@@ -12,8 +12,8 @@ bin/install
 cp .env.example .env   # then fill in your API keys
 
 # 3. Authenticate OAuth providers
-bin/ctl auth chatgpt   # browser PKCE login for ChatGPT / Codex
 bin/ctl auth gemini    # browser PKCE login for Gemini CLI
+bin/ctl auth chatgpt   # browser PKCE login for ChatGPT / Codex
 
 # 4. Start the proxy
 bin/ctl proxy
@@ -73,6 +73,24 @@ eval "$(~/.litellm/bin/ctl --completions)"
 | **Z.AI** | API key | `zai/glm-5`, `zai/glm-4.7`, `zai/glm-4.6`, `zai/glm-4.5`, etc. |
 
 Fallback chains are configured in `config.yaml` — e.g. `claude-opus-4-6` falls back through Codex then Z.AI.
+
+## Gemini CLI Provider
+
+The fork adds a `gemini_cli` provider that routes through Google's Code Assist API
+(`cloudcode-pa.googleapis.com`) using OAuth Bearer tokens — the same backend the
+official [Gemini CLI](https://github.com/google-gemini/gemini-cli) uses.
+
+**How it works:**
+
+1. `bin/ctl auth gemini` performs an OAuth 2.0 PKCE login with Google, saves
+   tokens to `auth.gemini_cli.json`, and discovers your Code Assist project.
+2. The provider reuses LiteLLM's existing Gemini request/response transformers
+   while adding OAuth Bearer auth and the Code Assist request envelope.
+3. Tokens auto-refresh on expiry; re-run `bin/ctl auth gemini` if they expire
+   completely.
+
+OAuth client credentials are auto-extracted from the installed Gemini CLI binary
+(`npm i -g @google/gemini-cli`) at runtime — no manual env vars needed.
 
 ## Syncing with Upstream
 

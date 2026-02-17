@@ -3,6 +3,7 @@
 BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$BIN_DIR/.." && pwd)"
 SETTINGS_FILE="$HOME/.claude/settings.json"
+PORT_FILE="$PROJECT_DIR/.proxy-port"
 
 # Load master key from .env
 if [ -f "$PROJECT_DIR/.env" ]; then
@@ -10,26 +11,32 @@ if [ -f "$PROJECT_DIR/.env" ]; then
 fi
 
 if [ -z "$LITELLM_AUTH_TOKEN" ]; then
-  echo "ERROR: LITELLM_MASTER_KEY not found in $SCRIPT_DIR/.env"
+  echo "ERROR: LITELLM_MASTER_KEY not found in $PROJECT_DIR/.env"
   exit 1
 fi
 
-# LiteLLM Proxy settings
-LITELLM_BASE_URL="http://127.0.0.1:4000"
+# Read the proxy port (from .proxy-port file or default 4000)
+if [ -f "$PORT_FILE" ]; then
+  PROXY_PORT=$(cat "$PORT_FILE")
+else
+  PROXY_PORT=4000
+fi
+
+LITELLM_BASE_URL="http://127.0.0.1:${PROXY_PORT}"
 
 # Read current settings for ANTHROPIC_BASE_URL
 CURRENT_BASE_URL=$(jq -r '.env.ANTHROPIC_BASE_URL // ""' "$SETTINGS_FILE")
 
-if [ "$CURRENT_BASE_URL" == "$LITELLM_BASE_URL" ]; then
+if echo "$CURRENT_BASE_URL" | grep -q "127.0.0.1"; then
   echo "Switching Claude Code to use Direct Anthropic API (via OAuth)..."
   # Remove the entire env object
   jq 'del(.env)' "$SETTINGS_FILE" > tmp.$$.json && mv tmp.$$.json "$SETTINGS_FILE"
   echo "Claude Code now configured for Direct Anthropic API (OAuth)."
 else
-  echo "Switching Claude Code to use LiteLLM Proxy..."
+  echo "Switching Claude Code to use LiteLLM Proxy (port $PROXY_PORT)..."
   # Set env with proxy overrides
   jq '.env = {"ANTHROPIC_BASE_URL": "'"$LITELLM_BASE_URL"'", "ANTHROPIC_AUTH_TOKEN": "'"$LITELLM_AUTH_TOKEN"'"}' "$SETTINGS_FILE" > tmp.$$.json && mv tmp.$$.json "$SETTINGS_FILE"
-  echo "Claude Code now configured for LiteLLM Proxy."
+  echo "Claude Code now configured for LiteLLM Proxy at $LITELLM_BASE_URL."
 fi
 
 echo "Remember to restart Claude Code for changes to take full effect."

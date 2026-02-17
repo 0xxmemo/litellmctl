@@ -2,6 +2,10 @@
 .env
 auth.chatgpt.json
 auth.gemini_cli.json
+*auth.json
+
+# Runtime
+.proxy-port
 
 # Logs
 *.log
@@ -15,3 +19,4 @@ venv/
 # Editor
 .vscode/
 .idea/
+ref/
