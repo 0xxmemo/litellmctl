@@ -1,0 +1,4 @@
+[submodule "litellm"]
+	path = litellm
+	url = https://github.com/0xxmemo/litellm.git
+	shallow = true
