@@ -478,7 +478,8 @@ cmd_update() {
   git -C "$PROJECT_DIR" pull --ff-only || { error "Config pull failed"; exit 1; }
 
   info "Syncing litellm submodule ..."
-  git -C "$PROJECT_DIR" submodule update --init --remote --merge || { error "Submodule sync failed"; exit 1; }
+  git -C "$PROJECT_DIR" submodule sync --recursive
+  git -C "$PROJECT_DIR" submodule update --init --force || { error "Submodule sync failed"; exit 1; }
 
   info "Reinstalling litellm fork ..."
   activate_venv
