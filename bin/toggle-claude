@@ -34,9 +34,18 @@ if echo "$CURRENT_BASE_URL" | grep -q "127.0.0.1"; then
   echo "Claude Code now configured for Direct Anthropic API (OAuth)."
 else
   echo "Switching Claude Code to use LiteLLM Proxy (port $PROXY_PORT)..."
-  # Set env with proxy overrides
-  jq '.env = {"ANTHROPIC_BASE_URL": "'"$LITELLM_BASE_URL"'", "ANTHROPIC_AUTH_TOKEN": "'"$LITELLM_AUTH_TOKEN"'"}' "$SETTINGS_FILE" > tmp.$$.json && mv tmp.$$.json "$SETTINGS_FILE"
+  jq --arg base "$LITELLM_BASE_URL" --arg key "$LITELLM_AUTH_TOKEN" \
+    '.env = {
+      "ANTHROPIC_BASE_URL":              $base,
+      "ANTHROPIC_AUTH_TOKEN":             $key,
+      "ANTHROPIC_DEFAULT_OPUS_MODEL":    "claude-opus-4-6",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL":  "claude-sonnet-4-5-20250929",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL":   "claude-haiku-4-5-20251001"
+    }' "$SETTINGS_FILE" > tmp.$$.json && mv tmp.$$.json "$SETTINGS_FILE"
   echo "Claude Code now configured for LiteLLM Proxy at $LITELLM_BASE_URL."
+  echo "  Opus:   claude-opus-4-6"
+  echo "  Sonnet: claude-sonnet-4-5-20250929"
+  echo "  Haiku:  claude-haiku-4-5-20251001"
 fi
 
 echo "Remember to restart Claude Code for changes to take full effect."
