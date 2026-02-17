@@ -401,20 +401,26 @@ cmd_stop() {
 
 cmd_restart() {
   info "Restarting proxy ..."
-  if is_macos; then
+  if is_macos && launchd_is_running; then
     launchd_stop
     sleep 1
     local port config
     port=$(get_proxy_port)
     config="$PROJECT_DIR/config.yaml"
     launchd_install "$port" "$config"
-  elif is_linux; then
+  elif is_linux && systemd_is_running; then
     systemctl --user restart "$SYSTEMD_UNIT"
     info "Restarted."
   else
-    cmd_stop
-    sleep 1
-    cmd_start
+    # Foreground / manual process — kill and restart
+    local port pid
+    port=$(get_proxy_port)
+    pid=$(find_proxy_pid)
+    if [ -n "$pid" ]; then
+      kill "$pid" 2>/dev/null || true
+      sleep 1
+    fi
+    info "Start the proxy with: litellmctl start  or  litellmctl proxy"
   fi
 }
 
