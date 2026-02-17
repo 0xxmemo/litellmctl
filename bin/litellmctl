@@ -307,6 +307,62 @@ systemd_uninstall() {
   info "Removed systemd service."
 }
 
+has_systemd_user() {
+  systemctl --user status >/dev/null 2>&1
+}
+
+# ── Service: nohup fallback (servers without systemd user bus) ─────────────
+
+PIDFILE="$PROJECT_DIR/.proxy.pid"
+
+nohup_start() {
+  local port="$1"
+  local config="$2"
+
+  ensure_log_dir
+  activate_venv
+  load_env
+
+  echo "$port" > "$PORT_FILE"
+
+  nohup "$VENV_DIR/bin/litellm" --config "$config" --port "$port" \
+    >> "$LOG_DIR/proxy.log" 2>> "$LOG_DIR/proxy-error.log" &
+  local pid=$!
+  echo "$pid" > "$PIDFILE"
+  disown "$pid" 2>/dev/null || true
+
+  info "Proxy started in background (PID $pid, port $port)"
+  info "Logs: $LOG_DIR/proxy.log"
+  info "Note: add 'litellmctl start' to cron @reboot for auto-start"
+}
+
+nohup_stop() {
+  local pid=""
+  if [ -f "$PIDFILE" ]; then
+    pid=$(cat "$PIDFILE")
+  fi
+  if [ -z "$pid" ]; then
+    pid=$(find_proxy_pid)
+  fi
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    kill "$pid" 2>/dev/null
+    rm -f "$PIDFILE"
+    info "Stopped (PID $pid)."
+  else
+    rm -f "$PIDFILE"
+    warn "No proxy found."
+  fi
+}
+
+nohup_is_running() {
+  if [ -f "$PIDFILE" ]; then
+    local pid
+    pid=$(cat "$PIDFILE")
+    kill -0 "$pid" 2>/dev/null && return 0
+  fi
+  [ -n "$(find_proxy_pid)" ]
+}
+
 # ── Commands ────────────────────────────────────────────────────────────────
 
 cmd_setup_completions() {
@@ -373,54 +429,47 @@ cmd_start() {
 
   if is_macos; then
     launchd_install "$port" "$config"
-  elif is_linux; then
+  elif is_linux && has_systemd_user; then
     systemd_install "$port" "$config"
   else
-    error "Unsupported OS. Use 'litellmctl proxy' for foreground mode."
-    exit 1
+    nohup_start "$port" "$config"
   fi
 }
 
 cmd_stop() {
-  if is_macos; then
+  if is_macos && launchd_is_running; then
     launchd_stop
-  elif is_linux; then
+  elif is_linux && systemd_is_running; then
     systemd_stop
   else
-    local port pid
-    port=$(get_proxy_port)
-    pid=$(find_proxy_pid)
-    if [ -n "$pid" ]; then
-      kill "$pid" 2>/dev/null
-      info "Stopped (PID $pid)."
-    else
-      warn "No proxy found."
-    fi
+    nohup_stop
   fi
 }
 
 cmd_restart() {
   info "Restarting proxy ..."
+  local port config
+  port=$(get_proxy_port)
+  config="$PROJECT_DIR/config.yaml"
+
   if is_macos && launchd_is_running; then
     launchd_stop
     sleep 1
-    local port config
-    port=$(get_proxy_port)
-    config="$PROJECT_DIR/config.yaml"
     launchd_install "$port" "$config"
   elif is_linux && systemd_is_running; then
     systemctl --user restart "$SYSTEMD_UNIT"
     info "Restarted."
   else
-    # Foreground / manual process — kill and restart
-    local port pid
-    port=$(get_proxy_port)
-    pid=$(find_proxy_pid)
-    if [ -n "$pid" ]; then
-      kill "$pid" 2>/dev/null || true
+    nohup_stop
+    sleep 1
+    # Kill anything still on the port
+    local stale_pid
+    stale_pid=$(lsof -i :"$port" -t 2>/dev/null | head -1 || true)
+    if [ -n "$stale_pid" ]; then
+      kill -9 "$stale_pid" 2>/dev/null || true
       sleep 1
     fi
-    info "Start the proxy with: litellmctl start  or  litellmctl proxy"
+    nohup_start "$port" "$config"
   fi
 }
 
@@ -497,6 +546,7 @@ cmd_update() {
   local running=false
   if is_macos && launchd_is_running; then running=true; fi
   if is_linux && systemd_is_running; then running=true; fi
+  if nohup_is_running; then running=true; fi
   if [ -n "$(find_proxy_pid)" ]; then running=true; fi
 
   if $running; then
@@ -512,8 +562,12 @@ cmd_update() {
 cmd_uninstall_service() {
   if is_macos; then
     launchd_uninstall
-  elif is_linux; then
+  elif is_linux && [ -f "$SYSTEMD_FILE" ]; then
     systemd_uninstall
+  else
+    nohup_stop
+    rm -f "$PIDFILE" "$PORT_FILE"
+    info "Cleaned up nohup-managed proxy."
   fi
 }
 
@@ -536,6 +590,13 @@ cmd_status() {
   elif is_linux && systemd_is_running; then
     pid=$(find_proxy_pid)
     printf "  Service: \033[32mrunning\033[0m (systemd, auto-start enabled)\n"
+    printf "  Port:    %s\n" "$port"
+    [ -n "$pid" ] && printf "  PID:     %s\n" "$pid"
+    printf "\n"
+  elif nohup_is_running; then
+    pid=$(find_proxy_pid)
+    [ -z "$pid" ] && [ -f "$PIDFILE" ] && pid=$(cat "$PIDFILE")
+    printf "  Service: \033[32mrunning\033[0m (nohup, background)\n"
     printf "  Port:    %s\n" "$port"
     [ -n "$pid" ] && printf "  PID:     %s\n" "$pid"
     printf "\n"
@@ -577,6 +638,7 @@ $(printf "\033[1mCommands:\033[0m")
 $(printf "\033[1mService:\033[0m")
   macOS: launchd agent (~/Library/LaunchAgents/)
   Linux: systemd user unit (~/.config/systemd/user/)
+  Fallback: nohup background (servers without systemd user bus)
 
 EOF
 }

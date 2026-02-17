@@ -6,6 +6,7 @@ auth.gemini_cli.json
 
 # Runtime
 .proxy-port
+.proxy.pid
 
 # Logs
 logs/
