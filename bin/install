@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV_DIR="$SCRIPT_DIR/venv"
-SUBMODULE_DIR="$SCRIPT_DIR/litellm"
+BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$BIN_DIR/.." && pwd)"
+VENV_DIR="$PROJECT_DIR/venv"
+SUBMODULE_DIR="$PROJECT_DIR/litellm"
 
 # ── Helpers ──
 
@@ -60,7 +61,7 @@ fi
 
 if [ ! -f "$SUBMODULE_DIR/pyproject.toml" ]; then
   info "Initializing litellm submodule ..."
-  git -C "$SCRIPT_DIR" submodule update --init --depth 1 litellm
+  git -C "$PROJECT_DIR" submodule update --init --depth 1 litellm
 fi
 
 # ── Virtualenv ──
@@ -95,10 +96,10 @@ pip install -e "$SUBMODULE_DIR[proxy]"
 
 # ── Post-install checks ──
 
-if [ ! -f "$SCRIPT_DIR/.env" ]; then
+if [ ! -f "$PROJECT_DIR/.env" ]; then
   echo ""
   warn "No .env file found. Copy the example and fill in your keys:"
-  echo "  cp $SCRIPT_DIR/.env.example $SCRIPT_DIR/.env"
+  echo "  cp $PROJECT_DIR/.env.example $PROJECT_DIR/.env"
 fi
 
 echo ""
@@ -106,5 +107,5 @@ info "Installation complete!"
 echo ""
 echo "  To start the proxy:"
 echo "    source $VENV_DIR/bin/activate"
-echo "    litellm --config $SCRIPT_DIR/config.yaml"
+echo "    litellm --config $PROJECT_DIR/config.yaml"
 echo ""

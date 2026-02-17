@@ -1,11 +1,12 @@
 #!/bin/bash
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(cd "$BIN_DIR/.." && pwd)"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 
 # Load master key from .env
-if [ -f "$SCRIPT_DIR/.env" ]; then
-  LITELLM_AUTH_TOKEN=$(grep -E '^LITELLM_MASTER_KEY=' "$SCRIPT_DIR/.env" | cut -d'=' -f2-)
+if [ -f "$PROJECT_DIR/.env" ]; then
+  LITELLM_AUTH_TOKEN=$(grep -E '^LITELLM_MASTER_KEY=' "$PROJECT_DIR/.env" | cut -d'=' -f2-)
 fi
 
 if [ -z "$LITELLM_AUTH_TOKEN" ]; then

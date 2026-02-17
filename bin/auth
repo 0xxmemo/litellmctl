@@ -1,0 +1,522 @@
+#!/usr/bin/env python3
+"""
+LiteLLM Auth CLI — OAuth login for ChatGPT and Gemini CLI providers.
+
+Usage:
+    auth chatgpt          Browser-based PKCE login for ChatGPT / Codex
+    auth gemini           Browser-based PKCE login for Gemini CLI
+    auth refresh chatgpt  Refresh existing ChatGPT token
+    auth refresh gemini   Refresh existing Gemini CLI token
+    auth status           Show token status for all providers
+
+Follows OpenClaw's OAuth approach for both providers.
+"""
+
+import base64
+import hashlib
+import json
+import os
+import re
+import secrets
+import shutil
+import sys
+import time
+import webbrowser
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
+from typing import Optional
+from urllib.parse import parse_qs, urlencode, urlparse
+
+try:
+    import httpx
+except ImportError:
+    httpx = None
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = SCRIPT_DIR.parent
+
+# ── Helpers ─────────────────────────────────────────────────────────────────
+
+def _load_env():
+    env_file = PROJECT_DIR / ".env"
+    if not env_file.exists():
+        return
+    for line in env_file.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
+def _http_post(url: str, *, data: Optional[dict] = None,
+               json_body: Optional[dict] = None,
+               headers: Optional[dict] = None) -> dict:
+    if httpx:
+        with httpx.Client(timeout=30) as client:
+            resp = client.post(url, json=json_body, data=data, headers=headers)
+            resp.raise_for_status()
+            return resp.json()
+    import urllib.request, urllib.parse
+    if json_body:
+        body = json.dumps(json_body).encode()
+        headers = {**(headers or {}), "Content-Type": "application/json"}
+    else:
+        body = urllib.parse.urlencode(data or {}).encode()
+        headers = {**(headers or {}), "Content-Type": "application/x-www-form-urlencoded"}
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read())
+
+
+def _http_get(url: str, headers: Optional[dict] = None) -> dict:
+    if httpx:
+        with httpx.Client(timeout=30) as client:
+            resp = client.get(url, headers=headers)
+            resp.raise_for_status()
+            return resp.json()
+    import urllib.request
+    req = urllib.request.Request(url, headers=headers or {})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read())
+
+
+def _generate_pkce() -> tuple:
+    verifier = secrets.token_urlsafe(32)
+    challenge = (
+        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
+        .rstrip(b"=")
+        .decode()
+    )
+    return verifier, challenge
+
+
+def _decode_jwt(token: str) -> dict:
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return json.loads(base64.urlsafe_b64decode(payload))
+    except Exception:
+        return {}
+
+
+def _capture_callback(port: int, path: str, expected_state: str, timeout: int = 300) -> str:
+    result = {}
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            parsed = urlparse(self.path)
+            if parsed.path != path:
+                self.send_response(404); self.end_headers(); return
+
+            params = parse_qs(parsed.query)
+            code = params.get("code", [None])[0]
+            state = params.get("state", [None])[0]
+            error = params.get("error", [None])[0]
+
+            if error:
+                result["error"] = error
+            elif state != expected_state:
+                result["error"] = f"State mismatch"
+            elif code:
+                result["code"] = code
+
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(
+                b"<html><body><h2>Authentication successful!</h2>"
+                b"<p>You can close this tab.</p></body></html>"
+            )
+
+        def log_message(self, *a): pass
+
+    server = HTTPServer(("localhost", port), Handler)
+    server.timeout = timeout
+    server.handle_request()
+    server.server_close()
+
+    if "error" in result:
+        raise RuntimeError(f"OAuth error: {result['error']}")
+    if "code" not in result:
+        raise RuntimeError("Timed out waiting for OAuth callback.")
+    return result["code"]
+
+
+# ── Terminal colors ─────────────────────────────────────────────────────────
+
+_TTY = sys.stdout.isatty()
+def _c(t, c): return f"\033[{c}m{t}\033[0m" if _TTY else t
+def _green(t):  return _c(t, "32")
+def _yellow(t): return _c(t, "33")
+def _red(t):    return _c(t, "31")
+def _cyan(t):   return _c(t, "36")
+def _bold(t):   return _c(t, "1")
+def _dim(t):    return _c(t, "2")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ChatGPT / Codex
+# ═══════════════════════════════════════════════════════════════════════════
+
+CHATGPT_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
+CHATGPT_AUTHORIZE_URL = "https://auth.openai.com/oauth/authorize"
+CHATGPT_TOKEN_URL = "https://auth.openai.com/oauth/token"
+CHATGPT_REDIRECT_PORT = 1455
+CHATGPT_REDIRECT_URI = f"http://localhost:{CHATGPT_REDIRECT_PORT}/auth/callback"
+CHATGPT_SCOPES = "openid profile email offline_access"
+
+
+def _chatgpt_auth_file() -> Path:
+    d = os.getenv("CHATGPT_TOKEN_DIR", str(PROJECT_DIR))
+    n = os.getenv("CHATGPT_AUTH_FILE", "auth.chatgpt.json")
+    return Path(d) / n
+
+
+def chatgpt_login() -> dict:
+    verifier, challenge = _generate_pkce()
+    state = secrets.token_urlsafe(16)
+
+    params = {
+        "response_type": "code",
+        "client_id": CHATGPT_CLIENT_ID,
+        "redirect_uri": CHATGPT_REDIRECT_URI,
+        "scope": CHATGPT_SCOPES,
+        "code_challenge": challenge,
+        "code_challenge_method": "S256",
+        "state": state,
+        "id_token_add_organizations": "true",
+        "codex_cli_simplified_flow": "true",
+        "originator": "codex_cli_rs",
+    }
+    auth_url = f"{CHATGPT_AUTHORIZE_URL}?{urlencode(params)}"
+
+    print()
+    print(_bold("ChatGPT / Codex OAuth Login"))
+    print(_dim("─" * 40))
+    print(f"Opening browser...")
+    print(f"Sign in with your OpenAI account.")
+    print(f"Waiting for callback on localhost:{CHATGPT_REDIRECT_PORT}...\n")
+
+    webbrowser.open(auth_url)
+    code = _capture_callback(CHATGPT_REDIRECT_PORT, "/auth/callback", state)
+
+    print(_green("✓ Got authorization code. Exchanging for tokens..."))
+
+    data = _http_post(CHATGPT_TOKEN_URL, data={
+        "grant_type": "authorization_code",
+        "client_id": CHATGPT_CLIENT_ID,
+        "code": code,
+        "code_verifier": verifier,
+        "redirect_uri": CHATGPT_REDIRECT_URI,
+    })
+
+    access_token = data["access_token"]
+    refresh_token = data["refresh_token"]
+    id_token = data.get("id_token")
+    claims = _decode_jwt(access_token)
+    expires_at = claims.get("exp") or int(time.time() + data.get("expires_in", 3600))
+    account_id = claims.get("https://api.openai.com/auth", {}).get("chatgpt_account_id")
+
+    record = {
+        "access_token": access_token,
+        "refresh_token": refresh_token,
+        "id_token": id_token,
+        "expires_at": int(expires_at),
+        "account_id": account_id,
+    }
+    f = _chatgpt_auth_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(record, indent=2) + "\n")
+    print(_green(f"✓ Saved to {f}"))
+    _show_token("ChatGPT", record)
+    return record
+
+
+def chatgpt_refresh() -> dict:
+    f = _chatgpt_auth_file()
+    if not f.exists():
+        raise RuntimeError(f"No auth file at {f}. Run 'auth chatgpt' first.")
+    auth = json.loads(f.read_text())
+    rt = auth.get("refresh_token")
+    if not rt:
+        raise RuntimeError("No refresh_token. Run 'auth chatgpt' to re-login.")
+
+    print(_dim("Refreshing ChatGPT token..."))
+    data = _http_post(CHATGPT_TOKEN_URL, json_body={
+        "client_id": CHATGPT_CLIENT_ID,
+        "grant_type": "refresh_token",
+        "refresh_token": rt,
+        "scope": CHATGPT_SCOPES,
+    })
+
+    at = data["access_token"]
+    claims = _decode_jwt(at)
+    expires_at = claims.get("exp") or int(time.time() + data.get("expires_in", 3600))
+    account_id = claims.get("https://api.openai.com/auth", {}).get("chatgpt_account_id")
+
+    record = {
+        "access_token": at,
+        "refresh_token": data.get("refresh_token", rt),
+        "id_token": data.get("id_token"),
+        "expires_at": int(expires_at),
+        "account_id": account_id,
+    }
+    f.write_text(json.dumps(record, indent=2) + "\n")
+    print(_green(f"✓ Refreshed → {f}"))
+    _show_token("ChatGPT", record)
+    return record
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Gemini CLI
+# ═══════════════════════════════════════════════════════════════════════════
+
+GEMINI_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
+GEMINI_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GEMINI_USERINFO_URL = "https://www.googleapis.com/oauth2/v1/userinfo?alt=json"
+GEMINI_CODE_ASSIST_URL = "https://cloudcode-pa.googleapis.com"
+GEMINI_REDIRECT_PORT = 8085
+GEMINI_REDIRECT_URI = f"http://localhost:{GEMINI_REDIRECT_PORT}/oauth2callback"
+GEMINI_SCOPES = (
+    "https://www.googleapis.com/auth/cloud-platform "
+    "https://www.googleapis.com/auth/userinfo.email "
+    "https://www.googleapis.com/auth/userinfo.profile"
+)
+
+_CID_RE = re.compile(r"\d+-[a-z0-9]+\.apps\.googleusercontent\.com")
+_CSEC_RE = re.compile(r"GOCSPX-[A-Za-z0-9_-]+")
+
+
+def _gemini_auth_file() -> Path:
+    d = os.getenv("GEMINI_CLI_TOKEN_DIR", str(PROJECT_DIR))
+    n = os.getenv("GEMINI_CLI_AUTH_FILE", "auth.gemini_cli.json")
+    return Path(d) / n
+
+
+def _gemini_creds() -> tuple:
+    cid = os.getenv("GEMINI_CLI_OAUTH_CLIENT_ID")
+    csec = os.getenv("GEMINI_CLI_OAUTH_CLIENT_SECRET")
+    if cid and csec:
+        return cid, csec
+
+    gemini_bin = shutil.which("gemini")
+    if gemini_bin:
+        try:
+            real = os.path.realpath(gemini_bin)
+            base = os.path.dirname(real)
+            for rel in [
+                "../lib/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js",
+                "../node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js",
+            ]:
+                p = os.path.normpath(os.path.join(base, rel))
+                if os.path.isfile(p):
+                    txt = open(p).read()
+                    m_id, m_sec = _CID_RE.search(txt), _CSEC_RE.search(txt)
+                    if m_id and m_sec:
+                        return m_id.group(), m_sec.group()
+        except Exception:
+            pass
+
+    raise RuntimeError(
+        "Cannot resolve Gemini CLI OAuth credentials.\n"
+        "Add to .env:\n"
+        "  GEMINI_CLI_OAUTH_CLIENT_ID=...\n"
+        "  GEMINI_CLI_OAUTH_CLIENT_SECRET=...\n"
+        "Or install: npm install -g @google/gemini-cli"
+    )
+
+
+def _discover_project(token: str) -> Optional[str]:
+    try:
+        data = _http_post(
+            f"{GEMINI_CODE_ASSIST_URL}/v1internal:loadCodeAssist",
+            json_body={}, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        )
+        pid = data.get("projectId") or data.get("project_id")
+        if pid:
+            return pid
+        cap = data.get("cloudaicompanionProject")
+        if isinstance(cap, str):
+            return cap
+        if isinstance(cap, dict):
+            return cap.get("id")
+    except Exception as e:
+        print(_yellow(f"  Project discovery failed (non-fatal): {e}"))
+    return None
+
+
+def gemini_login() -> dict:
+    cid, csec = _gemini_creds()
+    verifier, challenge = _generate_pkce()
+    state = secrets.token_urlsafe(16)
+
+    params = {
+        "client_id": cid, "response_type": "code",
+        "redirect_uri": GEMINI_REDIRECT_URI, "scope": GEMINI_SCOPES,
+        "code_challenge": challenge, "code_challenge_method": "S256",
+        "state": state, "access_type": "offline", "prompt": "consent",
+    }
+    auth_url = f"{GEMINI_AUTH_URL}?{urlencode(params)}"
+
+    print()
+    print(_bold("Gemini CLI OAuth Login"))
+    print(_dim("─" * 40))
+    print("Opening browser...")
+    print("Sign in with your Google account.")
+    print(f"Waiting for callback on localhost:{GEMINI_REDIRECT_PORT}...\n")
+
+    webbrowser.open(auth_url)
+    code = _capture_callback(GEMINI_REDIRECT_PORT, "/oauth2callback", state)
+
+    print(_green("✓ Got authorization code. Exchanging for tokens..."))
+    data = _http_post(GEMINI_TOKEN_URL, data={
+        "grant_type": "authorization_code", "code": code,
+        "redirect_uri": GEMINI_REDIRECT_URI, "client_id": cid,
+        "client_secret": csec, "code_verifier": verifier,
+    })
+
+    at = data["access_token"]
+    rt = data.get("refresh_token")
+    if not rt:
+        raise RuntimeError("No refresh_token received. Try again.")
+
+    print(_dim("  Discovering project & email..."))
+    pid = _discover_project(at)
+    email = None
+    try:
+        email = _http_get(GEMINI_USERINFO_URL, headers={"Authorization": f"Bearer {at}"}).get("email")
+    except Exception:
+        pass
+
+    record = {
+        "access_token": at, "refresh_token": rt,
+        "expires_at": int(time.time() + data.get("expires_in", 3600)),
+        "project_id": pid, "email": email,
+    }
+    f = _gemini_auth_file()
+    f.parent.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(record, indent=2) + "\n")
+    print(_green(f"✓ Saved to {f}"))
+    _show_token("Gemini CLI", record)
+    return record
+
+
+def gemini_refresh() -> dict:
+    f = _gemini_auth_file()
+    if not f.exists():
+        raise RuntimeError(f"No auth file at {f}. Run 'auth gemini' first.")
+    auth = json.loads(f.read_text())
+    rt = auth.get("refresh_token")
+    if not rt:
+        raise RuntimeError("No refresh_token. Run 'auth gemini' to re-login.")
+
+    cid, csec = _gemini_creds()
+    print(_dim("Refreshing Gemini CLI token..."))
+    data = _http_post(GEMINI_TOKEN_URL, data={
+        "grant_type": "refresh_token", "refresh_token": rt,
+        "client_id": cid, "client_secret": csec,
+    })
+
+    at = data["access_token"]
+    auth["access_token"] = at
+    auth["refresh_token"] = data.get("refresh_token", rt)
+    auth["expires_at"] = int(time.time() + data.get("expires_in", 3600))
+
+    f.write_text(json.dumps(auth, indent=2) + "\n")
+    print(_green(f"✓ Refreshed → {f}"))
+    _show_token("Gemini CLI", auth)
+    return auth
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Status
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _show_token(provider: str, d: dict):
+    exp = d.get("expires_at")
+    if exp:
+        rem = int(exp - time.time())
+        if rem > 0:
+            expiry = _green(f"{rem // 3600}h {(rem % 3600) // 60}m remaining")
+        else:
+            expiry = _red("EXPIRED")
+    else:
+        expiry = _yellow("unknown")
+    print(f"  Provider:   {_bold(provider)}")
+    if d.get("email"):      print(f"  Email:      {d['email']}")
+    if d.get("account_id"): print(f"  Account:    {d['account_id']}")
+    if d.get("project_id"): print(f"  Project:    {d['project_id']}")
+    print(f"  Expires:    {expiry}")
+    print()
+
+
+def show_status():
+    print()
+    print(_bold("LiteLLM Auth Status"))
+    print(_dim("═" * 40))
+
+    for label, getter in [("ChatGPT / Codex", _chatgpt_auth_file), ("Gemini CLI", _gemini_auth_file)]:
+        f = getter()
+        print(f"\n{_bold(label)}")
+        print(f"  File: {f}")
+        if f.exists():
+            try:
+                _show_token(label, json.loads(f.read_text()))
+            except Exception as e:
+                print(_red(f"  Error: {e}\n"))
+        else:
+            print(_yellow("  Not authenticated\n"))
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# CLI
+# ═══════════════════════════════════════════════════════════════════════════
+
+USAGE = f"""\
+{_bold('LiteLLM Auth CLI')}
+
+{_bold('Commands:')}
+  auth chatgpt           Login to ChatGPT / Codex (browser PKCE)
+  auth gemini            Login to Gemini CLI (browser PKCE)
+  auth refresh chatgpt   Refresh ChatGPT token
+  auth refresh gemini    Refresh Gemini CLI token
+  auth status            Show token status
+"""
+
+def main():
+    _load_env()
+    args = sys.argv[1:]
+
+    if not args or args[0] in ("-h", "--help", "help"):
+        print(USAGE); return
+
+    cmd = args[0].lower()
+    try:
+        if cmd in ("chatgpt", "codex", "openai"):
+            chatgpt_login()
+        elif cmd in ("gemini", "gemini_cli", "gemini-cli"):
+            gemini_login()
+        elif cmd == "refresh":
+            if len(args) < 2:
+                print(_red("Usage: auth refresh <chatgpt|gemini>")); sys.exit(1)
+            t = args[1].lower()
+            if t in ("chatgpt", "codex", "openai"):   chatgpt_refresh()
+            elif t in ("gemini", "gemini_cli", "gemini-cli"): gemini_refresh()
+            else: print(_red(f"Unknown provider: {t}")); sys.exit(1)
+        elif cmd == "status":
+            show_status()
+        else:
+            print(_red(f"Unknown command: {cmd}")); print(USAGE); sys.exit(1)
+    except KeyboardInterrupt:
+        print(_yellow("\nAborted.")); sys.exit(130)
+    except RuntimeError as e:
+        print(_red(f"\nError: {e}")); sys.exit(1)
+    except Exception as e:
+        print(_red(f"\n{type(e).__name__}: {e}")); sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
