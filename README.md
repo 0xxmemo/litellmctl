@@ -12,8 +12,8 @@ bin/install
 cp .env.example .env   # then fill in your API keys
 
 # 3. Authenticate OAuth providers
-litellmctl auth gemini    # browser PKCE login for Gemini CLI
-litellmctl auth chatgpt   # browser PKCE login for ChatGPT / Codex
+litellmctl auth gemini    # PKCE login for Gemini CLI
+litellmctl auth chatgpt   # PKCE login for ChatGPT / Codex
 
 # 4. Start the proxy (background service, auto-starts on boot)
 litellmctl start
@@ -27,8 +27,8 @@ source ~/.zshrc
 
 ```
 litellmctl install                Install / reinstall the LiteLLM fork
-litellmctl auth chatgpt           Login to ChatGPT / Codex (browser PKCE)
-litellmctl auth gemini            Login to Gemini CLI (browser PKCE)
+litellmctl auth chatgpt           Login to ChatGPT / Codex (PKCE)
+litellmctl auth gemini            Login to Gemini CLI (PKCE)
 litellmctl auth refresh <p>       Refresh token for chatgpt or gemini
 litellmctl auth status            Show token expiry info
 litellmctl start [--port N]       Start proxy as background service (auto-start on boot)
@@ -45,6 +45,19 @@ litellmctl setup-completions      Add litellmctl to your shell (alias + tab comp
 `start` installs a system service (macOS: launchd, Linux: systemd) that
 auto-starts on login and restarts on crash. Use `proxy` for foreground
 mode when debugging.
+
+### Server / headless usage
+
+`litellmctl auth` detects headless environments (SSH, no display, Docker)
+and prints the OAuth URL for you to open in a local browser. After
+authenticating, either:
+
+- **Paste** the redirect URL back into the terminal, or
+- **SSH tunnel** the callback port so it's captured automatically:
+  ```
+  ssh -L 8085:localhost:8085 your-server   # Gemini
+  ssh -L 1455:localhost:1455 your-server   # ChatGPT
+  ```
 
 ## Project Layout
 
@@ -65,16 +78,27 @@ mode when debugging.
 └── venv/               Python virtualenv (git-ignored)
 ```
 
-## Model Tiers
+## Models & Fallbacks
 
-| Tier | Auth | Models |
+Three consumer-facing models, each with a tiered fallback chain:
+
+| Model | Fallback 1 (Codex) | Fallback 2 (Gemini) | Fallback 3 (Z.AI) |
+|---|---|---|---|
+| `claude-opus-4-6` | `codex/gpt-5.3-codex` | `gemini-cli/gemini-3-pro-preview` | `zai/glm-5` |
+| `claude-sonnet-4-5` | `codex/gpt-5.3-codex-spark` | `gemini-cli/gemini-3-flash-preview` | `zai/glm-4.5-air` |
+| `claude-haiku-4-5` | `codex/gpt-5.1-codex-mini` | `gemini-cli/gemini-2.5-flash-lite` | `zai/glm-4.5-flash` |
+
+All backend models are also directly addressable by their full name
+(e.g. `codex/gpt-5.3-codex`, `gemini-cli/gemini-2.5-pro`, `zai/glm-5`).
+
+### Available providers
+
+| Provider | Auth | Models |
 |---|---|---|
 | **Anthropic** | API key | `claude-opus-4-6`, `claude-sonnet-4-5`, `claude-haiku-4-5` |
-| **Codex** | ChatGPT OAuth | `codex/gpt-5.3-codex`, `codex/gpt-5.2-codex`, `codex/gpt-5.1-codex`, etc. |
-| **Gemini CLI** | Google OAuth | `gemini-cli/gemini-2.5-pro`, `gemini-cli/gemini-2.5-flash`, `gemini-cli/gemini-2.5-flash-lite`, `gemini-cli/gemini-3-pro-preview`, `gemini-cli/gemini-3-flash-preview` |
-| **Z.AI** | API key | `zai/glm-5`, `zai/glm-4.7`, `zai/glm-4.6`, `zai/glm-4.5`, etc. |
-
-Fallback chains are configured in `config.yaml` — e.g. `claude-opus-4-6` falls back through Codex then Z.AI.
+| **Codex** | ChatGPT OAuth | `codex/gpt-5.3-codex`, `codex/gpt-5.3-codex-spark`, `codex/gpt-5.2-codex`, `codex/gpt-5.1-codex`, `codex/gpt-5.1-codex-mini` |
+| **Gemini CLI** | Google OAuth | `gemini-cli/gemini-3-pro-preview`, `gemini-cli/gemini-3-flash-preview`, `gemini-cli/gemini-2.5-pro`, `gemini-cli/gemini-2.5-flash`, `gemini-cli/gemini-2.5-flash-lite` |
+| **Z.AI** | API key | `zai/glm-5`, `zai/glm-5v`, `zai/glm-4.7`, `zai/glm-4.6`, `zai/glm-4.5`, etc. |
 
 ## Gemini CLI Provider
 

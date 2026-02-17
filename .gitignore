@@ -11,8 +11,9 @@ auth.gemini_cli.json
 logs/
 *.log
 
-# Python virtualenv
+# Python
 venv/
+__pycache__/
 
 # OS
 .DS_Store
