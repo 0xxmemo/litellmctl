@@ -453,22 +453,74 @@ def _gemini_creds() -> tuple:
 
 
 def _discover_project(token: str) -> Optional[str]:
+    env_project = os.getenv("GOOGLE_CLOUD_PROJECT") or os.getenv("GOOGLE_CLOUD_PROJECT_ID")
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
     try:
+        body = {}
+        if env_project:
+            body["cloudaicompanionProject"] = env_project
+
         data = _http_post(
             f"{GEMINI_CODE_ASSIST_URL}/v1internal:loadCodeAssist",
-            json_body={}, headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json_body=body, headers=headers,
         )
+
+        cap = data.get("cloudaicompanionProject")
+        if isinstance(cap, dict):
+            return cap.get("id")
+        if isinstance(cap, str):
+            return cap
+
         pid = data.get("projectId") or data.get("project_id")
         if pid:
             return pid
-        cap = data.get("cloudaicompanionProject")
-        if isinstance(cap, str):
-            return cap
-        if isinstance(cap, dict):
-            return cap.get("id")
     except Exception as e:
-        print(_yellow(f"  Project discovery failed (non-fatal): {e}"))
-    return None
+        print(_yellow(f"  loadCodeAssist failed (non-fatal): {e}"))
+
+    # Fall back to listing GCP projects
+    found_project = env_project
+    if not found_project:
+        try:
+            projects = _http_get(
+                "https://cloudresourcemanager.googleapis.com/v1/projects",
+                headers={"Authorization": f"Bearer {token}"},
+            ).get("projects", [])
+            for p in projects:
+                if "gemini" in p.get("name", "").lower() or "lang" in p.get("projectId", ""):
+                    found_project = p["projectId"]
+                    break
+            if not found_project and projects:
+                found_project = projects[0]["projectId"]
+            if found_project:
+                print(_dim(f"  Using GCP project: {found_project}"))
+        except Exception as e:
+            print(_yellow(f"  GCP project listing failed (non-fatal): {e}"))
+
+    # Onboard the project with Code Assist if we found one
+    if found_project:
+        try:
+            _http_post(
+                f"{GEMINI_CODE_ASSIST_URL}/v1internal:onboardUser",
+                json_body={
+                    "tierId": "standard-tier",
+                    "cloudaicompanionProject": found_project,
+                    "metadata": {"ideType": "IDE_UNSPECIFIED", "platform": "PLATFORM_UNSPECIFIED"},
+                },
+                headers=headers,
+            )
+        except Exception:
+            pass
+        # Also enable the Code Assist API on the project
+        try:
+            _http_post(
+                f"https://serviceusage.googleapis.com/v1/projects/{found_project}/services/cloudaicompanion.googleapis.com:enable",
+                json_body={}, headers=headers,
+            )
+        except Exception:
+            pass
+
+    return found_project
 
 
 def gemini_login() -> dict:
@@ -550,6 +602,18 @@ def gemini_refresh() -> dict:
     auth["access_token"] = at
     auth["refresh_token"] = data.get("refresh_token", rt)
     auth["expires_at"] = int(time.time() + data.get("expires_in", 3600))
+
+    if not auth.get("project_id"):
+        print(_dim("  Discovering project..."))
+        auth["project_id"] = _discover_project(at)
+
+    if not auth.get("email"):
+        try:
+            auth["email"] = _http_get(
+                GEMINI_USERINFO_URL, headers={"Authorization": f"Bearer {at}"}
+            ).get("email")
+        except Exception:
+            pass
 
     f.write_text(json.dumps(auth, indent=2) + "\n")
     print(_green(f"✓ Refreshed → {f}"))
