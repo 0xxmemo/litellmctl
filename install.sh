@@ -3,11 +3,16 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$SCRIPT_DIR/venv"
-FORK_REPO="https://github.com/0xxmemo/litellm.git"
-FORK_BRANCH="main"
+SUBMODULE_DIR="$SCRIPT_DIR/litellm"
 
 echo "==> LiteLLM Proxy Installer (fork: 0xxmemo/litellm)"
 echo ""
+
+# Init submodule if not already checked out
+if [ ! -f "$SUBMODULE_DIR/pyproject.toml" ]; then
+  echo "Initializing litellm submodule ..."
+  git -C "$SCRIPT_DIR" submodule update --init --depth 1 litellm
+fi
 
 # Create or reuse virtualenv
 if [ ! -d "$VENV_DIR" ]; then
@@ -23,9 +28,9 @@ source "$VENV_DIR/bin/activate"
 # Upgrade pip
 pip install --upgrade pip --quiet
 
-# Install the fork (editable if cloned, otherwise from git)
-echo "Installing litellm from fork ..."
-pip install "litellm[proxy] @ git+${FORK_REPO}@${FORK_BRANCH}" --upgrade
+# Install from local submodule in editable mode
+echo "Installing litellm[proxy] from local submodule (editable) ..."
+pip install -e "$SUBMODULE_DIR[proxy]"
 
 # Check for .env
 if [ ! -f "$SCRIPT_DIR/.env" ]; then
