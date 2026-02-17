@@ -1,0 +1,189 @@
+model_list:
+  # === Z.AI tier ===
+  - model_name: zai/glm-4.5
+    litellm_params:
+      model: anthropic/glm-4.5
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+      timeout: 600
+      reasoning: true
+      input: ["text"]
+  - model_name: zai/glm-4.5-air
+    litellm_params:
+      model: anthropic/glm-4.5-air
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+      timeout: 600
+      reasoning: false
+      input: ["text"]
+  - model_name: zai/glm-4.5-flash
+    litellm_params:
+      model: anthropic/glm-4.5-flash
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+      timeout: 600
+      reasoning: false
+      input: ["text"]
+  - model_name: zai/glm-4.5v
+    litellm_params:
+      model: anthropic/glm-4.5v
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+      timeout: 600
+      reasoning: true
+      input: ["text", "image"]
+  - model_name: zai/glm-4.6
+    litellm_params:
+      model: anthropic/glm-4.6
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+      timeout: 600
+      reasoning: true
+      input: ["text"]
+  - model_name: zai/glm-4.6v
+    litellm_params:
+      model: anthropic/glm-4.6v
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+      timeout: 600
+      reasoning: true
+      input: ["text", "image"]
+  - model_name: zai/glm-4.7
+    litellm_params:
+      model: anthropic/glm-4.7
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+      timeout: 600
+      reasoning: true
+      input: ["text"]
+  - model_name: zai/glm-4.7-flash
+    litellm_params:
+      model: anthropic/glm-4.7-flash
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+      timeout: 600
+      reasoning: false
+      input: ["text"]
+  - model_name: zai/glm-4.7-flashx
+    litellm_params:
+      model: anthropic/glm-4.7-flashx
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+      timeout: 600
+      reasoning: false
+      input: ["text"]
+  - model_name: zai/glm-5
+    litellm_params:
+      model: anthropic/glm-5
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+      timeout: 600
+      reasoning: true
+      input: ["text"]
+  - model_name: zai/glm-5v
+    litellm_params:
+      model: anthropic/glm-5v
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+      timeout: 600
+      reasoning: true
+      input: ["text", "image"]
+  - model_name: zai/glm-5-flash
+    litellm_params:
+      model: anthropic/glm-5-flash
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+      timeout: 600
+      reasoning: false
+      input: ["text"]
+
+  # === Codex tier (ChatGPT Pro/Max via OAuth) ===
+  - model_name: codex/gpt-5.3-codex
+    model_info:
+      mode: responses
+    litellm_params:
+      model: chatgpt/gpt-5.3-codex
+      timeout: 600
+  - model_name: codex/gpt-5.3-codex-spark
+    model_info:
+      mode: responses
+    litellm_params:
+      model: chatgpt/gpt-5.3-codex-spark
+      timeout: 600
+  - model_name: codex/gpt-5.2-codex
+    model_info:
+      mode: responses
+    litellm_params:
+      model: chatgpt/gpt-5.2-codex
+      timeout: 600
+  - model_name: codex/gpt-5.1-codex
+    model_info:
+      mode: responses
+    litellm_params:
+      model: chatgpt/gpt-5.1-codex
+      timeout: 600
+  - model_name: codex/gpt-5.1-codex-mini
+    model_info:
+      mode: responses
+    litellm_params:
+      model: chatgpt/gpt-5.1-codex-mini
+      timeout: 600
+  - model_name: codex/gpt-5.2
+    model_info:
+      mode: responses
+    litellm_params:
+      model: chatgpt/gpt-5.2
+      timeout: 600
+  - model_name: codex/gpt-5.1
+    model_info:
+      mode: responses
+    litellm_params:
+      model: chatgpt/gpt-5.1
+      timeout: 600
+
+  # === Opus tier ===
+  - model_name: claude-opus-4-6
+    litellm_params:
+      model: anthropic/claude-opus-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+      timeout: 600
+
+  # === Sonnet tier ===
+  - model_name: claude-sonnet-4-5-20250929
+    litellm_params:
+      model: anthropic/claude-sonnet-4-5-20250929
+      api_key: os.environ/ANTHROPIC_API_KEY
+      timeout: 600
+
+  # === Haiku tier ===
+  - model_name: claude-haiku-4-5-20251001
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+      timeout: 600
+
+router_settings:
+  num_retries: 2
+  timeout: 600
+  retry_after: 5
+  allowed_fails: 1
+  fallbacks:
+    - claude-opus-4-6: [codex/gpt-5.3-codex, codex/gpt-5.3-codex-spark, zai/glm-5, zai/glm-4.7]
+    - claude-sonnet-4-5-20250929: [codex/gpt-5.2-codex, codex/gpt-5.1-codex, zai/glm-4.6, zai/glm-4.5v]
+    - claude-haiku-4-5-20251001: [codex/gpt-5.1-codex-mini, zai/glm-4.5-flash, zai/glm-4.5-air]
+    - codex/gpt-5.3-codex: [codex/gpt-5.3-codex-spark, codex/gpt-5.2-codex, zai/glm-5, zai/glm-4.7]
+    - codex/gpt-5.2-codex: [codex/gpt-5.1-codex, codex/gpt-5.1-codex-mini, zai/glm-4.6, zai/glm-4.5v]
+    - codex/gpt-5.1-codex: [codex/gpt-5.1-codex-mini, zai/glm-4.5v]
+    - codex/gpt-5.1-codex-mini: [zai/glm-4.5-flash, zai/glm-4.5-air]
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  request_timeout: 600
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+
+environment_variables:
+  CHATGPT_TOKEN_DIR: /Users/anon/.litellm
+  CHATGPT_AUTH_FILE: auth.chatgpt.json

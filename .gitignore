@@ -1,0 +1,16 @@
+# Secrets
+.env
+auth.chatgpt.json
+
+# Logs
+*.log
+
+# Python virtualenv
+venv/
+
+# OS
+.DS_Store
+
+# Editor
+.vscode/
+.idea/
