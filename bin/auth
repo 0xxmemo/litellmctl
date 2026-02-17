@@ -382,27 +382,64 @@ def _gemini_auth_file() -> Path:
     return Path(d) / n
 
 
+def _find_oauth2_js() -> Optional[str]:
+    """Find gemini-cli-core's oauth2.js across npm, bun, pnpm, yarn layouts."""
+    OAUTH_SUBPATH = "@google/gemini-cli-core/dist/src/code_assist/oauth2.js"
+
+    candidates = []
+
+    gemini_bin = shutil.which("gemini")
+    if gemini_bin:
+        real = os.path.realpath(gemini_bin)
+        # Walk up from the resolved binary looking for node_modules
+        d = os.path.dirname(real)
+        for _ in range(10):
+            nm = os.path.join(d, "node_modules", OAUTH_SUBPATH)
+            if os.path.isfile(nm):
+                return nm
+            parent = os.path.dirname(d)
+            if parent == d:
+                break
+            d = parent
+
+    # Common global install paths
+    home = os.path.expanduser("~")
+    candidates += [
+        # bun
+        os.path.join(home, ".bun/install/global/node_modules", OAUTH_SUBPATH),
+        # npm (macOS Homebrew)
+        "/usr/local/lib/node_modules/" + OAUTH_SUBPATH,
+        # npm (Linux)
+        "/usr/lib/node_modules/" + OAUTH_SUBPATH,
+        # npm prefix
+        os.path.join(home, ".npm-global/lib/node_modules", OAUTH_SUBPATH),
+        # nvm
+        *(
+            [os.path.join(os.getenv("NVM_DIR", ""), f"versions/node/{v}/lib/node_modules", OAUTH_SUBPATH)
+             for v in os.listdir(os.path.join(os.getenv("NVM_DIR", home + "/.nvm"), "versions/node"))
+            ] if os.path.isdir(os.path.join(os.getenv("NVM_DIR", home + "/.nvm"), "versions/node")) else []
+        ),
+    ]
+
+    for p in candidates:
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def _gemini_creds() -> tuple:
     cid = os.getenv("GEMINI_CLI_OAUTH_CLIENT_ID")
     csec = os.getenv("GEMINI_CLI_OAUTH_CLIENT_SECRET")
     if cid and csec:
         return cid, csec
 
-    gemini_bin = shutil.which("gemini")
-    if gemini_bin:
+    oauth_js = _find_oauth2_js()
+    if oauth_js:
         try:
-            real = os.path.realpath(gemini_bin)
-            base = os.path.dirname(real)
-            for rel in [
-                "../lib/node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js",
-                "../node_modules/@google/gemini-cli-core/dist/src/code_assist/oauth2.js",
-            ]:
-                p = os.path.normpath(os.path.join(base, rel))
-                if os.path.isfile(p):
-                    txt = open(p).read()
-                    m_id, m_sec = _CID_RE.search(txt), _CSEC_RE.search(txt)
-                    if m_id and m_sec:
-                        return m_id.group(), m_sec.group()
+            txt = open(oauth_js).read()
+            m_id, m_sec = _CID_RE.search(txt), _CSEC_RE.search(txt)
+            if m_id and m_sec:
+                return m_id.group(), m_sec.group()
         except Exception:
             pass
 
@@ -411,7 +448,7 @@ def _gemini_creds() -> tuple:
         "Add to .env:\n"
         "  GEMINI_CLI_OAUTH_CLIENT_ID=...\n"
         "  GEMINI_CLI_OAUTH_CLIENT_SECRET=...\n"
-        "Or install: npm install -g @google/gemini-cli"
+        "Or install: npm/bun install -g @google/gemini-cli"
     )
 
 
