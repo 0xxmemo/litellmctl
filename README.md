@@ -71,7 +71,7 @@ mode when debugging.
 |---|---|---|
 | **Anthropic** | API key | `claude-opus-4-6`, `claude-sonnet-4-5`, `claude-haiku-4-5` |
 | **Codex** | ChatGPT OAuth | `codex/gpt-5.3-codex`, `codex/gpt-5.2-codex`, `codex/gpt-5.1-codex`, etc. |
-| **Gemini CLI** | Google OAuth | `gemini-cli/gemini-2.5-flash-lite` |
+| **Gemini CLI** | Google OAuth | `gemini-cli/gemini-2.5-pro`, `gemini-cli/gemini-2.5-flash`, `gemini-cli/gemini-2.5-flash-lite`, `gemini-cli/gemini-3-pro-preview`, `gemini-cli/gemini-3-flash-preview` |
 | **Z.AI** | API key | `zai/glm-5`, `zai/glm-4.7`, `zai/glm-4.6`, `zai/glm-4.5`, etc. |
 
 Fallback chains are configured in `config.yaml` — e.g. `claude-opus-4-6` falls back through Codex then Z.AI.
