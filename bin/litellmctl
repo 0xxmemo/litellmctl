@@ -42,7 +42,7 @@ _litellmctl_completions() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  commands="auth install start stop restart logs proxy status toggle-claude setup-completions help"
+  commands="auth install update start stop restart logs proxy status toggle-claude setup-completions help"
   auth_cmds="chatgpt gemini codex status refresh"
 
   case "$prev" in
@@ -71,6 +71,7 @@ _litellmctl_completions() {
   commands=(
     'auth:Manage OAuth tokens'
     'install:Install/reinstall LiteLLM'
+    'update:Pull latest, sync submodule, rebuild'
     'start:Start proxy as background service'
     'stop:Stop the proxy service'
     'restart:Restart the proxy service'
@@ -461,6 +462,36 @@ cmd_proxy() {
   fi
 }
 
+cmd_update() {
+  info "Pulling latest config ..."
+  cd "$PROJECT_DIR"
+  git pull --ff-only || { error "Config pull failed"; exit 1; }
+
+  info "Syncing litellm submodule ..."
+  git submodule update --remote --merge || { error "Submodule sync failed"; exit 1; }
+
+  info "Reinstalling litellm fork ..."
+  activate_venv
+  pip install -e "$PROJECT_DIR/litellm" --quiet || { error "pip install failed"; exit 1; }
+
+  info "Update complete."
+
+  # Ask to restart if service is running
+  local running=false
+  if is_macos && launchd_is_running; then running=true; fi
+  if is_linux && systemd_is_running; then running=true; fi
+  if [ -n "$(find_proxy_pid)" ]; then running=true; fi
+
+  if $running; then
+    printf "\n  Proxy is running. Restart now? [Y/n] "
+    read -r answer
+    case "$answer" in
+      [nN]*) info "Skipped restart. Run 'litellmctl restart' when ready." ;;
+      *)     cmd_restart ;;
+    esac
+  fi
+}
+
 cmd_uninstall_service() {
   if is_macos; then
     launchd_uninstall
@@ -510,6 +541,7 @@ $(printf "\033[1mUsage:\033[0m")  litellmctl <command> [args...]
 
 $(printf "\033[1mCommands:\033[0m")
   install              Install / reinstall LiteLLM fork
+  update               Pull latest, sync submodule, rebuild & restart
   auth chatgpt         Login to ChatGPT / Codex (browser PKCE)
   auth gemini          Login to Gemini CLI (browser PKCE)
   auth refresh <p>     Refresh token for <chatgpt|gemini>
@@ -543,6 +575,7 @@ case "$1" in
   --completions)     generate_completions; exit 0 ;;
   --zsh-completions) generate_zsh_completions; exit 0 ;;
   install)           shift; cmd_install "$@" ;;
+  update)            shift; cmd_update ;;
   auth)              shift; cmd_auth "$@" ;;
   start)             shift; cmd_start "$@" ;;
   stop)              shift; cmd_stop ;;
