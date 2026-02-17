@@ -1,47 +1,110 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 VENV_DIR="$SCRIPT_DIR/venv"
 SUBMODULE_DIR="$SCRIPT_DIR/litellm"
 
-echo "==> LiteLLM Proxy Installer (fork: 0xxmemo/litellm)"
+# ── Helpers ──
+
+info()  { printf "\033[1;34m==> %s\033[0m\n" "$*"; }
+warn()  { printf "\033[1;33m==> %s\033[0m\n" "$*"; }
+error() { printf "\033[1;31m==> %s\033[0m\n" "$*" >&2; }
+
+confirm() {
+  local prompt="$1"
+  local reply
+  printf "%s [y/N] " "$prompt"
+  read -r reply
+  case "$reply" in
+    [yY]|[yY][eE][sS]) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+detect_python() {
+  if command -v python3 &>/dev/null; then
+    echo "python3"
+  elif command -v python &>/dev/null; then
+    echo "python"
+  else
+    error "Python 3 not found. Please install Python 3.9+ first."
+    case "$OSTYPE" in
+      darwin*) echo "  brew install python3" ;;
+      linux*)  echo "  sudo apt install python3 python3-venv" ;;
+    esac
+    exit 1
+  fi
+}
+
+# ── Platform checks ──
+
+info "LiteLLM Proxy Installer (fork: 0xxmemo/litellm)"
 echo ""
 
-# Init submodule if not already checked out
+PYTHON="$(detect_python)"
+PY_VERSION="$($PYTHON --version 2>&1)"
+echo "  Platform: $OSTYPE"
+echo "  Python:   $PY_VERSION ($PYTHON)"
+echo ""
+
+# On Ubuntu/Debian, python3-venv may not be installed
+if [[ "$OSTYPE" == linux* ]]; then
+  if ! $PYTHON -c "import venv" 2>/dev/null; then
+    warn "python3-venv not found. Installing ..."
+    sudo apt-get update -qq && sudo apt-get install -y -qq python3-venv
+  fi
+fi
+
+# ── Submodule ──
+
 if [ ! -f "$SUBMODULE_DIR/pyproject.toml" ]; then
-  echo "Initializing litellm submodule ..."
+  info "Initializing litellm submodule ..."
   git -C "$SCRIPT_DIR" submodule update --init --depth 1 litellm
 fi
 
-# Create or reuse virtualenv
-if [ ! -d "$VENV_DIR" ]; then
-  echo "Creating virtualenv at $VENV_DIR ..."
-  python3 -m venv "$VENV_DIR"
+# ── Virtualenv ──
+
+if [ -d "$VENV_DIR" ]; then
+  warn "Existing virtualenv found at $VENV_DIR"
+  if confirm "  Replace it with a fresh build?"; then
+    info "Removing old virtualenv ..."
+    rm -rf "$VENV_DIR"
+    info "Creating new virtualenv ..."
+    $PYTHON -m venv "$VENV_DIR"
+  else
+    info "Keeping existing virtualenv."
+  fi
 else
-  echo "Using existing virtualenv at $VENV_DIR"
+  info "Creating virtualenv at $VENV_DIR ..."
+  $PYTHON -m venv "$VENV_DIR"
 fi
 
-# Activate
+# ── Activate ──
+
+# shellcheck disable=SC1091
 source "$VENV_DIR/bin/activate"
 
-# Upgrade pip
+# ── Install dependencies ──
+
+info "Upgrading pip ..."
 pip install --upgrade pip --quiet
 
-# Install from local submodule in editable mode
-echo "Installing litellm[proxy] from local submodule (editable) ..."
+info "Installing litellm[proxy] from local submodule (editable) ..."
 pip install -e "$SUBMODULE_DIR[proxy]"
 
-# Check for .env
+# ── Post-install checks ──
+
 if [ ! -f "$SCRIPT_DIR/.env" ]; then
   echo ""
-  echo "WARNING: No .env file found. Copy .env.example and fill in your keys:"
+  warn "No .env file found. Copy the example and fill in your keys:"
   echo "  cp $SCRIPT_DIR/.env.example $SCRIPT_DIR/.env"
 fi
 
 echo ""
-echo "==> Installation complete!"
+info "Installation complete!"
 echo ""
-echo "To start the proxy:"
-echo "  source $VENV_DIR/bin/activate"
-echo "  litellm --config $SCRIPT_DIR/config.yaml"
+echo "  To start the proxy:"
+echo "    source $VENV_DIR/bin/activate"
+echo "    litellm --config $SCRIPT_DIR/config.yaml"
+echo ""
