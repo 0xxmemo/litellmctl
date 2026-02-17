@@ -1,6 +1,6 @@
-# LiteLLM Proxy Config
+# litellmctl
 
-Personal LiteLLM proxy configuration using a [fork of litellm](https://github.com/0xxmemo/litellm) (upstream: [BerriAI/litellm](https://github.com/BerriAI/litellm)).
+Personal LiteLLM proxy control using a [fork of litellm](https://github.com/0xxmemo/litellm) (upstream: [BerriAI/litellm](https://github.com/BerriAI/litellm)).
 
 ## Quick Start
 
@@ -12,45 +12,46 @@ bin/install
 cp .env.example .env   # then fill in your API keys
 
 # 3. Authenticate OAuth providers
-bin/ctl auth gemini    # browser PKCE login for Gemini CLI
-bin/ctl auth chatgpt   # browser PKCE login for ChatGPT / Codex
+litellmctl auth gemini    # browser PKCE login for Gemini CLI
+litellmctl auth chatgpt   # browser PKCE login for ChatGPT / Codex
 
-# 4. Start the proxy
-bin/ctl proxy
+# 4. Start the proxy (background service, auto-starts on boot)
+litellmctl start
+
+# 5. Add litellmctl to your shell (alias + tab completion)
+litellmctl setup-completions
+source ~/.zshrc
 ```
 
 ## CLI
 
-Everything runs through `bin/ctl`:
-
 ```
-bin/ctl install                Install / reinstall the LiteLLM fork
-bin/ctl auth chatgpt           Login to ChatGPT / Codex (browser PKCE)
-bin/ctl auth gemini            Login to Gemini CLI (browser PKCE)
-bin/ctl auth refresh <p>       Refresh token for chatgpt or gemini
-bin/ctl auth status            Show token expiry info
-bin/ctl proxy                  Start proxy (default port 4000)
-bin/ctl proxy --port 8000      Start on a custom port
-bin/ctl stop                   Stop the running proxy
-bin/ctl status                 Auth + proxy status at a glance
-bin/ctl toggle-claude          Toggle Claude Code between direct API and proxy
+litellmctl install                Install / reinstall the LiteLLM fork
+litellmctl auth chatgpt           Login to ChatGPT / Codex (browser PKCE)
+litellmctl auth gemini            Login to Gemini CLI (browser PKCE)
+litellmctl auth refresh <p>       Refresh token for chatgpt or gemini
+litellmctl auth status            Show token expiry info
+litellmctl start [--port N]       Start proxy as background service (auto-start on boot)
+litellmctl stop                   Stop the proxy service
+litellmctl restart                Restart the proxy service
+litellmctl logs                   Tail proxy logs
+litellmctl proxy [--port N]       Start proxy in foreground (for debugging)
+litellmctl uninstall-service      Remove the system service
+litellmctl status                 Auth + proxy status at a glance
+litellmctl toggle-claude          Toggle Claude Code between direct API and proxy
+litellmctl setup-completions      Add litellmctl to your shell (alias + tab completion)
 ```
 
-Tab completion — add one line to your shell rc:
-
-```bash
-# zsh
-eval "$(~/.litellm/bin/ctl --zsh-completions)"
-# bash
-eval "$(~/.litellm/bin/ctl --completions)"
-```
+`start` installs a system service (macOS: launchd, Linux: systemd) that
+auto-starts on login and restarts on crash. Use `proxy` for foreground
+mode when debugging.
 
 ## Project Layout
 
 ```
 .litellm/
 ├── bin/
-│   ├── ctl             Unified CLI runner (bash, with tab-completion)
+│   ├── litellmctl      CLI runner (bash, with tab-completion)
 │   ├── auth            OAuth login & refresh for ChatGPT + Gemini CLI (python)
 │   ├── install         Installer — venv + editable pip install (bash)
 │   └── toggle-claude   Toggle Claude Code between direct API and proxy
@@ -60,6 +61,7 @@ eval "$(~/.litellm/bin/ctl --completions)"
 ├── .env.example        Template for .env
 ├── auth.chatgpt.json   ChatGPT OAuth tokens (git-ignored, auto-refreshed)
 ├── auth.gemini_cli.json Gemini CLI OAuth tokens (git-ignored, auto-refreshed)
+├── logs/               Service logs (git-ignored)
 └── venv/               Python virtualenv (git-ignored)
 ```
 
@@ -82,11 +84,11 @@ official [Gemini CLI](https://github.com/google-gemini/gemini-cli) uses.
 
 **How it works:**
 
-1. `bin/ctl auth gemini` performs an OAuth 2.0 PKCE login with Google, saves
+1. `litellmctl auth gemini` performs an OAuth 2.0 PKCE login with Google, saves
    tokens to `auth.gemini_cli.json`, and discovers your Code Assist project.
 2. The provider reuses LiteLLM's existing Gemini request/response transformers
    while adding OAuth Bearer auth and the Code Assist request envelope.
-3. Tokens auto-refresh on expiry; re-run `bin/ctl auth gemini` if they expire
+3. Tokens auto-refresh on expiry; re-run `litellmctl auth gemini` if they expire
    completely.
 
 OAuth client credentials are auto-extracted from the installed Gemini CLI binary

@@ -8,6 +8,7 @@ auth.gemini_cli.json
 .proxy-port
 
 # Logs
+logs/
 *.log
 
 # Python virtualenv
