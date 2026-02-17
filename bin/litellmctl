@@ -463,12 +463,17 @@ cmd_proxy() {
 }
 
 cmd_update() {
+  if [ ! -d "$PROJECT_DIR/.git" ]; then
+    error "$PROJECT_DIR is not a git repo."
+    info "Clone first: git clone https://github.com/0xxmemo/litellmctl.git ~/.litellm"
+    exit 1
+  fi
+
   info "Pulling latest config ..."
-  cd "$PROJECT_DIR"
-  git pull --ff-only || { error "Config pull failed"; exit 1; }
+  git -C "$PROJECT_DIR" pull --ff-only || { error "Config pull failed"; exit 1; }
 
   info "Syncing litellm submodule ..."
-  git submodule update --remote --merge || { error "Submodule sync failed"; exit 1; }
+  git -C "$PROJECT_DIR" submodule update --init --remote --merge || { error "Submodule sync failed"; exit 1; }
 
   info "Reinstalling litellm fork ..."
   activate_venv
