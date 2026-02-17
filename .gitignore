@@ -1,6 +1,7 @@
 # Secrets
 .env
 auth.chatgpt.json
+auth.gemini_cli.json
 
 # Logs
 *.log

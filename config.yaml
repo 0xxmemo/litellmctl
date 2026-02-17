@@ -187,3 +187,5 @@ general_settings:
 environment_variables:
   CHATGPT_TOKEN_DIR: /Users/anon/.litellm
   CHATGPT_AUTH_FILE: auth.chatgpt.json
+  GEMINI_CLI_TOKEN_DIR: /Users/anon/.litellm
+  GEMINI_CLI_AUTH_FILE: auth.gemini_cli.json
