@@ -21,6 +21,11 @@ set -euo pipefail
 
 BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(cd "$BIN_DIR/.." && pwd)"
+
+# If running from a symlink outside ~/.litellm, resolve to canonical path
+if [ ! -f "$PROJECT_DIR/config.yaml" ]; then
+  PROJECT_DIR="$HOME/.litellm"
+fi
 VENV_DIR="$PROJECT_DIR/venv"
 PORT_FILE="$PROJECT_DIR/.proxy-port"
 LOG_DIR="$PROJECT_DIR/logs"
