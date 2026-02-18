@@ -120,13 +120,20 @@ model_list:
       timeout: 600
 
   # === Qwen Portal tier (Qwen OAuth — free 1k req/day) ===
+  # "coder-model" alias resolves to qwen3.5-plus (flagship, reasoning)
+  - model_name: qwen/qwen3.5-plus
+    litellm_params:
+      model: qwen_portal/coder-model
+      timeout: 600
+  # qwen3-coder-plus is the 480B MoE coding specialist
   - model_name: qwen/qwen3-coder-plus
     litellm_params:
       model: qwen_portal/qwen3-coder-plus
       timeout: 600
-  - model_name: qwen/qwen3.5-plus
+  # "vision-model" alias resolves to qwen3-vl-plus (vision + text)
+  - model_name: qwen/qwen3-vl-plus
     litellm_params:
-      model: qwen_portal/qwen3.5-plus
+      model: qwen_portal/vision-model
       timeout: 600
 
   # === Codex tier (ChatGPT Pro/Max via OAuth) ===
@@ -200,9 +207,9 @@ router_settings:
   retry_after: 5
   allowed_fails: 1
   fallbacks:
-    - claude-opus-4-6: [codex/gpt-5.3-codex, gemini-cli/gemini-3-pro-preview, qwen/qwen3-coder-plus, zai/glm-5]
-    - claude-sonnet-4-5-20250929: [codex/gpt-5.3-codex-spark, gemini-cli/gemini-3-flash-preview, qwen/qwen3.5-plus, zai/glm-4.5-air]
-    - claude-haiku-4-5-20251001: [codex/gpt-5.1-codex-mini, gemini-cli/gemini-2.5-flash-lite, qwen/qwen3.5-plus, zai/glm-4.5-flash]
+    - claude-opus-4-6: [qwen/qwen3.5-plus, codex/gpt-5.3-codex, gemini-cli/gemini-3-pro-preview, zai/glm-5]
+    - claude-sonnet-4-5-20250929: [qwen/qwen3-coder-plus, codex/gpt-5.3-codex-spark, gemini-cli/gemini-3-flash-preview, zai/glm-4.5-air]
+    - claude-haiku-4-5-20251001: [qwen/qwen3-vl-plus, codex/gpt-5.1-codex-mini, gemini-cli/gemini-2.5-flash-lite, zai/glm-4.5-flash]
 
 litellm_settings:
   drop_params: true
