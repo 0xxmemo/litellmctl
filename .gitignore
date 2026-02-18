@@ -2,7 +2,7 @@
 .env
 auth.chatgpt.json
 auth.gemini_cli.json
-*auth.json
+auth.*.json
 
 # Runtime
 .proxy-port

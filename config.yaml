@@ -119,6 +119,16 @@ model_list:
       model: gemini_cli/gemini-3-flash-preview
       timeout: 600
 
+  # === Qwen Portal tier (Qwen OAuth — free 1k req/day) ===
+  - model_name: qwen/qwen3-coder-plus
+    litellm_params:
+      model: qwen_portal/qwen3-coder-plus
+      timeout: 600
+  - model_name: qwen/qwen3.5-plus
+    litellm_params:
+      model: qwen_portal/qwen3.5-plus
+      timeout: 600
+
   # === Codex tier (ChatGPT Pro/Max via OAuth) ===
   - model_name: codex/gpt-5.3-codex
     model_info:
@@ -190,9 +200,9 @@ router_settings:
   retry_after: 5
   allowed_fails: 1
   fallbacks:
-    - claude-opus-4-6: [codex/gpt-5.3-codex, gemini-cli/gemini-3-pro-preview, zai/glm-5]
-    - claude-sonnet-4-5-20250929: [codex/gpt-5.3-codex-spark, gemini-cli/gemini-3-flash-preview, zai/glm-4.5-air]
-    - claude-haiku-4-5-20251001: [codex/gpt-5.1-codex-mini, gemini-cli/gemini-2.5-flash-lite, zai/glm-4.5-flash]
+    - claude-opus-4-6: [codex/gpt-5.3-codex, gemini-cli/gemini-3-pro-preview, qwen/qwen3-coder-plus, zai/glm-5]
+    - claude-sonnet-4-5-20250929: [codex/gpt-5.3-codex-spark, gemini-cli/gemini-3-flash-preview, qwen/qwen3.5-plus, zai/glm-4.5-air]
+    - claude-haiku-4-5-20251001: [codex/gpt-5.1-codex-mini, gemini-cli/gemini-2.5-flash-lite, qwen/qwen3.5-plus, zai/glm-4.5-flash]
 
 litellm_settings:
   drop_params: true
@@ -207,3 +217,5 @@ environment_variables:
   CHATGPT_AUTH_FILE: auth.chatgpt.json
   GEMINI_CLI_TOKEN_DIR: /Users/anon/.litellm
   GEMINI_CLI_AUTH_FILE: auth.gemini_cli.json
+  QWEN_PORTAL_TOKEN_DIR: /Users/anon/.litellm
+  QWEN_PORTAL_AUTH_FILE: auth.qwen_portal.json
