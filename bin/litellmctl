@@ -152,6 +152,19 @@ find_proxy_pid() {
   lsof -i :"$port" -t 2>/dev/null | head -1 || true
 }
 
+kill_stale_on_port() {
+  local port="$1"
+  local pids
+  pids=$(lsof -i :"$port" -t 2>/dev/null || true)
+  if [ -n "$pids" ]; then
+    local count
+    count=$(echo "$pids" | wc -l | tr -d ' ')
+    warn "Killing $count stale process(es) on port $port: $(echo $pids | tr '\n' ' ')"
+    echo "$pids" | xargs kill -9 2>/dev/null || true
+    sleep 1
+  fi
+}
+
 is_macos() { [[ "$(uname -s)" == "Darwin" ]]; }
 is_linux() { [[ "$(uname -s)" == "Linux" ]]; }
 
@@ -420,13 +433,7 @@ cmd_start() {
     esac
   done
 
-  local stale_pid
-  stale_pid=$(lsof -i :"$port" -t 2>/dev/null | head -1 || true)
-  if [ -n "$stale_pid" ]; then
-    warn "Killing stale process $stale_pid on port $port"
-    kill -9 "$stale_pid" 2>/dev/null || true
-    sleep 1
-  fi
+  kill_stale_on_port "$port"
 
   if is_macos; then
     launchd_install "$port" "$config"
@@ -456,20 +463,16 @@ cmd_restart() {
   if is_macos && launchd_is_running; then
     launchd_stop
     sleep 1
+    kill_stale_on_port "$port"
     launchd_install "$port" "$config"
   elif is_linux && systemd_is_running; then
     systemctl --user restart "$SYSTEMD_UNIT"
+    kill_stale_on_port "$port"
     info "Restarted."
   else
     nohup_stop
     sleep 1
-    # Kill anything still on the port
-    local stale_pid
-    stale_pid=$(lsof -i :"$port" -t 2>/dev/null | head -1 || true)
-    if [ -n "$stale_pid" ]; then
-      kill -9 "$stale_pid" 2>/dev/null || true
-      sleep 1
-    fi
+    kill_stale_on_port "$port"
     nohup_start "$port" "$config"
   fi
 }
@@ -505,13 +508,7 @@ cmd_proxy() {
     esac
   done
 
-  local stale_pid
-  stale_pid=$(lsof -i :"$port" -t 2>/dev/null | head -1 || true)
-  if [ -n "$stale_pid" ]; then
-    warn "Killing stale process $stale_pid on port $port"
-    kill -9 "$stale_pid" 2>/dev/null || true
-    sleep 1
-  fi
+  kill_stale_on_port "$port"
 
   echo "$port" > "$PORT_FILE"
 
