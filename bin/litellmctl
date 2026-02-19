@@ -47,7 +47,7 @@ _litellmctl_completions() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  commands="auth install update start stop restart logs proxy status toggle-claude setup-completions help"
+  commands="auth install update init-env start stop restart logs proxy status toggle-claude setup-completions help"
   auth_cmds="chatgpt gemini codex status refresh"
 
   case "$prev" in
@@ -77,6 +77,7 @@ _litellmctl_completions() {
     'auth:Manage OAuth tokens'
     'install:Install/reinstall LiteLLM'
     'update:Pull latest, sync submodule, rebuild'
+    'init-env:Detect auth files and update .env paths'
     'start:Start proxy as background service'
     'stop:Stop the proxy service'
     'restart:Restart the proxy service'
@@ -559,6 +560,71 @@ cmd_update() {
   fi
 }
 
+cmd_init_env() {
+  local env_file="$PROJECT_DIR/.env"
+  local changed=0
+
+  if [ ! -f "$env_file" ]; then
+    warn "No .env file found. Copy .env.example first:"
+    warn "  cp $PROJECT_DIR/.env.example $env_file"
+    exit 1
+  fi
+
+  # Upsert a single key=value in .env. Only touches the target key;
+  # all other lines (comments, blanks, other vars) are preserved as-is.
+  _upsert_env_var() {
+    local var="$1" val="$2"
+    if grep -q "^${var}=" "$env_file" 2>/dev/null; then
+      local old_val
+      old_val=$(grep "^${var}=" "$env_file" | head -1 | cut -d= -f2-)
+      if [ "$old_val" = "$val" ]; then
+        return 1  # already correct
+      fi
+      sed -i.bak "s|^${var}=.*|${var}=${val}|" "$env_file"
+      rm -f "$env_file.bak"
+      changed=1
+      printf "    \033[36m↻\033[0m %s: %s → %s\n" "$var" "$old_val" "$val"
+      return 0
+    else
+      printf '\n%s=%s' "$var" "$val" >> "$env_file"
+      # ensure trailing newline
+      printf '\n' >> "$env_file"
+      changed=1
+      printf "    \033[32m+\033[0m %s=%s\n" "$var" "$val"
+      return 0
+    fi
+  }
+
+  _process_auth() {
+    local auth_file="$1" dir_var="$2" file_var="$3"
+    if [ -f "$PROJECT_DIR/$auth_file" ]; then
+      local sub_changed=0
+      _upsert_env_var "$dir_var" "$PROJECT_DIR" && sub_changed=1
+      _upsert_env_var "$file_var" "$auth_file" && sub_changed=1
+      if [ $sub_changed -eq 0 ]; then
+        printf "  \033[32m✓\033[0m %-30s (up to date)\n" "$auth_file"
+      else
+        printf "  \033[32m✓\033[0m %-30s synced\n" "$auth_file"
+      fi
+    else
+      printf "  \033[33m-\033[0m %-30s (not found, skipped)\n" "$auth_file"
+    fi
+  }
+
+  info "Scanning $PROJECT_DIR for auth files ..."
+  _process_auth "auth.chatgpt.json"      "CHATGPT_TOKEN_DIR"      "CHATGPT_AUTH_FILE"
+  _process_auth "auth.gemini_cli.json"    "GEMINI_CLI_TOKEN_DIR"   "GEMINI_CLI_AUTH_FILE"
+  _process_auth "auth.qwen_portal.json"   "QWEN_PORTAL_TOKEN_DIR"  "QWEN_PORTAL_AUTH_FILE"
+
+  if [ $changed -eq 0 ]; then
+    printf "\n"
+    info "All auth paths already up to date."
+  else
+    printf "\n"
+    info ".env updated — no existing entries were removed."
+  fi
+}
+
 cmd_uninstall_service() {
   if is_macos; then
     launchd_uninstall
@@ -620,9 +686,11 @@ $(printf "\033[1mUsage:\033[0m")  litellmctl <command> [args...]
 $(printf "\033[1mCommands:\033[0m")
   install              Install / reinstall LiteLLM fork
   update               Pull latest, sync submodule, rebuild & restart
+  init-env             Detect auth files and update .env with correct paths
   auth chatgpt         Login to ChatGPT / Codex (browser PKCE)
   auth gemini          Login to Gemini CLI (browser PKCE)
-  auth refresh <p>     Refresh token for <chatgpt|gemini>
+  auth qwen            Login to Qwen Portal (device-code)
+  auth refresh <p>     Refresh token for <chatgpt|gemini|qwen>
   auth status          Show auth token status
   start [--port N]     Start proxy as background service (auto-start on boot)
   stop                 Stop the proxy service
@@ -655,6 +723,7 @@ case "$1" in
   --zsh-completions) generate_zsh_completions; exit 0 ;;
   install)           shift; cmd_install "$@" ;;
   update)            shift; cmd_update ;;
+  init-env)          shift; cmd_init_env ;;
   auth)              shift; cmd_auth "$@" ;;
   start)             shift; cmd_start "$@" ;;
   stop)              shift; cmd_stop ;;
