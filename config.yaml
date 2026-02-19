@@ -227,9 +227,30 @@ router_settings:
   retry_after: 5
   allowed_fails: 1
   fallbacks:
-    - claude-opus-4-6: [qwen/qwen3.5-plus, dashscope/qwen3.5-plus, codex/gpt-5.3-codex, gemini-cli/gemini-3-pro-preview, zai/glm-5]
-    - claude-sonnet-4-5-20250929: [qwen/qwen3-coder-plus, dashscope/qwen3-coder-plus, codex/gpt-5.3-codex-spark, gemini-cli/gemini-3-flash-preview, zai/glm-4.5-air]
-    - claude-haiku-4-5-20251001: [qwen/qwen3-vl-plus, dashscope/qwen3-max, codex/gpt-5.1-codex-mini, gemini-cli/gemini-2.5-flash-lite, zai/glm-4.5-flash]
+    - claude-opus-4-6:
+        [
+          qwen/qwen3.5-plus,
+          dashscope/qwen3.5-plus,
+          codex/gpt-5.3-codex,
+          gemini-cli/gemini-3-pro-preview,
+          zai/glm-5,
+        ]
+    - claude-sonnet-4-5-20250929:
+        [
+          qwen/qwen3-coder-plus,
+          dashscope/qwen3-coder-plus,
+          codex/gpt-5.3-codex-spark,
+          gemini-cli/gemini-3-flash-preview,
+          zai/glm-4.5-air,
+        ]
+    - claude-haiku-4-5-20251001:
+        [
+          qwen/qwen3-vl-plus,
+          dashscope/qwen3-max,
+          codex/gpt-5.1-codex-mini,
+          gemini-cli/gemini-2.5-flash-lite,
+          zai/glm-4.5-flash,
+        ]
 
 litellm_settings:
   drop_params: true
