@@ -120,12 +120,6 @@ model_list:
       timeout: 600
 
   # === Qwen Portal tier (Qwen OAuth — free 1k req/day) ===
-  # "coder-model" alias resolves to qwen3.5-plus (flagship, reasoning)
-  - model_name: qwen/qwen3.5-plus
-    litellm_params:
-      model: qwen_portal/coder-model
-      timeout: 600
-  # qwen3-coder-plus is the 480B MoE coding specialist
   - model_name: qwen/qwen3-coder-plus
     litellm_params:
       model: qwen_portal/qwen3-coder-plus
@@ -137,12 +131,6 @@ model_list:
       timeout: 600
 
   # === Alibaba Cloud Coding Plan (Anthropic-compatible endpoint) ===
-  - model_name: dashscope/qwen3.5-plus
-    litellm_params:
-      model: anthropic/qwen3.5-plus
-      api_key: os.environ/DASHSCOPE_API_KEY
-      api_base: https://coding-intl.dashscope.aliyuncs.com/apps/anthropic
-      timeout: 600
   - model_name: dashscope/qwen3-max
     litellm_params:
       model: anthropic/qwen3-max-2026-01-23
@@ -229,8 +217,8 @@ router_settings:
   fallbacks:
     - claude-opus-4-6:
         [
-          qwen/qwen3.5-plus,
-          dashscope/qwen3.5-plus,
+          qwen/qwen3-coder-plus,
+          dashscope/qwen3-max,
           codex/gpt-5.3-codex,
           gemini-cli/gemini-3-pro-preview,
           zai/glm-5,
