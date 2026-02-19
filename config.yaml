@@ -110,14 +110,6 @@ model_list:
     litellm_params:
       model: gemini_cli/gemini-2.5-flash-lite
       timeout: 600
-  - model_name: gemini-cli/gemini-3-pro-preview
-    litellm_params:
-      model: gemini_cli/gemini-3-pro-preview
-      timeout: 600
-  - model_name: gemini-cli/gemini-3-flash-preview
-    litellm_params:
-      model: gemini_cli/gemini-3-flash-preview
-      timeout: 600
 
   # === Qwen Portal tier (Qwen OAuth — free 1k req/day) ===
   - model_name: qwen/qwen3-coder-plus
@@ -214,7 +206,7 @@ router_settings:
           qwen/qwen3-coder-plus,
           dashscope/qwen3-coder-plus,
           codex/gpt-5.3-codex,
-          gemini-cli/gemini-3-pro-preview,
+          gemini-cli/gemini-2.5-flash-lite,
           zai/glm-5,
         ]
     - claude-sonnet-4-5-20250929:
@@ -222,7 +214,7 @@ router_settings:
           qwen/qwen3-coder-plus,
           dashscope/qwen3-coder-plus,
           codex/gpt-5.3-codex-spark,
-          gemini-cli/gemini-3-flash-preview,
+          gemini-cli/gemini-2.5-flash-lite,
           zai/glm-4.5-air,
         ]
     - claude-haiku-4-5-20251001:

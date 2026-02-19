@@ -87,8 +87,8 @@ Three consumer-facing models, each with a tiered fallback chain:
 
 | Model               | Fallback 1 (Qwen Portal) | Fallback 2 (DashScope)       | Fallback 3 (Codex)          | Fallback 4 (Gemini)                 | Fallback 5 (Z.AI)   |
 | ------------------- | ------------------------ | ---------------------------- | --------------------------- | ----------------------------------- | ------------------- |
-| `claude-opus-4-6`   | `qwen/qwen3-coder-plus`  | `dashscope/qwen3-coder-plus` | `codex/gpt-5.3-codex`       | `gemini-cli/gemini-3-pro-preview`   | `zai/glm-5`         |
-| `claude-sonnet-4-5` | `qwen/qwen3-coder-plus`  | `dashscope/qwen3-coder-plus` | `codex/gpt-5.3-codex-spark` | `gemini-cli/gemini-3-flash-preview` | `zai/glm-4.5-air`   |
+| `claude-opus-4-6`   | `qwen/qwen3-coder-plus`  | `dashscope/qwen3-coder-plus` | `codex/gpt-5.3-codex`       | `gemini-cli/gemini-2.5-flash-lite`  | `zai/glm-5`         |
+| `claude-sonnet-4-5` | `qwen/qwen3-coder-plus`  | `dashscope/qwen3-coder-plus` | `codex/gpt-5.3-codex-spark` | `gemini-cli/gemini-2.5-flash-lite`  | `zai/glm-4.5-air`   |
 | `claude-haiku-4-5`  | `qwen/qwen3-vl-plus`     | `dashscope/qwen3-coder-plus` | `codex/gpt-5.1-codex-mini`  | `gemini-cli/gemini-2.5-flash-lite`  | `zai/glm-4.5-flash` |
 
 All backend models are also directly addressable by their full name
@@ -102,7 +102,7 @@ All backend models are also directly addressable by their full name
 | **Qwen Portal** | Qwen OAuth (device-code) | `qwen/qwen3-coder-plus`, `qwen/qwen3-vl-plus`                                                                                                                           |
 | **DashScope**   | API key (Coding Plan)    | `dashscope/qwen3-coder-plus`                                                                                                                                             |
 | **Codex**       | ChatGPT OAuth            | `codex/gpt-5.3-codex`, `codex/gpt-5.3-codex-spark`, `codex/gpt-5.2-codex`, `codex/gpt-5.1-codex`, `codex/gpt-5.1-codex-mini`                                           |
-| **Gemini CLI**  | Google OAuth             | `gemini-cli/gemini-3-pro-preview`, `gemini-cli/gemini-3-flash-preview`, `gemini-cli/gemini-2.5-pro`, `gemini-cli/gemini-2.5-flash`, `gemini-cli/gemini-2.5-flash-lite` |
+| **Gemini CLI**  | Google OAuth             | `gemini-cli/gemini-2.5-pro`, `gemini-cli/gemini-2.5-flash`, `gemini-cli/gemini-2.5-flash-lite`                                                                        |
 | **Z.AI**        | API key                  | `zai/glm-5`, `zai/glm-5v`, `zai/glm-4.7`, `zai/glm-4.6`, `zai/glm-4.5`, etc.                                                                                           |
 
 ## Gemini CLI Provider
