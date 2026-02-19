@@ -112,17 +112,35 @@ model_list:
       timeout: 600
 
   # === Qwen Portal tier (Qwen OAuth — free 1k req/day) ===
-  - model_name: qwen/qwen3-coder-plus
+  - model_name: qwen-cli/qwen3-coder-plus
     litellm_params:
       model: qwen_portal/qwen3-coder-plus
       timeout: 600
   # "vision-model" alias resolves to qwen3-vl-plus (vision + text)
-  - model_name: qwen/qwen3-vl-plus
+  - model_name: qwen-cli/qwen3-vl-plus
     litellm_params:
       model: qwen_portal/vision-model
       timeout: 600
 
   # === Alibaba Cloud Coding Plan (Anthropic-compatible endpoint) ===
+  - model_name: dashscope/qwen3.5-plus
+    litellm_params:
+      model: anthropic/qwen3.5-plus
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://coding-intl.dashscope.aliyuncs.com/apps/anthropic
+      timeout: 600
+      thinking:
+        type: enabled
+        budget_tokens: 16000
+  - model_name: dashscope/qwen3-max
+    litellm_params:
+      model: anthropic/qwen3-max-2026-01-23
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://coding-intl.dashscope.aliyuncs.com/apps/anthropic
+      timeout: 600
+      thinking:
+        type: enabled
+        budget_tokens: 16000
   - model_name: dashscope/qwen3-coder-plus
     litellm_params:
       model: anthropic/qwen3-coder-plus
@@ -201,21 +219,18 @@ router_settings:
   retry_after: 5
   allowed_fails: 1
   fallbacks:
-    - claude-opus-4-6:
-        [
-          qwen/qwen3-coder-plus,
-          codex/gpt-5.3-codex,
-          zai/glm-5,
-        ]
+    - claude-opus-4-6: [dashscope/qwen3.5-plus, codex/gpt-5.3-codex, zai/glm-5]
     - claude-sonnet-4-5-20250929:
         [
-          qwen/qwen3-coder-plus,
+          qwen-cli/qwen3-coder-plus,
+          dashscope/qwen3-coder-plus,
           codex/gpt-5.3-codex-spark,
           zai/glm-4.5-air,
         ]
     - claude-haiku-4-5-20251001:
         [
-          qwen/qwen3-vl-plus,
+          qwen-cli/qwen3-vl-plus,
+          dashscope/qwen3-max,
           codex/gpt-5.1-codex-mini,
           zai/glm-4.5-flash,
         ]
