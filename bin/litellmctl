@@ -48,7 +48,7 @@ _litellmctl_completions() {
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
   commands="auth install update init-env start stop restart logs proxy status toggle-claude setup-completions help"
-  auth_cmds="chatgpt gemini codex status refresh"
+  auth_cmds="chatgpt gemini qwen kimi codex status refresh"
 
   case "$prev" in
     litellmctl)
@@ -58,7 +58,7 @@ _litellmctl_completions() {
       COMPREPLY=( $(compgen -W "$auth_cmds" -- "$cur") )
       return ;;
     refresh)
-      COMPREPLY=( $(compgen -W "chatgpt gemini" -- "$cur") )
+      COMPREPLY=( $(compgen -W "chatgpt gemini qwen kimi" -- "$cur") )
       return ;;
     start|proxy)
       COMPREPLY=( $(compgen -W "--port --config" -- "$cur") )
@@ -91,6 +91,8 @@ _litellmctl_completions() {
   auth_cmds=(
     'chatgpt:Login to ChatGPT/Codex'
     'gemini:Login to Gemini CLI'
+    'qwen:Login to Qwen Portal'
+    'kimi:Login to Kimi Code'
     'codex:Login to ChatGPT/Codex'
     'status:Show token status'
     'refresh:Refresh existing token'
@@ -101,12 +103,12 @@ _litellmctl_completions() {
   elif (( CURRENT == 3 )); then
     case "${words[2]}" in
       auth)    _describe 'auth command' auth_cmds ;;
-      refresh) compadd chatgpt gemini ;;
+      refresh) compadd chatgpt gemini qwen kimi ;;
       start|proxy) compadd -- --port --config ;;
     esac
   elif (( CURRENT == 4 )); then
     case "${words[3]}" in
-      refresh) compadd chatgpt gemini ;;
+      refresh) compadd chatgpt gemini qwen kimi ;;
     esac
   fi
 }
@@ -612,6 +614,7 @@ cmd_init_env() {
   _process_auth "auth.chatgpt.json"      "CHATGPT_TOKEN_DIR"      "CHATGPT_AUTH_FILE"
   _process_auth "auth.gemini_cli.json"    "GEMINI_CLI_TOKEN_DIR"   "GEMINI_CLI_AUTH_FILE"
   _process_auth "auth.qwen_portal.json"   "QWEN_PORTAL_TOKEN_DIR"  "QWEN_PORTAL_AUTH_FILE"
+  _process_auth "auth.kimi_code.json"     "KIMI_CODE_TOKEN_DIR"    "KIMI_CODE_AUTH_FILE"
 
   if [ $changed -eq 0 ]; then
     printf "\n"
@@ -687,7 +690,8 @@ $(printf "\033[1mCommands:\033[0m")
   auth chatgpt         Login to ChatGPT / Codex (browser PKCE)
   auth gemini          Login to Gemini CLI (browser PKCE)
   auth qwen            Login to Qwen Portal (device-code)
-  auth refresh <p>     Refresh token for <chatgpt|gemini|qwen>
+  auth kimi            Login to Kimi Code (device-code)
+  auth refresh <p>     Refresh token for <chatgpt|gemini|qwen|kimi>
   auth status          Show auth token status
   start [--port N]     Start proxy as background service (auto-start on boot)
   stop                 Stop the proxy service
