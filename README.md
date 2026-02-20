@@ -2,26 +2,44 @@
 
 Personal LiteLLM proxy control using a [fork of litellm](https://github.com/0xxmemo/litellm) (upstream: [BerriAI/litellm](https://github.com/BerriAI/litellm)).
 
-## Quick Start
+## Install
 
 ```bash
-# 1. Install (creates venv, installs fork in editable mode)
+curl -fsSL https://raw.githubusercontent.com/0xxmemo/litellmctl/main/install.sh | bash
+```
+
+Works on **macOS** and **Ubuntu/Debian**. Safe to re-run — it won't clobber your existing
+`config.yaml`, `.env`, or auth token files.
+
+If `~/.litellm` already exists (e.g. from litellm's own config), the installer backs up
+your files, clones the repo, then restores everything on top.
+
+After install, load the CLI and start the proxy:
+
+```bash
+source ~/.zshrc            # or ~/.bashrc
+litellmctl auth gemini     # authenticate any OAuth providers you use
+litellmctl auth chatgpt
+litellmctl auth qwen
+litellmctl auth kimi
+litellmctl start           # background service, auto-starts on boot
+```
+
+### Manual install (alternative)
+
+```bash
+git clone https://github.com/0xxmemo/litellmctl.git ~/.litellm
+cd ~/.litellm
 bin/install
-
-# 2. Set up secrets
-cp .env.example .env   # then fill in your API keys
-
-# 3. Authenticate OAuth providers
-litellmctl auth gemini    # PKCE login for Gemini CLI
-litellmctl auth chatgpt   # PKCE login for ChatGPT / Codex
-litellmctl auth qwen      # Device-code login for Qwen Portal
-
-# 4. Start the proxy (background service, auto-starts on boot)
-litellmctl start
-
-# 5. Add litellmctl to your shell (alias + tab completion)
+cp .env.example .env       # fill in your API keys
 litellmctl setup-completions
 source ~/.zshrc
+```
+
+### Update
+
+```bash
+litellmctl update          # pull latest, sync submodule, rebuild & restart
 ```
 
 ## CLI
@@ -31,7 +49,8 @@ litellmctl install                Install / reinstall the LiteLLM fork
 litellmctl auth chatgpt           Login to ChatGPT / Codex (PKCE)
 litellmctl auth gemini            Login to Gemini CLI (PKCE)
 litellmctl auth qwen              Login to Qwen Portal (device-code)
-litellmctl auth refresh <p>       Refresh token for chatgpt, gemini, or qwen
+litellmctl auth kimi              Login to Kimi Code (device-code)
+litellmctl auth refresh <p>       Refresh token for chatgpt, gemini, qwen, or kimi
 litellmctl auth status            Show token expiry info
 litellmctl start [--port N]       Start proxy as background service (auto-start on boot)
 litellmctl stop                   Stop the proxy service
@@ -65,10 +84,11 @@ authenticating, either:
 
 ```
 .litellm/
+├── install.sh          One-line curl installer (bash)
 ├── bin/
 │   ├── litellmctl      CLI runner (bash, with tab-completion)
-│   ├── auth            OAuth login & refresh for ChatGPT, Gemini CLI & Qwen (python)
-│   ├── install         Installer — venv + editable pip install (bash)
+│   ├── auth            OAuth login & refresh (python)
+│   ├── install         Venv + editable pip install (bash)
 │   └── toggle-claude   Toggle Claude Code between direct API and proxy
 ├── litellm/            Git submodule → 0xxmemo/litellm fork
 ├── config.yaml         Proxy model routing, fallbacks, environment vars
@@ -77,6 +97,7 @@ authenticating, either:
 ├── auth.chatgpt.json   ChatGPT OAuth tokens (git-ignored, auto-refreshed)
 ├── auth.gemini_cli.json Gemini CLI OAuth tokens (git-ignored, auto-refreshed)
 ├── auth.qwen_portal.json Qwen Portal OAuth tokens (git-ignored, auto-refreshed)
+├── auth.kimi_code.json Kimi Code OAuth tokens (git-ignored, auto-refreshed)
 ├── logs/               Service logs (git-ignored)
 └── venv/               Python virtualenv (git-ignored)
 ```
@@ -99,6 +120,7 @@ All backend models are also directly addressable by their full name
 | Provider        | Auth                     | Models                                                                                                                                                                 |
 | --------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Anthropic**   | API key                  | `claude-opus-4-6`, `claude-sonnet-4-5`, `claude-haiku-4-5`                                                                                                             |
+| **Kimi Code**   | Kimi OAuth (device-code) | `kimi-code/kimi-for-coding` (K2.5)                                                                                                                                     |
 | **Qwen Portal** | Qwen OAuth (device-code) | `qwen/qwen3-coder-plus`, `qwen/qwen3-vl-plus`                                                                                                                           |
 | **DashScope**   | API key (Coding Plan)    | `dashscope/qwen3-coder-plus`                                                                                                                                             |
 | **Codex**       | ChatGPT OAuth            | `codex/gpt-5.3-codex`, `codex/gpt-5.3-codex-spark`, `codex/gpt-5.2-codex`, `codex/gpt-5.1-codex`, `codex/gpt-5.1-codex-mini`                                           |
@@ -123,6 +145,29 @@ official [Gemini CLI](https://github.com/google-gemini/gemini-cli) uses.
 
 OAuth client credentials are auto-extracted from the installed Gemini CLI binary
 (`npm i -g @google/gemini-cli`) at runtime — no manual env vars needed.
+
+## Kimi Code Provider
+
+The fork adds a `kimi_code` provider that routes through Moonshot's Kimi Code API
+(`api.kimi.com/coding/v1`) using OAuth Bearer tokens — the same backend the official
+[Kimi CLI](https://code.kimi.com) uses.
+
+**Prerequisites:**
+
+```bash
+curl -LsSf https://code.kimi.com/install.sh | bash   # install kimi-cli (creates device ID)
+```
+
+**How it works:**
+
+1. `litellmctl auth kimi` performs an OAuth 2.0 device-code login with `auth.kimi.com`,
+   saves tokens to `auth.kimi_code.json`, and syncs with kimi-cli's own credentials.
+2. The provider extends LiteLLM's OpenAI-compatible handler, injecting the OAuth Bearer
+   token and required agent identification headers (User-Agent, X-Msh-Platform, etc.).
+3. Tokens auto-refresh on expiry; re-run `litellmctl auth kimi` if they expire completely.
+
+Requires an [Allegretto plan](https://www.kimi.com/pricing) ($39/month) or higher for
+the K2.5 model via Kimi Code.
 
 ## Qwen Portal Provider
 
