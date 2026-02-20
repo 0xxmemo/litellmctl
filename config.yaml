@@ -227,12 +227,19 @@ router_settings:
   retry_after: 5
   allowed_fails: 1
   fallbacks:
-    - claude-opus-4-6: [dashscope/qwen3.5-plus, codex/gpt-5.3-codex, zai/glm-5]
+    - claude-opus-4-6:
+        [
+          minimax/MiniMax-M2.5-highspeed,
+          dashscope/qwen3.5-plus,
+          codex/gpt-5.3-codex,
+          zai/glm-5,
+        ]
     - claude-sonnet-4-5-20250929:
         [
           qwen-cli/qwen3-coder-plus,
           dashscope/qwen3-coder-plus,
           codex/gpt-5.3-codex-spark,
+          minimax/MiniMax-M2.5-highspeed,
           zai/glm-4.5-air,
         ]
     - claude-haiku-4-5-20251001:
@@ -240,6 +247,7 @@ router_settings:
           qwen-cli/qwen3-vl-plus,
           dashscope/qwen3-max,
           codex/gpt-5.1-codex-mini,
+          minimax/MiniMax-M2.5-highspeed,
           zai/glm-4.5-flash,
         ]
 
