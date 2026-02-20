@@ -252,7 +252,6 @@ router_settings:
         ]
     - claude-haiku-4-5-20251001:
         [
-          kimi-code/kimi-for-coding,
           qwen-cli/qwen3-vl-plus,
           dashscope/qwen3-max,
           codex/gpt-5.1-codex-mini,
