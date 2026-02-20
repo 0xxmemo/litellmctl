@@ -103,6 +103,7 @@ All backend models are also directly addressable by their full name
 | **DashScope**   | API key (Coding Plan)    | `dashscope/qwen3-coder-plus`                                                                                                                                             |
 | **Codex**       | ChatGPT OAuth            | `codex/gpt-5.3-codex`, `codex/gpt-5.3-codex-spark`, `codex/gpt-5.2-codex`, `codex/gpt-5.1-codex`, `codex/gpt-5.1-codex-mini`                                           |
 | **Gemini CLI**  | Google OAuth             | `gemini-cli/gemini-2.5-pro`, `gemini-cli/gemini-2.5-flash`, `gemini-cli/gemini-2.5-flash-lite`                                                                        |
+| **MiniMax**     | API key                  | `minimax/MiniMax-M2.5-highspeed`                                                                                                                                           |
 | **Z.AI**        | API key                  | `zai/glm-5`, `zai/glm-5v`, `zai/glm-4.7`, `zai/glm-4.6`, `zai/glm-4.5`, etc.                                                                                           |
 
 ## Gemini CLI Provider
