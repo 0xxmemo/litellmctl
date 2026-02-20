@@ -51,6 +51,8 @@ litellmctl auth gemini            Login to Gemini CLI (PKCE)
 litellmctl auth qwen              Login to Qwen Portal (device-code)
 litellmctl auth kimi              Login to Kimi Code (device-code)
 litellmctl auth refresh <p>       Refresh token for chatgpt, gemini, qwen, or kimi
+litellmctl auth export [p...]     Copy credentials as a paste-able transfer script
+litellmctl auth import            Read credentials from stdin
 litellmctl auth status            Show token expiry info
 litellmctl start [--port N]       Start proxy as background service (auto-start on boot)
 litellmctl stop                   Stop the proxy service
@@ -66,6 +68,22 @@ litellmctl setup-completions      Add litellmctl to your shell (alias + tab comp
 `start` installs a system service (macOS: launchd, Linux: systemd) that
 auto-starts on login and restarts on crash. Use `proxy` for foreground
 mode when debugging.
+
+### Transferring credentials between machines
+
+Export credentials from one machine and paste them on another:
+
+```bash
+# On source machine — copies a self-contained bash script to clipboard
+litellmctl auth export              # interactive: pick which providers
+litellmctl auth export chatgpt kimi # or specify directly
+
+# On target machine — just paste the script into the terminal
+# (no litellmctl required on the target)
+```
+
+If litellmctl is already installed on the target, the script also runs
+`init-env` to sync `.env` paths automatically.
 
 ### Server / headless usage
 

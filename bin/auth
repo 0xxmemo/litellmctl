@@ -3,14 +3,14 @@
 LiteLLM Auth CLI — OAuth login for custom providers.
 
 Usage:
-    auth chatgpt          Browser-based PKCE login for ChatGPT / Codex
-    auth gemini           Browser-based PKCE login for Gemini CLI
-    auth qwen             Device-code login for Qwen Portal
-    auth kimi             Device-code login for Kimi Code
-    auth refresh <name>   Refresh existing token
-    auth status           Show token status for all providers
-
-Follows OpenClaw's OAuth approach.
+    auth chatgpt              Browser-based PKCE login for ChatGPT / Codex
+    auth gemini               Browser-based PKCE login for Gemini CLI
+    auth qwen                 Device-code login for Qwen Portal
+    auth kimi                 Device-code login for Kimi Code
+    auth refresh <name>       Refresh existing token
+    auth status               Show token status for all providers
+    auth export [providers]   Copy credentials as a paste-able transfer script
+    auth import               Read credentials from stdin
 """
 
 import base64
@@ -1147,6 +1147,180 @@ def kimi_refresh() -> dict:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Export / Import (credential transfer between machines)
+# ═══════════════════════════════════════════════════════════════════════════
+
+_AUTH_PROVIDERS = [
+    ("chatgpt", "ChatGPT / Codex", _chatgpt_auth_file),
+    ("gemini",  "Gemini CLI",      _gemini_auth_file),
+    ("qwen",    "Qwen Portal",     _qwen_auth_file),
+    ("kimi",    "Kimi Code",       _kimi_auth_file),
+]
+
+
+def _expiry_label(d: dict) -> str:
+    exp = d.get("expires_at")
+    if not exp:
+        return "unknown expiry"
+    rem = int(exp - time.time())
+    if rem <= 0:
+        return "EXPIRED"
+    return f"{rem // 3600}h {(rem % 3600) // 60}m left"
+
+
+def _copy_to_clipboard(text: str) -> bool:
+    """Copy text to system clipboard. Returns True on success."""
+    import subprocess
+    for cmd in (["pbcopy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]):
+        try:
+            p = subprocess.Popen(cmd, stdin=subprocess.PIPE)
+            p.communicate(text.encode())
+            if p.returncode == 0:
+                return True
+        except FileNotFoundError:
+            continue
+    return False
+
+
+def export_creds(selected: list[str] | None = None):
+    available = []
+    for key, label, getter in _AUTH_PROVIDERS:
+        f = getter()
+        if f.exists():
+            try:
+                data = json.loads(f.read_text())
+                available.append((key, label, f, data))
+            except Exception:
+                pass
+
+    if not available:
+        print(_red("No auth files found. Run 'litellmctl auth <provider>' first."))
+        sys.exit(1)
+
+    if selected:
+        chosen = []
+        for key, label, f, data in available:
+            if key in selected:
+                chosen.append((key, label, f, data))
+        missing = set(selected) - {k for k, *_ in chosen}
+        if missing:
+            print(_yellow(f"Not found: {', '.join(missing)}"))
+        if not chosen:
+            print(_red("No matching auth files.")); sys.exit(1)
+    else:
+        print()
+        print(_bold("Available credentials:"))
+        for i, (key, label, f, data) in enumerate(available, 1):
+            exp = _expiry_label(data)
+            color = _green if "left" in exp else _red
+            print(f"  [{i}] {key:<12} {label:<20} ({color(exp)})")
+
+        print()
+        ans = input("Select (comma-separated numbers, or 'all') [all]: ").strip()
+        if not ans or ans.lower() == "all":
+            chosen = available
+        else:
+            indices = []
+            for part in ans.split(","):
+                part = part.strip()
+                if part.isdigit() and 1 <= int(part) <= len(available):
+                    indices.append(int(part) - 1)
+            if not indices:
+                print(_red("No valid selection.")); sys.exit(1)
+            chosen = [available[i] for i in indices]
+
+    # Build self-contained bash transfer script
+    lines = [
+        "#!/usr/bin/env bash",
+        "# litellmctl credential transfer",
+        f"# Generated: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+        f"# Credentials: {', '.join(k for k, *_ in chosen)}",
+        "#",
+        "# Paste this entire block into a terminal on the target machine.",
+        "set -euo pipefail",
+        'D="${LITELLM_DIR:-$HOME/.litellm}"',
+        'mkdir -p "$D"',
+        "",
+    ]
+
+    for key, label, f, data in chosen:
+        encoded = base64.b64encode(json.dumps(data, indent=2).encode()).decode()
+        fname = f.name
+        lines.append(f"# {label}")
+        lines.append(f"printf '%s' '{encoded}' | base64 -d > \"$D/{fname}\"")
+        lines.append(f'chmod 600 "$D/{fname}"')
+        lines.append(f'echo "  ✓ {fname}  ({label})"')
+        lines.append("")
+
+    lines.append('echo ""')
+    lines.append('echo "Done! Imported to $D"')
+    lines.append('[ -x "$D/bin/litellmctl" ] && "$D/bin/litellmctl" init-env 2>/dev/null && echo "  ✓ .env paths synced" || echo "  Run: litellmctl init-env"')
+
+    script = "\n".join(lines) + "\n"
+
+    if _copy_to_clipboard(script):
+        print()
+        print(_green(f"✓ Copied transfer script to clipboard ({len(chosen)} credential(s))"))
+        print(_dim("  Paste it into a terminal on the target machine."))
+    else:
+        print()
+        print(_yellow("Could not copy to clipboard. Printing script:\n"))
+        print(_dim("─" * 60))
+        print(script)
+        print(_dim("─" * 60))
+
+    print()
+
+
+def import_creds():
+    print()
+    print(_bold("Import credentials"))
+    print(_dim("─" * 40))
+    print("Paste base64-encoded credentials (one per line):")
+    print("Format:  <filename> <base64>")
+    print("Example: auth.chatgpt.json eyJhY2Nlc3...")
+    print()
+    print(_dim("End with an empty line or Ctrl+D."))
+    print()
+
+    imported = 0
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            break
+        parts = line.split(None, 1)
+        if len(parts) != 2:
+            print(_yellow(f"  Skipped (bad format): {line[:40]}..."))
+            continue
+
+        fname, b64data = parts
+        if not fname.startswith("auth.") or not fname.endswith(".json"):
+            print(_yellow(f"  Skipped (not auth file): {fname}"))
+            continue
+
+        try:
+            decoded = base64.b64decode(b64data)
+            json.loads(decoded)  # validate JSON
+        except Exception:
+            print(_red(f"  Invalid base64/JSON for {fname}"))
+            continue
+
+        target = PROJECT_DIR / fname
+        target.write_bytes(decoded)
+        os.chmod(target, 0o600)
+        print(_green(f"  ✓ {fname}"))
+        imported += 1
+
+    if imported:
+        print(f"\n{_green(f'✓ Imported {imported} credential(s)')}")
+        print(_dim("  Run: litellmctl init-env"))
+    else:
+        print(_yellow("\nNo credentials imported."))
+
+    print()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Status
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1194,12 +1368,14 @@ USAGE = f"""\
 {_bold('LiteLLM Auth CLI')}
 
 {_bold('Commands:')}
-  auth chatgpt           Login to ChatGPT / Codex (browser PKCE)
-  auth gemini            Login to Gemini CLI (browser PKCE)
-  auth qwen              Login to Qwen Portal (device code)
-  auth kimi              Login to Kimi Code (device code)
-  auth refresh <name>    Refresh token (chatgpt|gemini|qwen|kimi)
-  auth status            Show token status
+  auth chatgpt              Login to ChatGPT / Codex (browser PKCE)
+  auth gemini               Login to Gemini CLI (browser PKCE)
+  auth qwen                 Login to Qwen Portal (device code)
+  auth kimi                 Login to Kimi Code (device code)
+  auth refresh <name>       Refresh token (chatgpt|gemini|qwen|kimi)
+  auth status               Show token status
+  auth export [providers]   Copy credentials as a paste-able transfer script
+  auth import               Read credentials from stdin
 """
 
 def main():
@@ -1228,6 +1404,10 @@ def main():
             elif t in ("qwen", "qwen_portal", "qwen-portal"): qwen_refresh()
             elif t in ("kimi", "kimi_code", "kimi-code"): kimi_refresh()
             else: print(_red(f"Unknown provider: {t}")); sys.exit(1)
+        elif cmd == "export":
+            export_creds(args[1:] if len(args) > 1 else None)
+        elif cmd == "import":
+            import_creds()
         elif cmd == "status":
             show_status()
         else:

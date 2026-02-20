@@ -102,6 +102,10 @@ if [ ! -f "$PROJECT_DIR/.env" ]; then
   echo "  cp $PROJECT_DIR/.env.example $PROJECT_DIR/.env"
 fi
 
+# ── Shell completions ──
+
+"$BIN_DIR/litellmctl" setup-completions 2>/dev/null || true
+
 echo ""
 info "Installation complete!"
 echo ""

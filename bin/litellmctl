@@ -48,7 +48,7 @@ _litellmctl_completions() {
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
   commands="auth install update init-env start stop restart logs proxy status toggle-claude setup-completions help"
-  auth_cmds="chatgpt gemini qwen kimi codex status refresh"
+  auth_cmds="chatgpt gemini qwen kimi codex status refresh export import"
 
   case "$prev" in
     litellmctl)
@@ -57,7 +57,7 @@ _litellmctl_completions() {
     auth)
       COMPREPLY=( $(compgen -W "$auth_cmds" -- "$cur") )
       return ;;
-    refresh)
+    refresh|export)
       COMPREPLY=( $(compgen -W "chatgpt gemini qwen kimi" -- "$cur") )
       return ;;
     start|proxy)
@@ -96,6 +96,8 @@ _litellmctl_completions() {
     'codex:Login to ChatGPT/Codex'
     'status:Show token status'
     'refresh:Refresh existing token'
+    'export:Copy credentials as transfer script'
+    'import:Read credentials from stdin'
   )
 
   if (( CURRENT == 2 )); then
@@ -103,12 +105,12 @@ _litellmctl_completions() {
   elif (( CURRENT == 3 )); then
     case "${words[2]}" in
       auth)    _describe 'auth command' auth_cmds ;;
-      refresh) compadd chatgpt gemini qwen kimi ;;
+      refresh|export) compadd chatgpt gemini qwen kimi ;;
       start|proxy) compadd -- --port --config ;;
     esac
   elif (( CURRENT == 4 )); then
     case "${words[3]}" in
-      refresh) compadd chatgpt gemini qwen kimi ;;
+      refresh|export) compadd chatgpt gemini qwen kimi ;;
     esac
   fi
 }
@@ -542,6 +544,9 @@ cmd_update() {
 
   info "Update complete."
 
+  # Ensure shell completions are set up
+  cmd_setup_completions 2>/dev/null || true
+
   # Ask to restart if service is running
   local running=false
   if is_macos && launchd_is_running; then running=true; fi
@@ -692,6 +697,8 @@ $(printf "\033[1mCommands:\033[0m")
   auth qwen            Login to Qwen Portal (device-code)
   auth kimi            Login to Kimi Code (device-code)
   auth refresh <p>     Refresh token for <chatgpt|gemini|qwen|kimi>
+  auth export [p...]   Copy credentials as a paste-able transfer script
+  auth import          Read credentials from stdin
   auth status          Show auth token status
   start [--port N]     Start proxy as background service (auto-start on boot)
   stop                 Stop the proxy service
