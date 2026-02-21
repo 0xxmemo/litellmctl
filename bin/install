@@ -14,29 +14,32 @@ error() { printf "\033[1;31m==> %s\033[0m\n" "$*" >&2; }
 
 is_interactive() { [ -t 0 ]; }
 
-# Prevent git from blocking on credential/password prompts (SSH passphrase,
-# HTTP auth, etc.) which cause the script to hang on headless Linux.
+# Prevent git from blocking on credential/password prompts.
 export GIT_TERMINAL_PROMPT=0
 export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o ConnectTimeout=10}"
 
-# Wrapper: run a command with a timeout if GNU timeout is available.
+# Run a command with a hard timeout (GNU coreutils only).
+# Sends SIGKILL 5s after SIGTERM in case the child ignores it.
 run_with_timeout() {
   local secs="$1"; shift
-  if command -v timeout &>/dev/null; then
-    timeout "$secs" "$@"
+  local bin
+  bin="$(type -P timeout 2>/dev/null || true)"
+  if [ -n "$bin" ]; then
+    "$bin" -k 5 "$secs" "$@"
   else
     "$@"
   fi
 }
 
+# Check for local uncommitted changes or unpushed commits.
+# Does NOT do a git fetch (sync_repo handles that via git pull).
 has_local_changes() {
   local dir="$1"
   [ -d "$dir/.git" ] || [ -f "$dir/.git" ] || return 1
-  run_with_timeout 15 git -C "$dir" fetch --quiet 2>/dev/null || true
   # Uncommitted changes (staged or unstaged)
   ! git -C "$dir" diff --quiet 2>/dev/null && return 0
   ! git -C "$dir" diff --cached --quiet 2>/dev/null && return 0
-  # Unpushed commits ahead of remote
+  # Unpushed commits (vs last known remote head)
   local ahead
   ahead=$(git -C "$dir" rev-list --count @{u}..HEAD 2>/dev/null || echo "0")
   [ "$ahead" -gt 0 ] && return 0
@@ -82,7 +85,8 @@ sync_repo() {
         info "Stashing $label changes ..."
         git -C "$dir" stash --quiet
         info "Pulling $label ..."
-        run_with_timeout 60 git -C "$dir" pull --ff-only || { error "Pull failed for $label."; exit 1; }
+        run_with_timeout 60 git -C "$dir" pull --ff-only --no-recurse-submodules \
+          || { error "Pull failed for $label."; exit 1; }
         info "Restoring stashed $label changes ..."
         git -C "$dir" stash pop --quiet 2>/dev/null || {
           warn "Could not auto-restore $label changes. Check: git -C $dir stash list"
@@ -92,12 +96,14 @@ sync_repo() {
         warn "Discarding local $label changes."
         git -C "$dir" checkout . 2>/dev/null || true
         git -C "$dir" clean -fd 2>/dev/null || true
-        run_with_timeout 60 git -C "$dir" pull --ff-only || { error "Pull failed for $label."; exit 1; }
+        run_with_timeout 60 git -C "$dir" pull --ff-only --no-recurse-submodules \
+          || { error "Pull failed for $label."; exit 1; }
         ;;
     esac
   else
     info "Pulling $label ..."
-    run_with_timeout 60 git -C "$dir" pull --ff-only || { error "Pull failed for $label."; exit 1; }
+    run_with_timeout 60 git -C "$dir" pull --ff-only --no-recurse-submodules \
+      || { error "Pull failed for $label."; exit 1; }
   fi
 }
 
@@ -167,6 +173,7 @@ fi
 # ── Parent repo sync ──
 
 if [ -d "$PROJECT_DIR/.git" ]; then
+  info "Checking parent repo ..."
   sync_repo "$PROJECT_DIR" "parent repo"
 fi
 

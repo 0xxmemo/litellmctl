@@ -354,8 +354,10 @@ has_systemd_user() {
   # Without these, the command hangs on headless Linux / SSH / containers.
   [ -n "${XDG_RUNTIME_DIR:-}" ] || return 1
   command -v systemctl &>/dev/null || return 1
-  if command -v timeout &>/dev/null; then
-    timeout 5 systemctl --user status >/dev/null 2>&1
+  local bin
+  bin="$(type -P timeout 2>/dev/null || true)"
+  if [ -n "$bin" ]; then
+    "$bin" -k 3 5 systemctl --user status >/dev/null 2>&1
   else
     systemctl --user status >/dev/null 2>&1
   fi
