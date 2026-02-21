@@ -25,6 +25,20 @@ litellmctl auth kimi
 litellmctl start           # background service, auto-starts on boot
 ```
 
+### Config wizard
+
+Generate a `config.yaml` interactively — pick your primary provider, select
+fallback providers, and reorder fallback chains per tier:
+
+```bash
+litellmctl wizard
+```
+
+The wizard backs up your existing `config.yaml` before writing. It's re-runnable:
+each invocation regenerates the config from scratch (after backup). Provider
+templates and fallback defaults are kept in `bin/wizard` and update automatically
+with `litellmctl update`.
+
 ### Manual install (alternative)
 
 ```bash
@@ -45,6 +59,7 @@ litellmctl update          # pull latest, sync submodule, rebuild & restart
 ## CLI
 
 ```
+litellmctl wizard                 Interactive config.yaml generator (providers, tiers, fallbacks)
 litellmctl install                Install / reinstall the LiteLLM fork
 litellmctl auth chatgpt           Login to ChatGPT / Codex (PKCE)
 litellmctl auth gemini            Login to Gemini CLI (PKCE)
@@ -106,6 +121,7 @@ authenticating, either:
 ├── bin/
 │   ├── litellmctl      CLI runner (bash, with tab-completion)
 │   ├── auth            OAuth login & refresh (python)
+│   ├── wizard          Config generator with provider templates (python)
 │   ├── install         Venv + editable pip install (bash)
 │   └── toggle-claude   Toggle Claude Code between direct API and proxy
 ├── litellm/            Git submodule → 0xxmemo/litellm fork
