@@ -1292,34 +1292,42 @@ _EXPORT_LINE_RE = re.compile(
 )
 
 
+def _read_paste() -> list[str]:
+    """Read pasted content from stdin, auto-detecting end of paste."""
+    lines = []
+    if not sys.stdin.isatty():
+        return [l.strip() for l in sys.stdin.readlines()]
+
+    # Interactive: pasted text arrives in rapid bursts.
+    # Wait for a short idle gap after content to detect end of paste.
+    import io
+    fd = sys.stdin.fileno()
+    buf = ""
+    got_content = False
+    while True:
+        timeout = 0.5 if got_content else 60.0
+        ready, _, _ = select.select([sys.stdin], [], [], timeout)
+        if not ready:
+            if got_content:
+                break  # paste finished — no more data after idle gap
+            continue   # still waiting for first input
+        chunk = os.read(fd, 65536).decode(errors="replace")
+        if not chunk:
+            break  # EOF
+        buf += chunk
+        got_content = True
+
+    return [l.strip() for l in buf.splitlines()]
+
+
 def import_creds():
     print()
     print(_bold("Import credentials"))
     print(_dim("─" * 40))
-    print("Paste the export script (or <filename> <base64> lines).")
-    print(_dim("End with an empty line or Ctrl+D."))
+    print("Paste the export script below:")
     print()
 
-    raw_lines = []
-    try:
-        if sys.stdin.isatty():
-            # Interactive: stop on two consecutive empty lines
-            consecutive_empty = 0
-            for line in sys.stdin:
-                stripped = line.strip()
-                if not stripped:
-                    consecutive_empty += 1
-                    if consecutive_empty >= 2 and raw_lines:
-                        break
-                    raw_lines.append(stripped)
-                else:
-                    consecutive_empty = 0
-                    raw_lines.append(stripped)
-        else:
-            # Piped: read everything
-            raw_lines = [l.strip() for l in sys.stdin.readlines()]
-    except EOFError:
-        pass
+    raw_lines = _read_paste()
 
     if not raw_lines:
         print(_yellow("No input received."))
