@@ -1272,48 +1272,98 @@ def export_creds(selected: list[str] | None = None):
     print()
 
 
+def _import_write(fname: str, b64data: str) -> bool:
+    """Decode base64, validate JSON, write to PROJECT_DIR. Returns True on success."""
+    try:
+        decoded = base64.b64decode(b64data)
+        json.loads(decoded)
+    except Exception:
+        print(_red(f"  Invalid base64/JSON for {fname}"))
+        return False
+    target = PROJECT_DIR / fname
+    target.write_bytes(decoded)
+    os.chmod(target, 0o600)
+    print(_green(f"  ✓ {fname}"))
+    return True
+
+
+_EXPORT_LINE_RE = re.compile(
+    r"printf\s+'%s'\s+'([A-Za-z0-9+/=]+)'\s*\|\s*base64\s+-d\s*>\s*\"\$D/(auth\.[^\"]+)\""
+)
+
+
 def import_creds():
     print()
     print(_bold("Import credentials"))
     print(_dim("─" * 40))
-    print("Paste base64-encoded credentials (one per line):")
-    print("Format:  <filename> <base64>")
-    print("Example: auth.chatgpt.json eyJhY2Nlc3...")
-    print()
+    print("Paste the export script (or <filename> <base64> lines).")
     print(_dim("End with an empty line or Ctrl+D."))
     print()
 
+    raw_lines = []
+    try:
+        if sys.stdin.isatty():
+            # Interactive: stop on two consecutive empty lines
+            consecutive_empty = 0
+            for line in sys.stdin:
+                stripped = line.strip()
+                if not stripped:
+                    consecutive_empty += 1
+                    if consecutive_empty >= 2 and raw_lines:
+                        break
+                    raw_lines.append(stripped)
+                else:
+                    consecutive_empty = 0
+                    raw_lines.append(stripped)
+        else:
+            # Piped: read everything
+            raw_lines = [l.strip() for l in sys.stdin.readlines()]
+    except EOFError:
+        pass
+
+    if not raw_lines:
+        print(_yellow("No input received."))
+        print()
+        return
+
     imported = 0
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            break
-        parts = line.split(None, 1)
-        if len(parts) != 2:
-            print(_yellow(f"  Skipped (bad format): {line[:40]}..."))
-            continue
 
-        fname, b64data = parts
-        if not fname.startswith("auth.") or not fname.endswith(".json"):
-            print(_yellow(f"  Skipped (not auth file): {fname}"))
-            continue
+    # Detect export script format by scanning for the printf/base64 pattern
+    is_export_script = any(_EXPORT_LINE_RE.search(l) for l in raw_lines)
 
-        try:
-            decoded = base64.b64decode(b64data)
-            json.loads(decoded)  # validate JSON
-        except Exception:
-            print(_red(f"  Invalid base64/JSON for {fname}"))
-            continue
-
-        target = PROJECT_DIR / fname
-        target.write_bytes(decoded)
-        os.chmod(target, 0o600)
-        print(_green(f"  ✓ {fname}"))
-        imported += 1
+    if is_export_script:
+        for line in raw_lines:
+            m = _EXPORT_LINE_RE.search(line)
+            if m:
+                b64data, fname = m.group(1), m.group(2)
+                if _import_write(fname, b64data):
+                    imported += 1
+    else:
+        # Simple format: <filename> <base64>
+        for line in raw_lines:
+            if not line or line.startswith("#"):
+                continue
+            parts = line.split(None, 1)
+            if len(parts) != 2:
+                continue
+            fname, b64data = parts
+            if not fname.startswith("auth.") or not fname.endswith(".json"):
+                continue
+            if _import_write(fname, b64data):
+                imported += 1
 
     if imported:
         print(f"\n{_green(f'✓ Imported {imported} credential(s)')}")
-        print(_dim("  Run: litellmctl init-env"))
+        # Auto-run init-env if possible
+        try:
+            import subprocess
+            subprocess.run(
+                [str(SCRIPT_DIR / "litellmctl"), "init-env"],
+                capture_output=True, timeout=5,
+            )
+            print(_green("  ✓ .env paths synced"))
+        except Exception:
+            print(_dim("  Run: litellmctl init-env"))
     else:
         print(_yellow("\nNo credentials imported."))
 
