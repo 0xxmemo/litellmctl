@@ -214,14 +214,14 @@ model_list:
       timeout: 600
 
   # === Sonnet tier ===
-  - model_name: claude-sonnet-4-5-20250929
+  - model_name: claude-sonnet-4-5
     litellm_params:
       model: anthropic/claude-sonnet-4-5-20250929
       api_key: os.environ/ANTHROPIC_API_KEY
       timeout: 600
 
   # === Haiku tier ===
-  - model_name: claude-haiku-4-5-20251001
+  - model_name: claude-haiku-4-5
     litellm_params:
       model: anthropic/claude-haiku-4-5-20251001
       api_key: os.environ/ANTHROPIC_API_KEY
@@ -241,7 +241,7 @@ router_settings:
           codex/gpt-5.3-codex,
           zai/glm-5,
         ]
-    - claude-sonnet-4-5-20250929:
+    - claude-sonnet-4-5:
         [
           kimi-code/kimi-for-coding,
           qwen-cli/qwen3-coder-plus,
@@ -250,7 +250,7 @@ router_settings:
           minimax/MiniMax-M2.5-highspeed,
           zai/glm-4.5-air,
         ]
-    - claude-haiku-4-5-20251001:
+    - claude-haiku-4-5:
         [
           qwen-cli/qwen3-vl-plus,
           dashscope/qwen3-max,
