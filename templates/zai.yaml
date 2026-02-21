@@ -1,0 +1,61 @@
+name: Z.AI (GLM)
+desc: API key — pay-per-use
+auth: api_key
+env_vars:
+  - ZAI_API_KEY
+role: fallback
+
+tiers:
+  opus:
+    - model_name: zai/glm-5
+      model: anthropic/glm-5
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+  sonnet:
+    - model_name: zai/glm-4.5-air
+      model: anthropic/glm-4.5-air
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+  haiku:
+    - model_name: zai/glm-4.5-flash
+      model: anthropic/glm-4.5-flash
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+
+extra_models:
+  - model_name: zai/glm-4.5
+    model: anthropic/glm-4.5
+    api_key: os.environ/ZAI_API_KEY
+    api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.5v
+    model: anthropic/glm-4.5v
+    api_key: os.environ/ZAI_API_KEY
+    api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.6
+    model: anthropic/glm-4.6
+    api_key: os.environ/ZAI_API_KEY
+    api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.6v
+    model: anthropic/glm-4.6v
+    api_key: os.environ/ZAI_API_KEY
+    api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.7
+    model: anthropic/glm-4.7
+    api_key: os.environ/ZAI_API_KEY
+    api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.7-flash
+    model: anthropic/glm-4.7-flash
+    api_key: os.environ/ZAI_API_KEY
+    api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.7-flashx
+    model: anthropic/glm-4.7-flashx
+    api_key: os.environ/ZAI_API_KEY
+    api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-5v
+    model: anthropic/glm-5v
+    api_key: os.environ/ZAI_API_KEY
+    api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-5-flash
+    model: anthropic/glm-5-flash
+    api_key: os.environ/ZAI_API_KEY
+    api_base: https://api.z.ai/api/anthropic

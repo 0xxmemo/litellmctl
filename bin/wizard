@@ -4,16 +4,20 @@ litellmctl wizard — interactive config generator.
 
 Walks the user through selecting providers, models, and fallback chains,
 then writes a complete config.yaml (backing up the existing one).
+
+Provider templates and defaults are loaded from templates/*.yaml.
 """
 
-import os
 import shutil
 import sys
 from collections import OrderedDict
 from pathlib import Path
 
+import yaml
+
 SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
+TEMPLATES_DIR = PROJECT_DIR / "templates"
 CONFIG_FILE = PROJECT_DIR / "config.yaml"
 
 # ── Terminal helpers ────────────────────────────────────────────────────────
@@ -23,7 +27,6 @@ def _c(t, c): return f"\033[{c}m{t}\033[0m" if _TTY else t
 def _green(t):  return _c(t, "32")
 def _yellow(t): return _c(t, "33")
 def _red(t):    return _c(t, "31")
-def _cyan(t):   return _c(t, "36")
 def _bold(t):   return _c(t, "1")
 def _dim(t):    return _c(t, "2")
 
@@ -49,235 +52,32 @@ def _pick_numbers(prompt, count, default="all"):
     return indices
 
 
-# ── Provider Templates ─────────────────────────────────────────────────────
+# ── Template loading ───────────────────────────────────────────────────────
 
-PROVIDERS = OrderedDict([
-    ("anthropic", {
-        "name": "Anthropic (Claude)",
-        "desc": "API key — pay-per-use",
-        "auth": "api_key",
-        "env_vars": ["ANTHROPIC_API_KEY"],
-        "role": "primary",
-        "tiers": {
-            "opus": [{
-                "model_name": "claude-opus-4-6",
-                "model": "anthropic/claude-opus-4-6",
-                "api_key": "os.environ/ANTHROPIC_API_KEY",
-            }],
-            "sonnet": [{
-                "model_name": "claude-sonnet-4-5",
-                "model": "anthropic/claude-sonnet-4-5-20250929",
-                "api_key": "os.environ/ANTHROPIC_API_KEY",
-            }],
-            "haiku": [{
-                "model_name": "claude-haiku-4-5",
-                "model": "anthropic/claude-haiku-4-5-20251001",
-                "api_key": "os.environ/ANTHROPIC_API_KEY",
-            }],
-        },
-        "extra_models": [],
-    }),
-    ("kimi_code", {
-        "name": "Kimi Code",
-        "desc": "OAuth (device-code) — Allegretto $39/mo",
-        "auth": "oauth",
-        "auth_cmd": "litellmctl auth kimi",
-        "env_vars": [],
-        "role": "fallback",
-        "tiers": {
-            "opus": [{
-                "model_name": "kimi-code/kimi-for-coding",
-                "model": "kimi_code/kimi-for-coding",
-            }],
-            "sonnet": [{
-                "model_name": "kimi-code/kimi-for-coding",
-                "model": "kimi_code/kimi-for-coding",
-            }],
-        },
-        "extra_models": [],
-    }),
-    ("gemini_cli", {
-        "name": "Gemini CLI",
-        "desc": "OAuth (PKCE) — Free via Code Assist",
-        "auth": "oauth",
-        "auth_cmd": "litellmctl auth gemini",
-        "env_vars": [],
-        "role": "fallback",
-        "tiers": {
-            "opus": [{
-                "model_name": "gemini-cli/gemini-2.5-pro",
-                "model": "gemini_cli/gemini-2.5-pro",
-            }],
-            "sonnet": [{
-                "model_name": "gemini-cli/gemini-2.5-flash",
-                "model": "gemini_cli/gemini-2.5-flash",
-            }],
-            "haiku": [{
-                "model_name": "gemini-cli/gemini-2.5-flash-lite",
-                "model": "gemini_cli/gemini-2.5-flash-lite",
-            }],
-        },
-        "extra_models": [],
-    }),
-    ("qwen_portal", {
-        "name": "Qwen Portal",
-        "desc": "OAuth (device-code) — Free 1k req/day",
-        "auth": "oauth",
-        "auth_cmd": "litellmctl auth qwen",
-        "env_vars": [],
-        "role": "fallback",
-        "tiers": {
-            "sonnet": [{
-                "model_name": "qwen-cli/qwen3-coder-plus",
-                "model": "qwen_portal/qwen3-coder-plus",
-            }],
-            "haiku": [{
-                "model_name": "qwen-cli/qwen3-vl-plus",
-                "model": "qwen_portal/vision-model",
-            }],
-        },
-        "extra_models": [],
-    }),
-    ("dashscope", {
-        "name": "DashScope (Alibaba Coding Plan)",
-        "desc": "API key — Alibaba Cloud subscription",
-        "auth": "api_key",
-        "env_vars": ["DASHSCOPE_API_KEY"],
-        "role": "fallback",
-        "tiers": {
-            "opus": [{
-                "model_name": "dashscope/qwen3.5-plus",
-                "model": "anthropic/qwen3.5-plus",
-                "api_key": "os.environ/DASHSCOPE_API_KEY",
-                "api_base": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
-                "thinking": {"type": "enabled", "budget_tokens": 16000},
-            }],
-            "sonnet": [{
-                "model_name": "dashscope/qwen3-coder-plus",
-                "model": "anthropic/qwen3-coder-plus",
-                "api_key": "os.environ/DASHSCOPE_API_KEY",
-                "api_base": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
-            }],
-            "haiku": [{
-                "model_name": "dashscope/qwen3-max",
-                "model": "anthropic/qwen3-max-2026-01-23",
-                "api_key": "os.environ/DASHSCOPE_API_KEY",
-                "api_base": "https://coding-intl.dashscope.aliyuncs.com/apps/anthropic",
-                "thinking": {"type": "enabled", "budget_tokens": 16000},
-            }],
-        },
-        "extra_models": [],
-    }),
-    ("chatgpt", {
-        "name": "ChatGPT / Codex",
-        "desc": "OAuth (PKCE) — Pro/Max subscription",
-        "auth": "oauth",
-        "auth_cmd": "litellmctl auth chatgpt",
-        "env_vars": [],
-        "role": "fallback",
-        "tiers": {
-            "opus": [{
-                "model_name": "codex/gpt-5.3-codex",
-                "model": "chatgpt/gpt-5.3-codex",
-                "model_info": {"mode": "responses"},
-            }],
-            "sonnet": [{
-                "model_name": "codex/gpt-5.3-codex-spark",
-                "model": "chatgpt/gpt-5.3-codex-spark",
-                "model_info": {"mode": "responses"},
-            }],
-            "haiku": [{
-                "model_name": "codex/gpt-5.1-codex-mini",
-                "model": "chatgpt/gpt-5.1-codex-mini",
-                "model_info": {"mode": "responses"},
-            }],
-        },
-        "extra_models": [
-            {"model_name": "codex/gpt-5.2-codex", "model": "chatgpt/gpt-5.2-codex",
-             "model_info": {"mode": "responses"}},
-            {"model_name": "codex/gpt-5.1-codex", "model": "chatgpt/gpt-5.1-codex",
-             "model_info": {"mode": "responses"}},
-            {"model_name": "codex/gpt-5.2", "model": "chatgpt/gpt-5.2",
-             "model_info": {"mode": "responses"}},
-            {"model_name": "codex/gpt-5.1", "model": "chatgpt/gpt-5.1",
-             "model_info": {"mode": "responses"}},
-        ],
-    }),
-    ("minimax", {
-        "name": "MiniMax",
-        "desc": "API key — pay-per-use",
-        "auth": "api_key",
-        "env_vars": ["MINIMAX_API_KEY"],
-        "role": "fallback",
-        "tiers": {
-            "opus": [{
-                "model_name": "minimax/MiniMax-M2.5-highspeed",
-                "model": "anthropic/MiniMax-M2.5-highspeed",
-                "api_key": "os.environ/MINIMAX_API_KEY",
-                "api_base": "https://api.minimax.io/anthropic",
-            }],
-            "sonnet": [{
-                "model_name": "minimax/MiniMax-M2.5-highspeed",
-                "model": "anthropic/MiniMax-M2.5-highspeed",
-                "api_key": "os.environ/MINIMAX_API_KEY",
-                "api_base": "https://api.minimax.io/anthropic",
-            }],
-            "haiku": [{
-                "model_name": "minimax/MiniMax-M2.5-highspeed",
-                "model": "anthropic/MiniMax-M2.5-highspeed",
-                "api_key": "os.environ/MINIMAX_API_KEY",
-                "api_base": "https://api.minimax.io/anthropic",
-            }],
-        },
-        "extra_models": [],
-    }),
-    ("zai", {
-        "name": "Z.AI (GLM)",
-        "desc": "API key — pay-per-use",
-        "auth": "api_key",
-        "env_vars": ["ZAI_API_KEY"],
-        "role": "fallback",
-        "tiers": {
-            "opus": [{
-                "model_name": "zai/glm-5",
-                "model": "anthropic/glm-5",
-                "api_key": "os.environ/ZAI_API_KEY",
-                "api_base": "https://api.z.ai/api/anthropic",
-            }],
-            "sonnet": [{
-                "model_name": "zai/glm-4.5-air",
-                "model": "anthropic/glm-4.5-air",
-                "api_key": "os.environ/ZAI_API_KEY",
-                "api_base": "https://api.z.ai/api/anthropic",
-            }],
-            "haiku": [{
-                "model_name": "zai/glm-4.5-flash",
-                "model": "anthropic/glm-4.5-flash",
-                "api_key": "os.environ/ZAI_API_KEY",
-                "api_base": "https://api.z.ai/api/anthropic",
-            }],
-        },
-        "extra_models": [
-            {"model_name": n, "model": f"anthropic/{n.split('/', 1)[1]}",
-             "api_key": "os.environ/ZAI_API_KEY",
-             "api_base": "https://api.z.ai/api/anthropic"}
-            for n in [
-                "zai/glm-4.5", "zai/glm-4.5v", "zai/glm-4.6", "zai/glm-4.6v",
-                "zai/glm-4.7", "zai/glm-4.7-flash", "zai/glm-4.7-flashx",
-                "zai/glm-5v", "zai/glm-5-flash",
-            ]
-        ],
-    }),
-])
+def _load_defaults() -> dict:
+    path = TEMPLATES_DIR / "defaults.yaml"
+    if not path.exists():
+        print(_red(f"Missing {path}"))
+        sys.exit(1)
+    with open(path) as f:
+        return yaml.safe_load(f)
 
-TIERS = ["opus", "sonnet", "haiku"]
 
-# Per-tier default fallback order (matches the hand-tuned config)
-DEFAULT_TIER_ORDER = {
-    "opus":   ["kimi_code", "minimax", "dashscope", "chatgpt", "gemini_cli", "zai"],
-    "sonnet": ["kimi_code", "qwen_portal", "dashscope", "chatgpt", "gemini_cli", "minimax", "zai"],
-    "haiku":  ["qwen_portal", "dashscope", "chatgpt", "gemini_cli", "minimax", "zai"],
-}
+def _load_providers(load_order: list[str]) -> OrderedDict:
+    providers: OrderedDict = OrderedDict()
+    for pid in load_order:
+        path = TEMPLATES_DIR / f"{pid}.yaml"
+        if not path.exists():
+            print(_yellow(f"  Warning: template {path.name} not found, skipping"))
+            continue
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        # Normalise optional fields
+        data.setdefault("env_vars", [])
+        data.setdefault("extra_models", [])
+        data.setdefault("tiers", {})
+        providers[pid] = data
+    return providers
 
 
 # ── Config generation ──────────────────────────────────────────────────────
@@ -297,13 +97,13 @@ def _model_entry(m: dict) -> dict:
     return entry
 
 
-def _collect_models(selected_providers: list[str]) -> list[dict]:
+def _collect_models(selected_providers: list[str], providers: OrderedDict, tiers: list[str]) -> list[dict]:
     """Collect all model_list entries for selected providers, deduped."""
     seen_names: set[str] = set()
     models: list[dict] = []
     for pid in selected_providers:
-        prov = PROVIDERS[pid]
-        for tier in TIERS:
+        prov = providers[pid]
+        for tier in tiers:
             for m in prov["tiers"].get(tier, []):
                 if m["model_name"] not in seen_names:
                     seen_names.add(m["model_name"])
@@ -320,10 +120,11 @@ def _build_fallbacks(
     primary_provider: str,
     fallback_providers: list[str],
     fallback_order: dict[str, list[str]],
+    providers: OrderedDict,
 ) -> list[dict]:
     """Build the fallback chain list for router_settings."""
     fallbacks: list[dict] = []
-    prov = PROVIDERS[primary_provider]
+    prov = providers[primary_provider]
     for tier in primary_tiers:
         tier_models = prov["tiers"].get(tier, [])
         if not tier_models:
@@ -333,7 +134,7 @@ def _build_fallbacks(
         for fpid in fallback_order.get(tier, []):
             if fpid not in fallback_providers:
                 continue
-            fp = PROVIDERS[fpid]
+            fp = providers[fpid]
             for m in fp["tiers"].get(tier, []):
                 if m["model_name"] != primary_name and m["model_name"] not in chain:
                     chain.append(m["model_name"])
@@ -342,30 +143,7 @@ def _build_fallbacks(
     return fallbacks
 
 
-def _render_yaml_value(v, indent=0):
-    """Render a value for YAML output."""
-    prefix = "  " * indent
-    if isinstance(v, dict):
-        lines = []
-        for dk, dv in v.items():
-            if isinstance(dv, (dict, list)):
-                lines.append(f"{prefix}{dk}:")
-                lines.append(_render_yaml_value(dv, indent + 1))
-            else:
-                lines.append(f"{prefix}{dk}: {dv}")
-        return "\n".join(lines)
-    elif isinstance(v, list):
-        lines = []
-        for item in v:
-            lines.append(f"{prefix}- {item}")
-        return "\n".join(lines)
-    elif isinstance(v, bool):
-        return f"{prefix}{str(v).lower()}"
-    else:
-        return f"{prefix}{v}"
-
-
-def _generate_yaml(models: list[dict], fallbacks: list[dict]) -> str:
+def _generate_yaml(models: list[dict], fallbacks: list[dict], defaults: dict) -> str:
     """Render config.yaml as a clean YAML string."""
     lines: list[str] = ["model_list:"]
 
@@ -385,12 +163,11 @@ def _generate_yaml(models: list[dict], fallbacks: list[dict]) -> str:
             else:
                 lines.append(f"      {k}: {v}")
 
+    rs = defaults.get("router_settings", {})
     lines.append("")
     lines.append("router_settings:")
-    lines.append("  num_retries: 2")
-    lines.append("  timeout: 600")
-    lines.append("  retry_after: 5")
-    lines.append("  allowed_fails: 1")
+    for k, v in rs.items():
+        lines.append(f"  {k}: {v}")
 
     if fallbacks:
         lines.append("  fallbacks:")
@@ -402,14 +179,18 @@ def _generate_yaml(models: list[dict], fallbacks: list[dict]) -> str:
                     lines.append(f"          {m},")
                 lines.append("        ]")
 
+    ls = defaults.get("litellm_settings", {})
     lines.append("")
     lines.append("litellm_settings:")
-    lines.append("  drop_params: true")
-    lines.append("  set_verbose: false")
-    lines.append("  request_timeout: 600")
+    for k, v in ls.items():
+        lines.append(f"  {k}: {v}")
+
+    gs = defaults.get("general_settings", {})
     lines.append("")
     lines.append("general_settings:")
-    lines.append("  master_key: os.environ/LITELLM_MASTER_KEY")
+    for k, v in gs.items():
+        lines.append(f"  {k}: {v}")
+
     lines.append("")
     lines.append("environment_variables:")
     lines.append("  # Token dirs & auth files are set in .env (machine-specific paths)")
@@ -421,23 +202,33 @@ def _generate_yaml(models: list[dict], fallbacks: list[dict]) -> str:
 # ── Interactive wizard ─────────────────────────────────────────────────────
 
 def run_wizard():
+    defaults = _load_defaults()
+    tiers = defaults.get("tiers", ["opus", "sonnet", "haiku"])
+    load_order = defaults.get("load_order", [])
+    default_tier_order = defaults.get("fallback_order", {})
+
+    providers = _load_providers(load_order)
+    if not providers:
+        print(_red("No provider templates found in templates/"))
+        sys.exit(1)
+
     print()
     print(_bold("litellmctl config wizard"))
     print(_dim("=" * 50))
 
     # ── Step 1: Primary provider & tiers ──
-    primaries = [(pid, p) for pid, p in PROVIDERS.items() if p["role"] == "primary"]
+    primaries = [(pid, p) for pid, p in providers.items() if p.get("role") == "primary"]
     if len(primaries) == 1:
         primary_id, primary = primaries[0]
         print(f"\n  Primary provider: {_bold(primary['name'])}")
     else:
         print(f"\n{_bold('Primary providers:')}")
         for i, (pid, p) in enumerate(primaries, 1):
-            print(f"  [{i}] {p['name']:<30} {_dim(p['desc'])}")
+            print(f"  [{i}] {p['name']:<30} {_dim(p.get('desc', ''))}")
         idx = _pick_numbers("\nSelect primary provider [1]: ", len(primaries), "1")
         primary_id, primary = primaries[idx[0] if idx else 0]
 
-    available_tiers = [t for t in TIERS if t in primary["tiers"]]
+    available_tiers = [t for t in tiers if t in primary["tiers"]]
     print(f"\n{_bold('Which tiers to expose?')}")
     for i, t in enumerate(available_tiers, 1):
         model_name = primary["tiers"][t][0]["model_name"]
@@ -450,12 +241,12 @@ def run_wizard():
     print(f"  -> {_green(', '.join(selected_tiers))}")
 
     # ── Step 2: Fallback providers ──
-    fallbacks_list = [(pid, p) for pid, p in PROVIDERS.items() if p["role"] == "fallback"]
+    fallbacks_list = [(pid, p) for pid, p in providers.items() if p.get("role") == "fallback"]
     print(f"\n{_bold('Available fallback providers:')}")
     for i, (pid, p) in enumerate(fallbacks_list, 1):
-        auth_label = "OAuth" if p["auth"] == "oauth" else "API key"
-        tiers_avail = ", ".join(t for t in TIERS if t in p["tiers"])
-        print(f"  [{i}] {p['name']:<28} {auth_label:<10} {_dim(p['desc'])}")
+        auth_label = "OAuth" if p.get("auth") == "oauth" else "API key"
+        tiers_avail = ", ".join(t for t in tiers if t in p["tiers"])
+        print(f"  [{i}] {p['name']:<28} {auth_label:<10} {_dim(p.get('desc', ''))}")
         print(f"      {_dim('Tiers: ' + tiers_avail)}")
 
     fb_idx = _pick_numbers(
@@ -467,7 +258,7 @@ def run_wizard():
         if fb_idx is not None
         else [pid for pid, _ in fallbacks_list]
     )
-    selected_fb_names = [PROVIDERS[pid]["name"] for pid in selected_fb_ids]
+    selected_fb_names = [providers[pid]["name"] for pid in selected_fb_ids]
     print(f"  -> {_green(', '.join(selected_fb_names))}")
 
     # ── Step 3: Fallback ordering per tier ──
@@ -476,15 +267,13 @@ def run_wizard():
     print(_dim("  (enter reordered numbers, or press Enter to accept default)"))
 
     for tier in selected_tiers:
-        # Build the default order for this tier from the template
-        default_for_tier = DEFAULT_TIER_ORDER.get(tier, [])
+        default_for_tier = default_tier_order.get(tier, [])
         available_for_tier = [
             pid for pid in default_for_tier
-            if pid in selected_fb_ids and tier in PROVIDERS[pid]["tiers"]
+            if pid in selected_fb_ids and tier in providers[pid]["tiers"]
         ]
-        # Add any selected providers not in the default order
         for pid in selected_fb_ids:
-            if pid not in available_for_tier and tier in PROVIDERS[pid]["tiers"]:
+            if pid not in available_for_tier and tier in providers[pid]["tiers"]:
                 available_for_tier.append(pid)
 
         if not available_for_tier:
@@ -493,8 +282,8 @@ def run_wizard():
 
         print(f"\n  {_bold(tier)}:")
         for i, pid in enumerate(available_for_tier, 1):
-            m = PROVIDERS[pid]["tiers"][tier][0]
-            print(f"    [{i}] {m['model_name']:<40} ({PROVIDERS[pid]['name']})")
+            m = providers[pid]["tiers"][tier][0]
+            print(f"    [{i}] {m['model_name']:<40} ({providers[pid]['name']})")
 
         default_nums = ",".join(str(i) for i in range(1, len(available_for_tier) + 1))
         ans = _ask(f"  Order [{default_nums}]: ", default_nums)
@@ -510,9 +299,9 @@ def run_wizard():
 
     # ── Step 4: Generate ──
     all_selected = [primary_id] + selected_fb_ids
-    models = _collect_models(all_selected)
-    fallbacks = _build_fallbacks(selected_tiers, primary_id, selected_fb_ids, fallback_order)
-    yaml_content = _generate_yaml(models, fallbacks)
+    models = _collect_models(all_selected, providers, tiers)
+    fallbacks = _build_fallbacks(selected_tiers, primary_id, selected_fb_ids, fallback_order, providers)
+    yaml_content = _generate_yaml(models, fallbacks, defaults)
 
     # Summary
     print(f"\n{_bold('Summary')}")
@@ -521,11 +310,10 @@ def run_wizard():
     print(f"  Fallbacks: {', '.join(selected_fb_names)}")
     print(f"  Models:    {len(models)} total")
 
-    # Show env vars / auth commands needed
     env_vars_needed: list[str] = []
     auth_cmds_needed: list[str] = []
     for pid in all_selected:
-        p = PROVIDERS[pid]
+        p = providers[pid]
         env_vars_needed.extend(p.get("env_vars", []))
         if p.get("auth_cmd"):
             auth_cmds_needed.append(p["auth_cmd"])
@@ -539,13 +327,11 @@ def run_wizard():
             print(f"    {cmd}")
     print()
 
-    # Confirm
     ans = _ask("  Write config.yaml? [Y/n]: ", "y")
     if ans.lower().startswith("n"):
         print(_yellow("  Aborted."))
         return
 
-    # Backup and write
     if CONFIG_FILE.exists():
         backup = CONFIG_FILE.with_suffix(".yaml.bak")
         shutil.copy2(CONFIG_FILE, backup)

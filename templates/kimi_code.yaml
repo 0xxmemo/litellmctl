@@ -1,0 +1,16 @@
+name: Kimi Code
+desc: OAuth (device-code) — Allegretto $39/mo
+auth: oauth
+auth_cmd: litellmctl auth kimi
+env_vars: []
+role: fallback
+
+tiers:
+  opus:
+    - model_name: kimi-code/kimi-for-coding
+      model: kimi_code/kimi-for-coding
+  sonnet:
+    - model_name: kimi-code/kimi-for-coding
+      model: kimi_code/kimi-for-coding
+
+extra_models: []

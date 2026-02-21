@@ -1,0 +1,25 @@
+name: MiniMax
+desc: API key — pay-per-use
+auth: api_key
+env_vars:
+  - MINIMAX_API_KEY
+role: fallback
+
+tiers:
+  opus:
+    - model_name: minimax/MiniMax-M2.5-highspeed
+      model: anthropic/MiniMax-M2.5-highspeed
+      api_key: os.environ/MINIMAX_API_KEY
+      api_base: https://api.minimax.io/anthropic
+  sonnet:
+    - model_name: minimax/MiniMax-M2.5-highspeed
+      model: anthropic/MiniMax-M2.5-highspeed
+      api_key: os.environ/MINIMAX_API_KEY
+      api_base: https://api.minimax.io/anthropic
+  haiku:
+    - model_name: minimax/MiniMax-M2.5-highspeed
+      model: anthropic/MiniMax-M2.5-highspeed
+      api_key: os.environ/MINIMAX_API_KEY
+      api_base: https://api.minimax.io/anthropic
+
+extra_models: []

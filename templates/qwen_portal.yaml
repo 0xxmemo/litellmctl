@@ -1,0 +1,16 @@
+name: Qwen Portal
+desc: OAuth (device-code) — Free 1k req/day
+auth: oauth
+auth_cmd: litellmctl auth qwen
+env_vars: []
+role: fallback
+
+tiers:
+  sonnet:
+    - model_name: qwen-cli/qwen3-coder-plus
+      model: qwen_portal/qwen3-coder-plus
+  haiku:
+    - model_name: qwen-cli/qwen3-vl-plus
+      model: qwen_portal/vision-model
+
+extra_models: []

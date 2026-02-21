@@ -236,8 +236,8 @@ router_settings:
     - claude-opus-4-6:
         [
           kimi-code/kimi-for-coding,
-          minimax/MiniMax-M2.5-highspeed,
           dashscope/qwen3.5-plus,
+          minimax/MiniMax-M2.5-highspeed,
           codex/gpt-5.3-codex,
           zai/glm-5,
         ]

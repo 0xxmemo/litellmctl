@@ -1,0 +1,54 @@
+tiers:
+  - opus
+  - sonnet
+  - haiku
+
+# Display / load order in the wizard
+load_order:
+  - anthropic
+  - kimi_code
+  - gemini_cli
+  - qwen_portal
+  - dashscope
+  - chatgpt
+  - minimax
+  - zai
+
+# Per-tier default fallback order (matches the hand-tuned config)
+fallback_order:
+  opus:
+    - kimi_code
+    - dashscope
+    - minimax
+    - chatgpt
+    - gemini_cli
+    - zai
+  sonnet:
+    - kimi_code
+    - qwen_portal
+    - dashscope
+    - chatgpt
+    - gemini_cli
+    - minimax
+    - zai
+  haiku:
+    - qwen_portal
+    - dashscope
+    - chatgpt
+    - gemini_cli
+    - minimax
+    - zai
+
+router_settings:
+  num_retries: 2
+  timeout: 600
+  retry_after: 5
+  allowed_fails: 1
+
+litellm_settings:
+  drop_params: true
+  set_verbose: false
+  request_timeout: 600
+
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY

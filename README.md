@@ -36,8 +36,8 @@ litellmctl wizard
 
 The wizard backs up your existing `config.yaml` before writing. It's re-runnable:
 each invocation regenerates the config from scratch (after backup). Provider
-templates and fallback defaults are kept in `bin/wizard` and update automatically
-with `litellmctl update`.
+templates live in `templates/*.yaml` and update automatically with
+`litellmctl update`. Edit or add YAML files there to customise providers.
 
 ### Manual install (alternative)
 
@@ -121,9 +121,19 @@ authenticating, either:
 ├── bin/
 │   ├── litellmctl      CLI runner (bash, with tab-completion)
 │   ├── auth            OAuth login & refresh (python)
-│   ├── wizard          Config generator with provider templates (python)
+│   ├── wizard          Config wizard, loads templates/ (python)
 │   ├── install         Venv + editable pip install (bash)
 │   └── toggle-claude   Toggle Claude Code between direct API and proxy
+├── templates/          Provider & defaults YAML for the wizard
+│   ├── defaults.yaml   Tiers, fallback order, router/litellm/general settings
+│   ├── anthropic.yaml  Anthropic (Claude) — primary
+│   ├── kimi_code.yaml  Kimi Code — fallback
+│   ├── gemini_cli.yaml Gemini CLI — fallback
+│   ├── qwen_portal.yaml Qwen Portal — fallback
+│   ├── dashscope.yaml  DashScope — fallback
+│   ├── chatgpt.yaml    ChatGPT / Codex — fallback
+│   ├── minimax.yaml    MiniMax — fallback
+│   └── zai.yaml        Z.AI (GLM) — fallback
 ├── litellm/            Git submodule → 0xxmemo/litellm fork
 ├── config.yaml         Proxy model routing, fallbacks, environment vars
 ├── .env                API keys & OAuth secrets (git-ignored)

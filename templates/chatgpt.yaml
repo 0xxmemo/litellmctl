@@ -1,0 +1,41 @@
+name: ChatGPT / Codex
+desc: OAuth (PKCE) — Pro/Max subscription
+auth: oauth
+auth_cmd: litellmctl auth chatgpt
+env_vars: []
+role: fallback
+
+tiers:
+  opus:
+    - model_name: codex/gpt-5.3-codex
+      model: chatgpt/gpt-5.3-codex
+      model_info:
+        mode: responses
+  sonnet:
+    - model_name: codex/gpt-5.3-codex-spark
+      model: chatgpt/gpt-5.3-codex-spark
+      model_info:
+        mode: responses
+  haiku:
+    - model_name: codex/gpt-5.1-codex-mini
+      model: chatgpt/gpt-5.1-codex-mini
+      model_info:
+        mode: responses
+
+extra_models:
+  - model_name: codex/gpt-5.2-codex
+    model: chatgpt/gpt-5.2-codex
+    model_info:
+      mode: responses
+  - model_name: codex/gpt-5.1-codex
+    model: chatgpt/gpt-5.1-codex
+    model_info:
+      mode: responses
+  - model_name: codex/gpt-5.2
+    model: chatgpt/gpt-5.2
+    model_info:
+      mode: responses
+  - model_name: codex/gpt-5.1
+    model: chatgpt/gpt-5.1
+    model_info:
+      mode: responses
