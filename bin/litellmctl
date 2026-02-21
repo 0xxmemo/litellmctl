@@ -4,7 +4,7 @@
 #
 # Usage:
 #   litellmctl <command> [args...]
-#   litellmctl install [--local]    Install, update, or rebuild LiteLLM
+#   litellmctl install              Install, update, or rebuild LiteLLM
 #   litellmctl auth status          Show auth token status
 #   litellmctl start                Start proxy as background service
 #   litellmctl stop                 Stop the proxy service
@@ -60,9 +60,6 @@ _litellmctl_completions() {
     refresh|export)
       COMPREPLY=( $(compgen -W "chatgpt gemini qwen kimi" -- "$cur") )
       return ;;
-    install)
-      COMPREPLY=( $(compgen -W "--local" -- "$cur") )
-      return ;;
     start|proxy)
       COMPREPLY=( $(compgen -W "--port --config" -- "$cur") )
       return ;;
@@ -110,7 +107,6 @@ _litellmctl_completions() {
     case "${words[2]}" in
       auth)    _describe 'auth command' auth_cmds ;;
       refresh|export) compadd chatgpt gemini qwen kimi ;;
-      install) compadd -- --local ;;
       start|proxy) compadd -- --port --config ;;
     esac
   elif (( CURRENT == 4 )); then
@@ -677,7 +673,7 @@ $(printf "\033[1mUsage:\033[0m")  litellmctl <command> [args...]
 
 $(printf "\033[1mCommands:\033[0m")
   wizard               Interactive config.yaml generator (providers, tiers, fallbacks)
-  install [--local]    Install, update, or rebuild LiteLLM
+  install              Install, update, or rebuild LiteLLM
   init-env             Detect auth files and update .env with correct paths
   auth chatgpt         Login to ChatGPT / Codex (browser PKCE)
   auth gemini          Login to Gemini CLI (browser PKCE)

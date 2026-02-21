@@ -6,14 +6,6 @@ PROJECT_DIR="$(cd "$BIN_DIR/.." && pwd)"
 VENV_DIR="$PROJECT_DIR/venv"
 SUBMODULE_DIR="$PROJECT_DIR/litellm"
 
-USE_LOCAL=false
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --local) USE_LOCAL=true; shift ;;
-    *)       shift ;;
-  esac
-done
-
 # ── Helpers ──
 
 info()  { printf "\033[1;34m==> %s\033[0m\n" "$*"; }
@@ -56,10 +48,6 @@ prompt_local_changes() {
 sync_repo() {
   local dir="$1" label="$2"
   if has_local_changes "$dir"; then
-    if $USE_LOCAL; then
-      info "Local changes in $label — skipping sync (--local)."
-      return 0
-    fi
     local choice
     choice=$(prompt_local_changes "$dir" "$label")
     case "$choice" in
@@ -139,41 +127,32 @@ fi
 # ── Submodule ──
 
 if [ ! -f "$SUBMODULE_DIR/pyproject.toml" ]; then
-  if $USE_LOCAL; then
-    error "litellm/ submodule not found and --local was specified. Cannot continue."
-    info "Run without --local to initialize the submodule first."
-    exit 1
-  fi
   info "Initializing litellm submodule ..."
   git -C "$PROJECT_DIR" submodule update --init --depth 1 litellm
 elif has_local_changes "$SUBMODULE_DIR"; then
-  if $USE_LOCAL; then
-    info "Local changes in litellm/ submodule — skipping sync (--local)."
-  else
-    choice=$(prompt_local_changes "$SUBMODULE_DIR" "litellm/ submodule")
-    case "$choice" in
-      keep)
-        info "Keeping local submodule files. Skipping sync."
-        ;;
-      stash)
-        info "Stashing submodule changes ..."
-        git -C "$SUBMODULE_DIR" stash --quiet
-        info "Syncing litellm submodule ..."
-        git -C "$PROJECT_DIR" submodule sync --recursive
-        git -C "$PROJECT_DIR" submodule update --init --depth 1 --force litellm
-        info "Restoring stashed submodule changes ..."
-        git -C "$SUBMODULE_DIR" stash pop --quiet 2>/dev/null || {
-          warn "Could not auto-restore submodule changes. Check: git -C $SUBMODULE_DIR stash list"
-        }
-        ;;
-      discard)
-        warn "Discarding local submodule changes."
-        info "Syncing litellm submodule ..."
-        git -C "$PROJECT_DIR" submodule sync --recursive
-        git -C "$PROJECT_DIR" submodule update --init --depth 1 --force litellm
-        ;;
-    esac
-  fi
+  choice=$(prompt_local_changes "$SUBMODULE_DIR" "litellm/ submodule")
+  case "$choice" in
+    keep)
+      info "Keeping local submodule files. Skipping sync."
+      ;;
+    stash)
+      info "Stashing submodule changes ..."
+      git -C "$SUBMODULE_DIR" stash --quiet
+      info "Syncing litellm submodule ..."
+      git -C "$PROJECT_DIR" submodule sync --recursive
+      git -C "$PROJECT_DIR" submodule update --init --depth 1 --force litellm
+      info "Restoring stashed submodule changes ..."
+      git -C "$SUBMODULE_DIR" stash pop --quiet 2>/dev/null || {
+        warn "Could not auto-restore submodule changes. Check: git -C $SUBMODULE_DIR stash list"
+      }
+      ;;
+    discard)
+      warn "Discarding local submodule changes."
+      info "Syncing litellm submodule ..."
+      git -C "$PROJECT_DIR" submodule sync --recursive
+      git -C "$PROJECT_DIR" submodule update --init --depth 1 --force litellm
+      ;;
+  esac
 else
   info "Syncing litellm submodule ..."
   git -C "$PROJECT_DIR" submodule sync --recursive
