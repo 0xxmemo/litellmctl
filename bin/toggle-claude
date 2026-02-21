@@ -5,6 +5,16 @@ PROJECT_DIR="$(cd "$BIN_DIR/.." && pwd)"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 PORT_FILE="$PROJECT_DIR/.proxy-port"
 
+if ! command -v jq &>/dev/null; then
+  echo "ERROR: jq is required but not installed."
+  case "$(uname -s)" in
+    Darwin) echo "  brew install jq" ;;
+    Linux)  echo "  sudo apt install jq  (Debian/Ubuntu)"
+            echo "  sudo dnf install jq  (Fedora/RHEL)" ;;
+  esac
+  exit 1
+fi
+
 # Load master key from .env
 if [ -f "$PROJECT_DIR/.env" ]; then
   LITELLM_AUTH_TOKEN=$(grep -E '^LITELLM_MASTER_KEY=' "$PROJECT_DIR/.env" | cut -d'=' -f2-)
@@ -29,11 +39,14 @@ CURRENT_BASE_URL=$(jq -r '.env.ANTHROPIC_BASE_URL // ""' "$SETTINGS_FILE")
 
 if echo "$CURRENT_BASE_URL" | grep -q "127.0.0.1"; then
   echo "Switching Claude Code to use Direct Anthropic API (via OAuth)..."
-  # Remove the entire env object
-  jq 'del(.env)' "$SETTINGS_FILE" > tmp.$$.json && mv tmp.$$.json "$SETTINGS_FILE"
+  local tmpf
+  tmpf=$(mktemp "${SETTINGS_FILE}.XXXXXX")
+  jq 'del(.env)' "$SETTINGS_FILE" > "$tmpf" && mv "$tmpf" "$SETTINGS_FILE"
   echo "Claude Code now configured for Direct Anthropic API (OAuth)."
 else
   echo "Switching Claude Code to use LiteLLM Proxy (port $PROXY_PORT)..."
+  local tmpf
+  tmpf=$(mktemp "${SETTINGS_FILE}.XXXXXX")
   jq --arg base "$LITELLM_BASE_URL" --arg key "$LITELLM_AUTH_TOKEN" \
     '.env = {
       "ANTHROPIC_BASE_URL":              $base,
@@ -41,7 +54,7 @@ else
       "ANTHROPIC_DEFAULT_OPUS_MODEL":    "claude-opus-4-6",
       "ANTHROPIC_DEFAULT_SONNET_MODEL":  "claude-sonnet-4-5-20250929",
       "ANTHROPIC_DEFAULT_HAIKU_MODEL":   "claude-haiku-4-5-20251001"
-    }' "$SETTINGS_FILE" > tmp.$$.json && mv tmp.$$.json "$SETTINGS_FILE"
+    }' "$SETTINGS_FILE" > "$tmpf" && mv "$tmpf" "$SETTINGS_FILE"
   echo "Claude Code now configured for LiteLLM Proxy at $LITELLM_BASE_URL."
   echo "  Opus:   claude-opus-4-6"
   echo "  Sonnet: claude-sonnet-4-5-20250929"

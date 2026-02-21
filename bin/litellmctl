@@ -151,16 +151,31 @@ get_proxy_port() {
   fi
 }
 
+is_interactive() { [ -t 0 ]; }
+
+# Portable PID lookup for a listening port — works on Linux without lsof.
+_pids_on_port() {
+  local port="$1"
+  if command -v lsof &>/dev/null; then
+    lsof -i :"$port" -t 2>/dev/null || true
+  elif command -v ss &>/dev/null; then
+    ss -tlnp "sport = :$port" 2>/dev/null \
+      | grep -oP 'pid=\K[0-9]+' 2>/dev/null || true
+  elif command -v fuser &>/dev/null; then
+    fuser "$port/tcp" 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$' || true
+  fi
+}
+
 find_proxy_pid() {
   local port
   port=$(get_proxy_port)
-  lsof -i :"$port" -t 2>/dev/null | head -1 || true
+  _pids_on_port "$port" | head -1
 }
 
 kill_stale_on_port() {
   local port="$1"
   local pids
-  pids=$(lsof -i :"$port" -t 2>/dev/null || true)
+  pids=$(_pids_on_port "$port")
   if [ -n "$pids" ]; then
     local count
     count=$(echo "$pids" | wc -l | tr -d ' ')
@@ -307,6 +322,14 @@ UNIT
   info "Installed systemd user service ($SYSTEMD_UNIT)"
   info "Proxy starting on port $port (auto-starts on login)"
   info "Logs: $LOG_DIR/proxy.log"
+
+  # Enable lingering so the service survives logout (requires loginctl).
+  if command -v loginctl &>/dev/null; then
+    if ! loginctl show-user "$USER" --property=Linger 2>/dev/null | grep -q "yes"; then
+      warn "Enabling loginctl linger for $USER (keeps service running after logout)"
+      loginctl enable-linger "$USER" 2>/dev/null || true
+    fi
+  fi
 }
 
 systemd_stop() {
@@ -327,7 +350,15 @@ systemd_uninstall() {
 }
 
 has_systemd_user() {
-  systemctl --user status >/dev/null 2>&1
+  # systemctl --user requires a dbus session bus and XDG_RUNTIME_DIR.
+  # Without these, the command hangs on headless Linux / SSH / containers.
+  [ -n "${XDG_RUNTIME_DIR:-}" ] || return 1
+  command -v systemctl &>/dev/null || return 1
+  if command -v timeout &>/dev/null; then
+    timeout 5 systemctl --user status >/dev/null 2>&1
+  else
+    systemctl --user status >/dev/null 2>&1
+  fi
 }
 
 # ── Service: nohup fallback (servers without systemd user bus) ─────────────
@@ -427,12 +458,16 @@ cmd_install() {
   if [ -n "$(find_proxy_pid)" ]; then running=true; fi
 
   if $running; then
-    printf "\n  Proxy is running. Restart now? [Y/n] "
-    read -r answer
-    case "$answer" in
-      [nN]*) info "Skipped restart. Run 'litellmctl restart' when ready." ;;
-      *)     cmd_restart ;;
-    esac
+    if is_interactive; then
+      printf "\n  Proxy is running. Restart now? [Y/n] "
+      read -r answer </dev/tty || answer="n"
+      case "$answer" in
+        [nN]*) info "Skipped restart. Run 'litellmctl restart' when ready." ;;
+        *)     cmd_restart ;;
+      esac
+    else
+      info "Proxy is running. Run 'litellmctl restart' to apply changes."
+    fi
   fi
 }
 
