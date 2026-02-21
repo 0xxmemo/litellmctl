@@ -4,11 +4,11 @@
 #
 # Usage:
 #   litellmctl <command> [args...]
-#   litellmctl install              Run the installer
+#   litellmctl install [--local]    Install, update, or rebuild LiteLLM
 #   litellmctl auth status          Show auth token status
 #   litellmctl start                Start proxy as background service
 #   litellmctl stop                 Stop the proxy service
-#   litellmctl restart              Restart the proxy service
+#   litellmctl restart | r          Restart the proxy service
 #   litellmctl logs                 Tail proxy logs
 #   litellmctl proxy                Start proxy in foreground (debug)
 #   litellmctl help                 Show this help
@@ -47,7 +47,7 @@ _litellmctl_completions() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  commands="auth wizard install update init-env start stop restart logs proxy status toggle-claude setup-completions help"
+  commands="auth wizard install init-env start stop restart r logs proxy status toggle-claude setup-completions help"
   auth_cmds="chatgpt gemini qwen kimi codex status refresh export import"
 
   case "$prev" in
@@ -59,6 +59,9 @@ _litellmctl_completions() {
       return ;;
     refresh|export)
       COMPREPLY=( $(compgen -W "chatgpt gemini qwen kimi" -- "$cur") )
+      return ;;
+    install)
+      COMPREPLY=( $(compgen -W "--local" -- "$cur") )
       return ;;
     start|proxy)
       COMPREPLY=( $(compgen -W "--port --config" -- "$cur") )
@@ -76,12 +79,12 @@ _litellmctl_completions() {
   commands=(
     'auth:Manage OAuth tokens'
     'wizard:Interactive config.yaml generator'
-    'install:Install/reinstall LiteLLM'
-    'update:Pull latest, sync submodule, rebuild'
+    'install:Install, update, or rebuild LiteLLM'
     'init-env:Detect auth files and update .env paths'
     'start:Start proxy as background service'
     'stop:Stop the proxy service'
     'restart:Restart the proxy service'
+    'r:Alias for restart'
     'logs:Tail proxy logs'
     'proxy:Start proxy in foreground (debug)'
     'status:Show auth + proxy status'
@@ -107,6 +110,7 @@ _litellmctl_completions() {
     case "${words[2]}" in
       auth)    _describe 'auth command' auth_cmds ;;
       refresh|export) compadd chatgpt gemini qwen kimi ;;
+      install) compadd -- --local ;;
       start|proxy) compadd -- --port --config ;;
     esac
   elif (( CURRENT == 4 )); then
@@ -417,7 +421,23 @@ eval "$(~/.litellm/bin/litellmctl --completions)"'
 }
 
 cmd_install() {
-  exec "$BIN_DIR/install" "$@"
+  "$BIN_DIR/install" "$@"
+
+  # Ask to restart if service is running
+  local running=false
+  if is_macos && launchd_is_running; then running=true; fi
+  if is_linux && systemd_is_running; then running=true; fi
+  if nohup_is_running; then running=true; fi
+  if [ -n "$(find_proxy_pid)" ]; then running=true; fi
+
+  if $running; then
+    printf "\n  Proxy is running. Restart now? [Y/n] "
+    read -r answer
+    case "$answer" in
+      [nN]*) info "Skipped restart. Run 'litellmctl restart' when ready." ;;
+      *)     cmd_restart ;;
+    esac
+  fi
 }
 
 cmd_auth() {
@@ -522,86 +542,6 @@ cmd_proxy() {
     exec litellm --config "$config" --port "$port" "${extra_args[@]}"
   else
     exec litellm --config "$config" --port "$port"
-  fi
-}
-
-cmd_update() {
-  if [ ! -d "$PROJECT_DIR/.git" ]; then
-    error "$PROJECT_DIR is not a git repo."
-    info "Clone first: git clone https://github.com/0xxmemo/litellmctl.git ~/.litellm"
-    exit 1
-  fi
-
-  # Stash local changes so pull always works
-  local stashed=false
-  if ! git -C "$PROJECT_DIR" diff --quiet 2>/dev/null; then
-    git -C "$PROJECT_DIR" stash --quiet
-    stashed=true
-  fi
-
-  info "Pulling latest ..."
-  git -C "$PROJECT_DIR" pull --ff-only || { error "Pull failed. Check git status."; exit 1; }
-
-  # Offer to adopt upstream config.yaml
-  if $stashed; then
-    # Check if config.yaml has upstream changes vs local
-    local upstream_config
-    upstream_config=$(git -C "$PROJECT_DIR" show HEAD:config.yaml 2>/dev/null || true)
-
-    if [ -n "$upstream_config" ]; then
-      local local_config
-      local_config=$(git -C "$PROJECT_DIR" stash show -p 2>/dev/null | grep "^[+-]" | head -1 || true)
-
-      if [ -n "$local_config" ]; then
-        echo ""
-        printf "  Update config.yaml from upstream? [y/N] "
-        read -r answer
-        case "$answer" in
-          [yY]*)
-            # Back up current config before applying upstream
-            cp "$PROJECT_DIR/config.yaml" "$PROJECT_DIR/config.yaml.bak"
-            info "Backed up config.yaml → config.yaml.bak"
-            # Drop the stash (use upstream version)
-            git -C "$PROJECT_DIR" stash drop --quiet 2>/dev/null || true
-            stashed=false
-            info "Config updated from upstream."
-            ;;
-          *)
-            info "Keeping your local config."
-            ;;
-        esac
-      fi
-    fi
-
-    # Restore local changes if we didn't drop the stash
-    if $stashed; then
-      git -C "$PROJECT_DIR" stash pop --quiet 2>/dev/null || {
-        warn "Could not auto-restore local changes. Check: git -C $PROJECT_DIR stash list"
-      }
-    fi
-  fi
-
-  info "Syncing litellm submodule ..."
-  git -C "$PROJECT_DIR" submodule sync --recursive
-  git -C "$PROJECT_DIR" submodule update --init --depth 1 --force || { error "Submodule sync failed"; exit 1; }
-
-  # Shared install logic (venv, pip, .env, init-env, completions)
-  "$BIN_DIR/install"
-
-  # Ask to restart if service is running
-  local running=false
-  if is_macos && launchd_is_running; then running=true; fi
-  if is_linux && systemd_is_running; then running=true; fi
-  if nohup_is_running; then running=true; fi
-  if [ -n "$(find_proxy_pid)" ]; then running=true; fi
-
-  if $running; then
-    printf "\n  Proxy is running. Restart now? [Y/n] "
-    read -r answer
-    case "$answer" in
-      [nN]*) info "Skipped restart. Run 'litellmctl restart' when ready." ;;
-      *)     cmd_restart ;;
-    esac
   fi
 }
 
@@ -737,8 +677,7 @@ $(printf "\033[1mUsage:\033[0m")  litellmctl <command> [args...]
 
 $(printf "\033[1mCommands:\033[0m")
   wizard               Interactive config.yaml generator (providers, tiers, fallbacks)
-  install              Install / reinstall LiteLLM fork
-  update               Pull latest, sync submodule, rebuild & restart
+  install [--local]    Install, update, or rebuild LiteLLM
   init-env             Detect auth files and update .env with correct paths
   auth chatgpt         Login to ChatGPT / Codex (browser PKCE)
   auth gemini          Login to Gemini CLI (browser PKCE)
@@ -750,7 +689,7 @@ $(printf "\033[1mCommands:\033[0m")
   auth status          Show auth token status
   start [--port N]     Start proxy as background service (auto-start on boot)
   stop                 Stop the proxy service
-  restart              Restart the proxy service
+  restart | r          Restart the proxy service
   logs                 Tail proxy logs
   proxy [--port N]     Start proxy in foreground (for debugging)
   uninstall-service    Remove the system service
@@ -779,12 +718,12 @@ case "$1" in
   --zsh-completions) generate_zsh_completions; exit 0 ;;
   wizard)            shift; cmd_wizard "$@" ;;
   install)           shift; cmd_install "$@" ;;
-  update)            shift; cmd_update ;;
+  update)            warn "'update' has been folded into 'install'."; info "Run: litellmctl install [--local]"; exit 0 ;;
   init-env)          shift; cmd_init_env ;;
   auth)              shift; cmd_auth "$@" ;;
   start)             shift; cmd_start "$@" ;;
   stop)              shift; cmd_stop ;;
-  restart)           shift; cmd_restart ;;
+  restart|r)         shift; cmd_restart ;;
   logs)              shift; cmd_logs ;;
   proxy)             shift; cmd_proxy "$@" ;;
   uninstall-service) shift; cmd_uninstall_service ;;
