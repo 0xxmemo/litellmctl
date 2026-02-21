@@ -188,6 +188,19 @@ kill_stale_on_port() {
 is_macos() { [[ "$(uname -s)" == "Darwin" ]]; }
 is_linux() { [[ "$(uname -s)" == "Linux" ]]; }
 
+# Build extra CLI flags from env vars (NUM_WORKERS, KEEPALIVE_TIMEOUT).
+_perf_flags() {
+  local flags=()
+  local workers="${NUM_WORKERS:-1}"
+  if [ "$workers" -gt 1 ] 2>/dev/null; then
+    flags+=(--num_workers "$workers")
+  fi
+  if [ -n "${KEEPALIVE_TIMEOUT:-}" ]; then
+    flags+=(--keepalive_timeout "$KEEPALIVE_TIMEOUT")
+  fi
+  echo "${flags[@]}"
+}
+
 ensure_log_dir() {
   mkdir -p "$LOG_DIR"
 }
@@ -212,6 +225,19 @@ launchd_install() {
     done < "$PROJECT_DIR/.env"
   fi
 
+  local perf_args=""
+  local workers="${NUM_WORKERS:-1}"
+  if [ "$workers" -gt 1 ] 2>/dev/null; then
+    perf_args="${perf_args}    <string>--num_workers</string>
+    <string>${workers}</string>
+"
+  fi
+  if [ -n "${KEEPALIVE_TIMEOUT:-}" ]; then
+    perf_args="${perf_args}    <string>--keepalive_timeout</string>
+    <string>${KEEPALIVE_TIMEOUT}</string>
+"
+  fi
+
   cat > "$LAUNCHD_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -226,7 +252,7 @@ launchd_install() {
     <string>${config}</string>
     <string>--port</string>
     <string>${port}</string>
-  </array>
+${perf_args}  </array>
   <key>WorkingDirectory</key>
   <string>${PROJECT_DIR}</string>
   <key>EnvironmentVariables</key>
@@ -299,7 +325,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=${PROJECT_DIR}
-ExecStart=${VENV_DIR}/bin/litellm --config ${config} --port ${port}
+ExecStart=${VENV_DIR}/bin/litellm --config ${config} --port ${port} $(_perf_flags)
 Restart=on-failure
 RestartSec=5
 
@@ -377,7 +403,8 @@ nohup_start() {
 
   echo "$port" > "$PORT_FILE"
 
-  nohup "$VENV_DIR/bin/litellm" --config "$config" --port "$port" \
+  # shellcheck disable=SC2046
+  nohup "$VENV_DIR/bin/litellm" --config "$config" --port "$port" $(_perf_flags) \
     >> "$LOG_DIR/proxy.log" 2>> "$LOG_DIR/proxy-error.log" &
   local pid=$!
   echo "$pid" > "$PIDFILE"
@@ -480,6 +507,7 @@ cmd_auth() {
 }
 
 cmd_start() {
+  load_env
   local port=4000
   local config="$PROJECT_DIR/config.yaml"
 
@@ -513,6 +541,7 @@ cmd_stop() {
 }
 
 cmd_restart() {
+  load_env
   info "Restarting proxy ..."
   local port config
   port=$(get_proxy_port)
@@ -571,10 +600,11 @@ cmd_proxy() {
   echo "$port" > "$PORT_FILE"
 
   info "Starting LiteLLM proxy on port $port (foreground) ..."
+  # shellcheck disable=SC2046
   if [ ${#extra_args[@]} -gt 0 ]; then
-    exec litellm --config "$config" --port "$port" "${extra_args[@]}"
+    exec litellm --config "$config" --port "$port" $(_perf_flags) "${extra_args[@]}"
   else
-    exec litellm --config "$config" --port "$port"
+    exec litellm --config "$config" --port "$port" $(_perf_flags)
   fi
 }
 

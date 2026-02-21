@@ -67,10 +67,11 @@ prompt_local_changes() {
     return
   fi
 
-  printf "  [K]eep local  [S]tash & sync  [D]iscard & sync  [K/s/d] " >&2
+  printf "  [K]eep local  [S]tash & sync  [R]ebase  [D]iscard & sync  [K/s/r/d] " >&2
   read -r answer </dev/tty || answer=""
   case "$answer" in
     [sS]*) echo "stash" ;;
+    [rR]*) echo "rebase" ;;
     [dD]*) echo "discard" ;;
     *)     echo "keep" ;;
   esac
@@ -95,6 +96,11 @@ sync_repo() {
         git -C "$dir" stash pop --quiet 2>/dev/null || {
           warn "Could not auto-restore $label changes. Check: git -C $dir stash list"
         }
+        ;;
+      rebase)
+        info "Rebasing $label onto remote ..."
+        run_with_timeout 60 git -C "$dir" pull --rebase --no-recurse-submodules \
+          || { error "Rebase failed for $label. Resolve conflicts, then re-run."; exit 1; }
         ;;
       discard)
         warn "Discarding local $label changes."
@@ -202,6 +208,12 @@ elif has_local_changes "$SUBMODULE_DIR"; then
       git -C "$SUBMODULE_DIR" stash pop --quiet 2>/dev/null || {
         warn "Could not auto-restore submodule changes. Check: git -C $SUBMODULE_DIR stash list"
       }
+      ;;
+    rebase)
+      info "Rebasing submodule onto updated HEAD ..."
+      run_with_timeout 30 git -C "$PROJECT_DIR" submodule sync --recursive
+      run_with_timeout 120 git -C "$PROJECT_DIR" submodule update --init --depth 1 --rebase litellm \
+        || { error "Submodule rebase failed. Resolve conflicts in $SUBMODULE_DIR, then re-run."; exit 1; }
       ;;
     discard)
       warn "Discarding local submodule changes."

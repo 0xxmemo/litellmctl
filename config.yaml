@@ -228,10 +228,11 @@ model_list:
       timeout: 600
 
 router_settings:
-  num_retries: 2
+  num_retries: 1
   timeout: 600
-  retry_after: 5
-  allowed_fails: 1
+  retry_after: 2
+  allowed_fails: 2
+  cooldown_time: 30
   fallbacks:
     - claude-opus-4-6:
         [
@@ -263,6 +264,10 @@ litellm_settings:
   drop_params: true
   set_verbose: false
   request_timeout: 600
+  cache: true
+  cache_params:
+    type: local
+    ttl: 600
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
