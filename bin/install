@@ -48,22 +48,26 @@ has_local_changes() {
 
 prompt_local_changes() {
   local dir="$1" label="$2"
-  echo ""
-  warn "Local changes detected in $label:"
-  git -C "$dir" diff --stat 2>/dev/null
-  git -C "$dir" diff --cached --stat 2>/dev/null
-  local ahead
-  ahead=$(git -C "$dir" rev-list --count @{u}..HEAD 2>/dev/null || echo "0")
-  [ "$ahead" -gt 0 ] && info "$ahead unpushed commit(s) ahead of remote"
-  echo ""
+  # This function is called inside $() which captures stdout.
+  # Display output goes to stderr; only the result word goes to stdout.
+  {
+    echo ""
+    warn "Local changes detected in $label:"
+    git -C "$dir" diff --stat 2>/dev/null || true
+    git -C "$dir" diff --cached --stat 2>/dev/null || true
+    local ahead
+    ahead=$(git -C "$dir" rev-list --count @{u}..HEAD 2>/dev/null || echo "0")
+    [ "$ahead" -gt 0 ] && info "$ahead unpushed commit(s) ahead of remote"
+    echo ""
+  } >&2
 
   if ! is_interactive; then
-    warn "Non-interactive terminal — defaulting to [K]eep local."
+    warn "Non-interactive terminal — defaulting to [K]eep local." >&2
     echo "keep"
     return
   fi
 
-  printf "  [K]eep local  [S]tash & sync  [D]iscard & sync  [K/s/d] "
+  printf "  [K]eep local  [S]tash & sync  [D]iscard & sync  [K/s/d] " >&2
   read -r answer </dev/tty || answer=""
   case "$answer" in
     [sS]*) echo "stash" ;;
