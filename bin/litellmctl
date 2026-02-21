@@ -531,6 +531,8 @@ cmd_start() {
 }
 
 cmd_stop() {
+  local port
+  port=$(get_proxy_port)
   if is_macos && launchd_is_running; then
     launchd_stop
   elif is_linux && systemd_is_running; then
@@ -538,6 +540,7 @@ cmd_stop() {
   else
     nohup_stop
   fi
+  kill_stale_on_port "$port"
 }
 
 cmd_restart() {
@@ -549,17 +552,22 @@ cmd_restart() {
 
   if is_macos && launchd_is_running; then
     launchd_stop
-    sleep 1
-    kill_stale_on_port "$port"
-    launchd_install "$port" "$config"
   elif is_linux && systemd_is_running; then
-    systemctl --user restart "$SYSTEMD_UNIT"
-    kill_stale_on_port "$port"
-    info "Restarted."
+    systemctl --user stop "$SYSTEMD_UNIT" 2>/dev/null || true
   else
     nohup_stop
-    sleep 1
-    kill_stale_on_port "$port"
+  fi
+
+  sleep 1
+  kill_stale_on_port "$port"
+
+  if is_macos; then
+    launchd_install "$port" "$config"
+  elif is_linux && has_systemd_user; then
+    systemctl --user daemon-reload
+    systemctl --user start "$SYSTEMD_UNIT"
+    info "Restarted."
+  else
     nohup_start "$port" "$config"
   fi
 }
