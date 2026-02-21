@@ -531,21 +531,15 @@ cmd_update() {
     exit 1
   fi
 
-  info "Pulling latest config ..."
-  git -C "$PROJECT_DIR" pull --ff-only || { error "Config pull failed"; exit 1; }
+  info "Pulling latest ..."
+  git -C "$PROJECT_DIR" pull --ff-only || { error "Pull failed (local changes?). Stash or commit first."; exit 1; }
 
   info "Syncing litellm submodule ..."
   git -C "$PROJECT_DIR" submodule sync --recursive
-  git -C "$PROJECT_DIR" submodule update --init --force || { error "Submodule sync failed"; exit 1; }
+  git -C "$PROJECT_DIR" submodule update --init --depth 1 --force || { error "Submodule sync failed"; exit 1; }
 
-  info "Reinstalling litellm fork ..."
-  activate_venv
-  pip install -e "$PROJECT_DIR/litellm" --quiet || { error "pip install failed"; exit 1; }
-
-  info "Update complete."
-
-  # Ensure shell completions are set up
-  cmd_setup_completions 2>/dev/null || true
+  # Shared install logic (venv, pip, .env, init-env, completions)
+  "$BIN_DIR/install"
 
   # Ask to restart if service is running
   local running=false

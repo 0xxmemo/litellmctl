@@ -24,18 +24,22 @@ confirm() {
 }
 
 detect_python() {
-  if command -v python3 &>/dev/null; then
-    echo "python3"
-  elif command -v python &>/dev/null; then
-    echo "python"
-  else
-    error "Python 3 not found. Please install Python 3.9+ first."
-    case "$OSTYPE" in
-      darwin*) echo "  brew install python3" ;;
-      linux*)  echo "  sudo apt install python3 python3-venv" ;;
-    esac
-    exit 1
-  fi
+  for cmd in python3 python; do
+    if command -v "$cmd" &>/dev/null; then
+      local ver
+      ver=$("$cmd" -c 'import sys; print(sys.version_info[:2] >= (3,9))' 2>/dev/null || echo "False")
+      if [ "$ver" = "True" ]; then
+        echo "$cmd"
+        return
+      fi
+    fi
+  done
+  error "Python 3.9+ not found."
+  case "$OSTYPE" in
+    darwin*) echo "  brew install python3" ;;
+    linux*)  echo "  sudo apt install python3 python3-venv" ;;
+  esac
+  exit 1
 }
 
 # ── Platform checks ──
@@ -49,11 +53,14 @@ echo "  Platform: $OSTYPE"
 echo "  Python:   $PY_VERSION ($PYTHON)"
 echo ""
 
-# On Ubuntu/Debian, python3-venv may not be installed
 if [[ "$OSTYPE" == linux* ]]; then
   if ! $PYTHON -c "import venv" 2>/dev/null; then
-    warn "python3-venv not found. Installing ..."
+    warn "python3-venv not found — installing ..."
     sudo apt-get update -qq && sudo apt-get install -y -qq python3-venv
+  fi
+  if ! $PYTHON -c "import ensurepip" 2>/dev/null; then
+    warn "python3-pip/ensurepip not found — installing ..."
+    sudo apt-get update -qq && sudo apt-get install -y -qq python3-pip
   fi
 fi
 
@@ -67,14 +74,12 @@ fi
 # ── Virtualenv ──
 
 if [ -d "$VENV_DIR" ]; then
-  warn "Existing virtualenv found at $VENV_DIR"
-  if confirm "  Replace it with a fresh build?"; then
-    info "Removing old virtualenv ..."
+  if [ "${LITELLM_REINSTALL_VENV:-}" = "1" ]; then
+    info "Rebuilding virtualenv ..."
     rm -rf "$VENV_DIR"
-    info "Creating new virtualenv ..."
     $PYTHON -m venv "$VENV_DIR"
   else
-    info "Keeping existing virtualenv."
+    info "Reusing existing virtualenv."
   fi
 else
   info "Creating virtualenv at $VENV_DIR ..."
@@ -89,18 +94,29 @@ source "$VENV_DIR/bin/activate"
 # ── Install dependencies ──
 
 info "Upgrading pip ..."
-pip install --upgrade pip --quiet
+pip install --upgrade pip --quiet 2>/dev/null
 
-info "Installing litellm[proxy] from local submodule (editable) ..."
-pip install -e "$SUBMODULE_DIR[proxy]"
+info "Installing litellm[proxy] (editable) ..."
+pip install -e "$SUBMODULE_DIR[proxy]" --quiet 2>/dev/null
+info "litellm installed."
 
-# ── Post-install checks ──
+# ── .env setup ──
 
 if [ ! -f "$PROJECT_DIR/.env" ]; then
-  echo ""
-  warn "No .env file found. Copy the example and fill in your keys:"
-  echo "  cp $PROJECT_DIR/.env.example $PROJECT_DIR/.env"
+  if [ -f "$PROJECT_DIR/.env.example" ]; then
+    cp "$PROJECT_DIR/.env.example" "$PROJECT_DIR/.env"
+    sed -i.bak "s|/path/to/.litellm|$PROJECT_DIR|g" "$PROJECT_DIR/.env" 2>/dev/null || true
+    rm -f "$PROJECT_DIR/.env.bak"
+    warn "Created .env from template — edit to add your API keys"
+  else
+    warn "No .env file found. Copy the example and fill in your keys:"
+    echo "  cp $PROJECT_DIR/.env.example $PROJECT_DIR/.env"
+  fi
 fi
+
+# ── Sync auth file paths ──
+
+"$BIN_DIR/litellmctl" init-env 2>/dev/null || true
 
 # ── Shell completions ──
 
@@ -108,8 +124,4 @@ fi
 
 echo ""
 info "Installation complete!"
-echo ""
-echo "  To start the proxy:"
-echo "    source $VENV_DIR/bin/activate"
-echo "    litellm --config $PROJECT_DIR/config.yaml"
 echo ""
