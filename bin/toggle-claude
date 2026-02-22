@@ -52,13 +52,13 @@ else
       "ANTHROPIC_BASE_URL":              $base,
       "ANTHROPIC_AUTH_TOKEN":             $key,
       "ANTHROPIC_DEFAULT_OPUS_MODEL":    "claude-opus-4-6",
-      "ANTHROPIC_DEFAULT_SONNET_MODEL":  "claude-sonnet-4-5-20250929",
-      "ANTHROPIC_DEFAULT_HAIKU_MODEL":   "claude-haiku-4-5-20251001"
+      "ANTHROPIC_DEFAULT_SONNET_MODEL":  "claude-sonnet-4-5",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL":   "claude-haiku-4-5"
     }' "$SETTINGS_FILE" > "$tmpf" && mv "$tmpf" "$SETTINGS_FILE"
   echo "Claude Code now configured for LiteLLM Proxy at $LITELLM_BASE_URL."
   echo "  Opus:   claude-opus-4-6"
-  echo "  Sonnet: claude-sonnet-4-5-20250929"
-  echo "  Haiku:  claude-haiku-4-5-20251001"
+  echo "  Sonnet: claude-sonnet-4-5"
+  echo "  Haiku:  claude-haiku-4-5"
 fi
 
 echo "Remember to restart Claude Code for changes to take full effect."
