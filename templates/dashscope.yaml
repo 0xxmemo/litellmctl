@@ -1,0 +1,25 @@
+name: Alibaba Cloud Coding Plan
+desc: API key — OpenAI-compatible (via qwen-code CLI setup)
+auth: api_key
+env_vars:
+  - DASHSCOPE_API_KEY
+role: fallback
+
+tiers:
+  opus:
+    - model_name: dashscope/qwen3.5-plus
+      model: openai/qwen3.5-plus
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://coding-intl.dashscope.aliyuncs.com/v1
+  sonnet:
+    - model_name: dashscope/qwen3-coder-plus
+      model: openai/qwen3-coder-plus
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://coding-intl.dashscope.aliyuncs.com/v1
+  haiku:
+    - model_name: dashscope/qwen3-max
+      model: openai/qwen3-max
+      api_key: os.environ/DASHSCOPE_API_KEY
+      api_base: https://coding-intl.dashscope.aliyuncs.com/v1
+
+extra_models: []
