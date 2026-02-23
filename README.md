@@ -130,7 +130,7 @@ authenticating, either:
 │   ├── kimi_code.yaml  Kimi Code — fallback
 │   ├── gemini_cli.yaml Gemini CLI — fallback
 │   ├── qwen_portal.yaml Qwen Portal — fallback
-│   ├── dashscope.yaml  DashScope — fallback
+
 │   ├── chatgpt.yaml    ChatGPT / Codex — fallback
 │   ├── minimax.yaml    MiniMax — fallback
 │   └── zai.yaml        Z.AI (GLM) — fallback
@@ -150,14 +150,14 @@ authenticating, either:
 
 Three consumer-facing models, each with a tiered fallback chain:
 
-| Model               | Fallback 1 (Qwen Portal) | Fallback 2 (DashScope)       | Fallback 3 (Codex)          | Fallback 4 (Gemini)                | Fallback 5 (Z.AI)   |
-| ------------------- | ------------------------ | ---------------------------- | --------------------------- | ---------------------------------- | ------------------- |
-| `claude-opus-4-6`   | `qwen/qwen3-coder-plus`  | `dashscope/qwen3-coder-plus` | `codex/gpt-5.3-codex`       | `gemini-cli/gemini-2.5-flash-lite` | `zai/glm-5`         |
-| `claude-sonnet-4-5` | `qwen/qwen3-coder-plus`  | `dashscope/qwen3-coder-plus` | `codex/gpt-5.3-codex-spark` | `gemini-cli/gemini-2.5-flash-lite` | `zai/glm-4.5-air`   |
-| `claude-haiku-4-5`  | `qwen/qwen3-vl-plus`     | `dashscope/qwen3-coder-plus` | `codex/gpt-5.1-codex-mini`  | `gemini-cli/gemini-2.5-flash-lite` | `zai/glm-4.5-flash` |
+| Model               | Fallback 1 (Codex)          | Fallback 2 (Kimi Code)         | Fallback 3 (MiniMax)                | Fallback 4 (Z.AI)   |
+| ------------------- | --------------------------- | ------------------------------ | ----------------------------------- | ------------------- |
+| `claude-opus-4-6`   | `codex/gpt-5.3-codex`       | `kimi-code/kimi-for-coding`    | `minimax/MiniMax-M2.5-highspeed`    | `zai/glm-5`         |
+| `claude-sonnet-4-5` | `codex/gpt-5.3-codex-spark`  | `kimi-code/kimi-for-coding`    | `minimax/MiniMax-M2.5-highspeed`    | `zai/glm-4.5-air`   |
+| `claude-haiku-4-5`  | `codex/gpt-5.1-codex-mini`  | `qwen-cli/qwen3-vl-plus`      | `minimax/MiniMax-M2.5-highspeed`    | `zai/glm-4.5-flash` |
 
 All backend models are also directly addressable by their full name
-(e.g. `qwen/qwen3-coder-plus`, `dashscope/qwen3-coder-plus`, `codex/gpt-5.3-codex`, `gemini-cli/gemini-2.5-pro`, `zai/glm-5`).
+(e.g. `codex/gpt-5.3-codex`, `kimi-code/kimi-for-coding`, `gemini-cli/gemini-2.5-pro`, `zai/glm-5`).
 
 ### Available providers
 
@@ -166,7 +166,7 @@ All backend models are also directly addressable by their full name
 | **Anthropic**   | API key                  | `claude-opus-4-6`, `claude-sonnet-4-5`, `claude-haiku-4-5`                                                                   |
 | **Kimi Code**   | Kimi OAuth (device-code) | `kimi-code/kimi-for-coding` (K2.5)                                                                                           |
 | **Qwen Portal** | Qwen OAuth (device-code) | `qwen/qwen3-coder-plus`, `qwen/qwen3-vl-plus`                                                                                |
-| **DashScope**   | API key (Coding Plan)    | `dashscope/qwen3-coder-plus`                                                                                                 |
+
 | **Codex**       | ChatGPT OAuth            | `codex/gpt-5.3-codex`, `codex/gpt-5.3-codex-spark`, `codex/gpt-5.2-codex`, `codex/gpt-5.1-codex`, `codex/gpt-5.1-codex-mini` |
 | **Gemini CLI**  | Google OAuth             | `gemini-cli/gemini-2.5-pro`, `gemini-cli/gemini-2.5-flash`, `gemini-cli/gemini-2.5-flash-lite`                               |
 | **MiniMax**     | API key                  | `minimax/MiniMax-M2.5-highspeed`                                                                                             |
@@ -228,9 +228,7 @@ The fork adds a `qwen_portal` provider that routes through Qwen's Portal API
 3. Tokens auto-refresh on expiry; re-run `litellmctl auth qwen` if they expire
    completely.
 
-Free tier: 60 requests/minute, 1,000 requests/day. For higher quotas, add a
-`DASHSCOPE_API_KEY` from the [Alibaba Cloud Coding Plan](https://bailian.console.aliyun.com)
-and the `dashscope/` models will be used as fallbacks when the portal quota is exhausted.
+Free tier: 60 requests/minute, 1,000 requests/day.
 
 ## Syncing with Upstream
 
