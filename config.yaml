@@ -231,31 +231,31 @@ router_settings:
   num_retries: 1
   timeout: 600
   retry_after: 2
-  allowed_fails: 2
+  allowed_fails: §
   cooldown_time: 30
   fallbacks:
     - claude-opus-4-6:
         [
-          kimi-code/kimi-for-coding,
-          dashscope/qwen3.5-plus,
-          minimax/MiniMax-M2.5-highspeed,
           codex/gpt-5.3-codex,
+          dashscope/qwen3.5-plus,
+          kimi-code/kimi-for-coding,
+          minimax/MiniMax-M2.5-highspeed,
           zai/glm-5,
         ]
     - claude-sonnet-4-5:
         [
-          kimi-code/kimi-for-coding,
+          codex/gpt-5.3-codex-spark,
           qwen-cli/qwen3-coder-plus,
           dashscope/qwen3-coder-plus,
-          codex/gpt-5.3-codex-spark,
+          kimi-code/kimi-for-coding,
           minimax/MiniMax-M2.5-highspeed,
           zai/glm-4.5-air,
         ]
     - claude-haiku-4-5:
         [
+          codex/gpt-5.1-codex-mini,
           qwen-cli/qwen3-vl-plus,
           dashscope/qwen3-max,
-          codex/gpt-5.1-codex-mini,
           minimax/MiniMax-M2.5-highspeed,
           zai/glm-4.5-flash,
         ]
