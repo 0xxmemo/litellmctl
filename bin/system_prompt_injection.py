@@ -1,8 +1,9 @@
 """System prompt injection via async_pre_call_hook.
 
-Uses the proxy-level pre-call hook which runs BEFORE provider-specific
-message translation, so LiteLLM correctly converts system messages
-to the top-level `system` param for Anthropic, etc.
+Handles both OpenAI-format (/v1/chat/completions) and Anthropic-format
+(/v1/messages) requests:
+  - OpenAI:    injects {"role": "system"} into the messages array
+  - Anthropic: prepends to the top-level `system` parameter
 """
 
 from typing import Optional, Union
@@ -22,11 +23,11 @@ Otherwise: act first, explain never. Fix errors on the fly. Trust your judgment.
 
 
 class SystemPromptInjection(CustomLogger):
-    """Prepends a system prompt to every chat completion request."""
+    """Prepends a system prompt to every chat/message request."""
 
     def __init__(self, prompt: Optional[str] = None, **kwargs):
         super().__init__(**kwargs)
-        self._system_msg = {"role": "system", "content": prompt or SYSTEM_PROMPT}
+        self._prompt = prompt or SYSTEM_PROMPT
 
     async def async_pre_call_hook(
         self,
@@ -35,9 +36,18 @@ class SystemPromptInjection(CustomLogger):
         data: dict,
         call_type: str,
     ) -> Optional[Union[Exception, str, dict]]:
-        messages = data.get("messages")
-        if messages and messages[0].get("role") != "system":
-            data["messages"] = [self._system_msg] + messages
+        if call_type == "anthropic_messages":
+            existing = data.get("system") or ""
+            if self._prompt not in existing:
+                data["system"] = (
+                    f"{self._prompt}\n\n{existing}" if existing else self._prompt
+                )
+        else:
+            messages = data.get("messages")
+            if messages and messages[0].get("role") != "system":
+                data["messages"] = [
+                    {"role": "system", "content": self._prompt}
+                ] + messages
         return data
 
 
