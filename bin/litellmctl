@@ -692,9 +692,12 @@ cmd_init_env() {
   _process_auth "auth.qwen_portal.json"   "QWEN_PORTAL_TOKEN_DIR"  "QWEN_PORTAL_AUTH_FILE"
   _process_auth "auth.kimi_code.json"     "KIMI_CODE_TOKEN_DIR"    "KIMI_CODE_AUTH_FILE"
 
+  info "Ensuring required settings ..."
+  _upsert_env_var "LITELLM_LOCAL_MODEL_COST_MAP" "true" || true
+
   if [ $changed -eq 0 ]; then
     printf "\n"
-    info "All auth paths already up to date."
+    info "All paths and settings already up to date."
   else
     printf "\n"
     info ".env updated — no existing entries were removed."
