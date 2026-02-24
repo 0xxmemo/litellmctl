@@ -11,15 +11,36 @@ tiers:
       model: openai/qwen3.5-plus
       api_key: os.environ/DASHSCOPE_API_KEY
       api_base: https://coding-intl.dashscope.aliyuncs.com/v1
+      model_info:
+        supports_function_calling: true
+        supports_parallel_function_calling: true
+        supports_reasoning: true
+        supports_response_schema: true
+        supports_system_messages: true
+        supports_vision: true
   sonnet:
     - model_name: dashscope/qwen3-coder-plus
       model: openai/qwen3-coder-plus
       api_key: os.environ/DASHSCOPE_API_KEY
       api_base: https://coding-intl.dashscope.aliyuncs.com/v1
+      model_info:
+        supports_function_calling: true
+        supports_parallel_function_calling: true
+        supports_reasoning: true
+        supports_response_schema: true
+        supports_system_messages: true
+        supports_vision: false
   haiku:
     - model_name: dashscope/qwen3-max
       model: openai/qwen3-max
       api_key: os.environ/DASHSCOPE_API_KEY
       api_base: https://coding-intl.dashscope.aliyuncs.com/v1
+      model_info:
+        supports_function_calling: true
+        supports_parallel_function_calling: true
+        supports_reasoning: true
+        supports_response_schema: true
+        supports_system_messages: true
+        supports_vision: false
 
 extra_models: []
