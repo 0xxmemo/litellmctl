@@ -9,7 +9,7 @@ load_order:
   - kimi_code
   - gemini_cli
   - qwen_portal
-  - dashscope
+  - alibaba
   - chatgpt
   - minimax
   - zai
@@ -18,7 +18,7 @@ load_order:
 fallback_order:
   opus:
     - kimi_code
-    - dashscope
+    - alibaba
     - minimax
     - chatgpt
     - gemini_cli
@@ -26,14 +26,14 @@ fallback_order:
   sonnet:
     - kimi_code
     - qwen_portal
-    - dashscope
+    - alibaba
     - chatgpt
     - gemini_cli
     - minimax
     - zai
   haiku:
     - qwen_portal
-    - dashscope
+    - alibaba
     - chatgpt
     - gemini_cli
     - minimax

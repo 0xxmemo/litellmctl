@@ -122,8 +122,8 @@ model_list:
       model: qwen_portal/vision-model
       timeout: 600
 
-  # === Alibaba Cloud Coding Plan (OpenAI-compatible, ref: qwen-code CLI) ===
-  - model_name: dashscope/qwen3.5-plus
+  # === Alibaba Cloud Coding Plan (OpenAI + Anthropic-compatible) ===
+  - model_name: alibaba/qwen3.5-plus
     model_info:
       supports_function_calling: true
       supports_parallel_function_calling: true
@@ -132,11 +132,10 @@ model_list:
       supports_system_messages: true
       supports_vision: true
     litellm_params:
-      model: openai/qwen3.5-plus
+      model: alibaba/qwen3.5-plus
       api_key: os.environ/DASHSCOPE_API_KEY
-      api_base: https://coding-intl.dashscope.aliyuncs.com/v1
       timeout: 600
-  - model_name: dashscope/qwen3-coder-plus
+  - model_name: alibaba/qwen3-coder-plus
     model_info:
       supports_function_calling: true
       supports_parallel_function_calling: true
@@ -145,11 +144,10 @@ model_list:
       supports_system_messages: true
       supports_vision: false
     litellm_params:
-      model: openai/qwen3-coder-plus
+      model: alibaba/qwen3-coder-plus
       api_key: os.environ/DASHSCOPE_API_KEY
-      api_base: https://coding-intl.dashscope.aliyuncs.com/v1
       timeout: 600
-  - model_name: dashscope/qwen3-coder-next
+  - model_name: alibaba/qwen3-coder-next
     model_info:
       supports_function_calling: true
       supports_parallel_function_calling: true
@@ -158,9 +156,8 @@ model_list:
       supports_system_messages: true
       supports_vision: false
     litellm_params:
-      model: openai/qwen3-coder-next
+      model: alibaba/qwen3-coder-next
       api_key: os.environ/DASHSCOPE_API_KEY
-      api_base: https://coding-intl.dashscope.aliyuncs.com/v1
       timeout: 600
 
   # === Kimi Code tier (Kimi OAuth — Allegretto plan, powered by K2.5) ===
@@ -252,7 +249,7 @@ router_settings:
     - claude-opus-4-6:
         [
           codex/gpt-5.3-codex,
-          dashscope/qwen3.5-plus,
+          alibaba/qwen3.5-plus,
           kimi-code/kimi-for-coding,
           minimax/MiniMax-M2.5-highspeed,
           zai/glm-5,
@@ -261,7 +258,7 @@ router_settings:
         [
           codex/gpt-5.3-codex-spark,
           qwen-cli/qwen3-coder-plus,
-          dashscope/qwen3-coder-plus,
+          alibaba/qwen3-coder-plus,
           kimi-code/kimi-for-coding,
           minimax/MiniMax-M2.5-highspeed,
           zai/glm-4.5-air,
@@ -270,7 +267,7 @@ router_settings:
         [
           codex/gpt-5.1-codex-mini,
           qwen-cli/qwen3-vl-plus,
-          dashscope/qwen3-coder-next,
+          alibaba/qwen3-coder-next,
           minimax/MiniMax-M2.5-highspeed,
           zai/glm-4.5-flash,
         ]

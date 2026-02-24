@@ -166,20 +166,39 @@ _pids_on_port() {
   fi
 }
 
+_is_litellm_pid() {
+  local pid="$1"
+  local cmd
+  cmd=$(ps -p "$pid" -o command= 2>/dev/null) || return 1
+  [[ "$cmd" == *litellm* ]]
+}
+
+# Return only LiteLLM PIDs listening on the given port.
+_litellm_pids_on_port() {
+  local port="$1"
+  local pids pid
+  pids=$(_pids_on_port "$port")
+  for pid in $pids; do
+    if _is_litellm_pid "$pid"; then
+      echo "$pid"
+    fi
+  done
+}
+
 find_proxy_pid() {
   local port
   port=$(get_proxy_port)
-  _pids_on_port "$port" | head -1
+  _litellm_pids_on_port "$port" | head -1
 }
 
 kill_stale_on_port() {
   local port="$1"
   local pids
-  pids=$(_pids_on_port "$port")
+  pids=$(_litellm_pids_on_port "$port")
   if [ -n "$pids" ]; then
     local count
     count=$(echo "$pids" | wc -l | tr -d ' ')
-    warn "Killing $count stale process(es) on port $port: $(echo $pids | tr '\n' ' ')"
+    warn "Killing $count stale litellm process(es) on port $port: $(echo $pids | tr '\n' ' ')"
     echo "$pids" | xargs kill -9 2>/dev/null || true
     sleep 1
   fi
