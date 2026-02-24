@@ -124,41 +124,17 @@ model_list:
 
   # === Alibaba Cloud Coding Plan (OpenAI + Anthropic-compatible) ===
   - model_name: alibaba/qwen3.5-plus
-    model_info:
-      supports_function_calling: true
-      supports_parallel_function_calling: true
-      supports_reasoning: true
-      supports_response_schema: true
-      supports_system_messages: true
-      supports_vision: true
     litellm_params:
       model: alibaba/qwen3.5-plus
       api_key: os.environ/DASHSCOPE_API_KEY
-      timeout: 600
   - model_name: alibaba/qwen3-coder-plus
-    model_info:
-      supports_function_calling: true
-      supports_parallel_function_calling: true
-      supports_reasoning: false
-      supports_response_schema: true
-      supports_system_messages: true
-      supports_vision: false
     litellm_params:
       model: alibaba/qwen3-coder-plus
       api_key: os.environ/DASHSCOPE_API_KEY
-      timeout: 600
   - model_name: alibaba/qwen3-coder-next
-    model_info:
-      supports_function_calling: true
-      supports_parallel_function_calling: true
-      supports_reasoning: false
-      supports_response_schema: true
-      supports_system_messages: true
-      supports_vision: false
     litellm_params:
       model: alibaba/qwen3-coder-next
       api_key: os.environ/DASHSCOPE_API_KEY
-      timeout: 600
 
   # === Kimi Code tier (Kimi OAuth — Allegretto plan, powered by K2.5) ===
   - model_name: kimi-code/kimi-for-coding

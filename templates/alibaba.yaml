@@ -10,34 +10,13 @@ tiers:
     - model_name: alibaba/qwen3.5-plus
       model: alibaba/qwen3.5-plus
       api_key: os.environ/DASHSCOPE_API_KEY
-      model_info:
-        supports_function_calling: true
-        supports_parallel_function_calling: true
-        supports_reasoning: true
-        supports_response_schema: true
-        supports_system_messages: true
-        supports_vision: true
   sonnet:
     - model_name: alibaba/qwen3-coder-plus
       model: alibaba/qwen3-coder-plus
       api_key: os.environ/DASHSCOPE_API_KEY
-      model_info:
-        supports_function_calling: true
-        supports_parallel_function_calling: true
-        supports_reasoning: false
-        supports_response_schema: true
-        supports_system_messages: true
-        supports_vision: false
   haiku:
     - model_name: alibaba/qwen3-coder-next
       model: alibaba/qwen3-coder-next
       api_key: os.environ/DASHSCOPE_API_KEY
-      model_info:
-        supports_function_calling: true
-        supports_parallel_function_calling: true
-        supports_reasoning: false
-        supports_response_schema: true
-        supports_system_messages: true
-        supports_vision: false
 
 extra_models: []

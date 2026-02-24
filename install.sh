@@ -210,6 +210,14 @@ else
   ok ".env already exists — not modified"
 fi
 
+# Ensure LITELLM_LOCAL_MODEL_COST_MAP is set (uses fork's model map instead of upstream)
+if [ -f "$INSTALL_DIR/.env" ]; then
+  if ! grep -q "^LITELLM_LOCAL_MODEL_COST_MAP=" "$INSTALL_DIR/.env" 2>/dev/null; then
+    printf '\nLITELLM_LOCAL_MODEL_COST_MAP=true\n' >> "$INSTALL_DIR/.env"
+    ok "Added LITELLM_LOCAL_MODEL_COST_MAP=true to .env"
+  fi
+fi
+
 # ── 7. Sync auth file paths in .env ──────────────────────────────────────
 
 info "Syncing auth file paths ..."
