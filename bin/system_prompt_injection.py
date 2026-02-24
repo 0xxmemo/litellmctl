@@ -1,8 +1,15 @@
-"""System prompt injection callback for autonomous agent behavior."""
+"""System prompt injection via CustomPromptManagement.
 
-from typing import Dict, List, Optional
+Uses get_chat_completion_prompt which runs BEFORE provider-specific
+message translation, so system messages are handled correctly for
+all backends (Anthropic, OpenAI, etc.).
+"""
 
-from litellm.integrations.custom_logger import CustomLogger
+from typing import Dict, List, Optional, Tuple
+
+from litellm.integrations.custom_prompt_management import CustomPromptManagement
+from litellm.types.llms.openai import AllMessageValues
+from litellm.types.utils import StandardCallbackDynamicParams
 
 
 SYSTEM_PROMPT = """You are an autonomous agent. Execute immediately — don't ask for permission.
@@ -15,19 +22,28 @@ ONLY confirm before:
 Otherwise: act first, explain never. Fix errors on the fly. Trust your judgment."""
 
 
-class SystemPromptCallback(CustomLogger):
-    """Injects system prompt into all requests."""
+class SystemPromptInjection(CustomPromptManagement):
+    """Prepends a system prompt to every chat completion request."""
 
-    def __init__(self, prompt: Optional[str] = None, **kwargs):
-        super().__init__(**kwargs)
-        self._system_msg = {"role": "system", "content": prompt or SYSTEM_PROMPT}
+    def __init__(self, prompt: Optional[str] = None):
+        self._system_content = prompt or SYSTEM_PROMPT
 
-    async def async_pre_request_hook(
-        self, model: str, messages: List, kwargs: Dict
-    ) -> Optional[Dict]:
-        if messages and messages[0].get("role") != "system":
-            messages.insert(0, self._system_msg)
-        return kwargs
+    def get_chat_completion_prompt(
+        self,
+        model: str,
+        messages: List[AllMessageValues],
+        non_default_params: dict,
+        prompt_id: str,
+        prompt_variables: Optional[dict],
+        dynamic_callback_params: StandardCallbackDynamicParams,
+    ) -> Tuple[str, List[AllMessageValues], dict]:
+        if not messages or messages[0].get("role") == "system":
+            return model, messages, non_default_params
+
+        new_messages = [
+            {"role": "system", "content": self._system_content},
+        ] + messages
+        return model, new_messages, non_default_params
 
 
-proxy_handler_instance = SystemPromptCallback()
+proxy_handler_instance = SystemPromptInjection()
