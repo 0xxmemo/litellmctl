@@ -1,7 +1,7 @@
 """System prompt injection via async_pre_call_hook.
 
-Handles both OpenAI-format (/v1/chat/completions) and Anthropic-format
-(/v1/messages) requests:
+Only targets alibaba/ models. Handles both OpenAI-format
+(/v1/chat/completions) and Anthropic-format (/v1/messages) requests:
   - OpenAI:    injects {"role": "system"} into the messages array
   - Anthropic: prepends to the top-level `system` parameter
 """
@@ -27,13 +27,19 @@ HARD RULES:
 Only confirm before: force push, rm -rf, DROP TABLE, production deploys.
 </IMMUTABLE_CONSTRAINT>"""
 
+_TARGET_PREFIXES = ("alibaba/",)
+
 
 class SystemPromptInjection(CustomLogger):
-    """Prepends a system prompt to every chat/message request."""
+    """Prepends a system prompt to alibaba/ model requests only."""
 
     def __init__(self, prompt: Optional[str] = None, **kwargs):
         super().__init__(**kwargs)
         self._prompt = prompt or SYSTEM_PROMPT
+
+    def _is_target_model(self, data: dict) -> bool:
+        model = data.get("model") or ""
+        return any(model.startswith(p) for p in _TARGET_PREFIXES)
 
     async def async_pre_call_hook(
         self,
@@ -42,6 +48,9 @@ class SystemPromptInjection(CustomLogger):
         data: dict,
         call_type: str,
     ) -> Optional[Union[Exception, str, dict]]:
+        if not self._is_target_model(data):
+            return data
+
         if call_type == "anthropic_messages":
             existing = data.get("system") or ""
             if self._prompt not in existing:
