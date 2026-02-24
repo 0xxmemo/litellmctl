@@ -3,19 +3,19 @@ desc: API key — pay-per-use
 auth: api_key
 env_vars:
   - ANTHROPIC_API_KEY
-role: primary
+role: fallback
 
 tiers:
   opus:
-    - model_name: claude-opus-4-6
+    - model_name: anthropic/claude-opus-4-6
       model: anthropic/claude-opus-4-6
       api_key: os.environ/ANTHROPIC_API_KEY
   sonnet:
-    - model_name: claude-sonnet-4-5
+    - model_name: anthropic/claude-sonnet-4-5
       model: anthropic/claude-sonnet-4-5-20250929
       api_key: os.environ/ANTHROPIC_API_KEY
   haiku:
-    - model_name: claude-haiku-4-5
+    - model_name: anthropic/claude-haiku-4-5
       model: anthropic/claude-haiku-4-5-20251001
       api_key: os.environ/ANTHROPIC_API_KEY
 

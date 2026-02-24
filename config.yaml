@@ -172,21 +172,41 @@ model_list:
       api_base: https://api.minimax.io/anthropic
       timeout: 90
 
-  # === Claude tier ===
-  - model_name: claude-opus-4-6
+  # === Claude tier (actual Anthropic endpoints) ===
+  - model_name: anthropic/claude-opus-4-6
     litellm_params:
       model: anthropic/claude-opus-4-6
       api_key: os.environ/ANTHROPIC_API_KEY
       timeout: 180
-  - model_name: claude-sonnet-4-5
+  - model_name: anthropic/claude-sonnet-4-5
     litellm_params:
       model: anthropic/claude-sonnet-4-5-20250929
       api_key: os.environ/ANTHROPIC_API_KEY
       timeout: 120
-  - model_name: claude-haiku-4-5
+  - model_name: anthropic/claude-haiku-4-5
     litellm_params:
       model: anthropic/claude-haiku-4-5-20251001
       api_key: os.environ/ANTHROPIC_API_KEY
+      timeout: 60
+
+  # === Stubs (API-facing names → first non-Anthropic provider) ===
+  - model_name: claude-opus-4-6
+    model_info:
+      mode: responses
+    litellm_params:
+      model: chatgpt/gpt-5.3-codex
+      timeout: 180
+  - model_name: claude-sonnet-4-5
+    model_info:
+      mode: responses
+    litellm_params:
+      model: chatgpt/gpt-5.3-codex-spark
+      timeout: 120
+  - model_name: claude-haiku-4-5
+    model_info:
+      mode: responses
+    litellm_params:
+      model: chatgpt/gpt-5.1-codex-mini
       timeout: 60
 
 router_settings:
@@ -198,11 +218,11 @@ router_settings:
   routing_strategy: simple-shuffle
   fallbacks:
     - claude-opus-4-6:
-        [codex/gpt-5.3-codex, alibaba/qwen3.5-plus, kimi-code/kimi-for-coding, zai/glm-5]
+        [alibaba/qwen3.5-plus, kimi-code/kimi-for-coding, anthropic/claude-opus-4-6, zai/glm-5]
     - claude-sonnet-4-5:
-        [codex/gpt-5.3-codex-spark, qwen-cli/qwen3-coder-plus, alibaba/qwen3-coder-plus, zai/glm-4.5-air]
+        [qwen-cli/qwen3-coder-plus, alibaba/qwen3-coder-plus, anthropic/claude-sonnet-4-5, zai/glm-4.5-air]
     - claude-haiku-4-5:
-        [codex/gpt-5.1-codex-mini, alibaba/qwen3-coder-next, qwen-cli/qwen3-vl-plus, zai/glm-4.5-flash]
+        [alibaba/qwen3-coder-next, qwen-cli/qwen3-vl-plus, anthropic/claude-haiku-4-5, zai/glm-4.5-flash]
 
 litellm_settings:
   drop_params: true

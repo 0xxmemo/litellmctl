@@ -5,13 +5,13 @@ tiers:
 
 # Display / load order in the wizard
 load_order:
-  - anthropic
+  - chatgpt
   - kimi_code
   - gemini_cli
   - qwen_portal
   - alibaba
-  - chatgpt
   - minimax
+  - anthropic
   - zai
 
 # Per-tier default fallback order (matches the hand-tuned config)
@@ -22,6 +22,7 @@ fallback_order:
     - minimax
     - chatgpt
     - gemini_cli
+    - anthropic
     - zai
   sonnet:
     - kimi_code
@@ -30,6 +31,7 @@ fallback_order:
     - chatgpt
     - gemini_cli
     - minimax
+    - anthropic
     - zai
   haiku:
     - qwen_portal
@@ -37,6 +39,7 @@ fallback_order:
     - chatgpt
     - gemini_cli
     - minimax
+    - anthropic
     - zai
 
 router_settings:
