@@ -41,14 +41,22 @@ fallback_order:
 
 router_settings:
   num_retries: 2
-  timeout: 600
-  retry_after: 5
-  allowed_fails: 1
+  timeout: 120
+  retry_after: 1
+  allowed_fails: 3
+  cooldown_time: 15
+  routing_strategy: simple-shuffle
 
 litellm_settings:
   drop_params: true
   set_verbose: false
-  request_timeout: 600
+  request_timeout: 120
+  cache: true
+  cache_params:
+    type: local
+    ttl: 300
+  callbacks:
+    - bin.system_prompt_injection.proxy_handler_instance
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

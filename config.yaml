@@ -5,257 +5,215 @@ model_list:
       model: anthropic/glm-4.5
       api_key: os.environ/ZAI_API_KEY
       api_base: https://api.z.ai/api/anthropic
-      timeout: 600
-      reasoning: true
-      input: ["text"]
+      timeout: 120
   - model_name: zai/glm-4.5-air
     litellm_params:
       model: anthropic/glm-4.5-air
       api_key: os.environ/ZAI_API_KEY
       api_base: https://api.z.ai/api/anthropic
-      timeout: 600
-      reasoning: false
-      input: ["text"]
+      timeout: 90
   - model_name: zai/glm-4.5-flash
     litellm_params:
       model: anthropic/glm-4.5-flash
       api_key: os.environ/ZAI_API_KEY
       api_base: https://api.z.ai/api/anthropic
-      timeout: 600
-      reasoning: false
-      input: ["text"]
+      timeout: 60
   - model_name: zai/glm-4.5v
     litellm_params:
       model: anthropic/glm-4.5v
       api_key: os.environ/ZAI_API_KEY
       api_base: https://api.z.ai/api/anthropic
-      timeout: 600
-      reasoning: true
-      input: ["text", "image"]
+      timeout: 120
   - model_name: zai/glm-4.6
     litellm_params:
       model: anthropic/glm-4.6
       api_key: os.environ/ZAI_API_KEY
       api_base: https://api.z.ai/api/anthropic
-      timeout: 600
-      reasoning: true
-      input: ["text"]
+      timeout: 120
   - model_name: zai/glm-4.6v
     litellm_params:
       model: anthropic/glm-4.6v
       api_key: os.environ/ZAI_API_KEY
       api_base: https://api.z.ai/api/anthropic
-      timeout: 600
-      reasoning: true
-      input: ["text", "image"]
+      timeout: 120
   - model_name: zai/glm-4.7
     litellm_params:
       model: anthropic/glm-4.7
       api_key: os.environ/ZAI_API_KEY
       api_base: https://api.z.ai/api/anthropic
-      timeout: 600
-      reasoning: true
-      input: ["text"]
+      timeout: 120
   - model_name: zai/glm-4.7-flash
     litellm_params:
       model: anthropic/glm-4.7-flash
       api_key: os.environ/ZAI_API_KEY
       api_base: https://api.z.ai/api/anthropic
-      timeout: 600
-      reasoning: false
-      input: ["text"]
+      timeout: 60
   - model_name: zai/glm-4.7-flashx
     litellm_params:
       model: anthropic/glm-4.7-flashx
       api_key: os.environ/ZAI_API_KEY
       api_base: https://api.z.ai/api/anthropic
-      timeout: 600
-      reasoning: false
-      input: ["text"]
+      timeout: 60
   - model_name: zai/glm-5
     litellm_params:
       model: anthropic/glm-5
       api_key: os.environ/ZAI_API_KEY
       api_base: https://api.z.ai/api/anthropic
-      timeout: 600
-      reasoning: true
-      input: ["text"]
+      timeout: 180
   - model_name: zai/glm-5v
     litellm_params:
       model: anthropic/glm-5v
       api_key: os.environ/ZAI_API_KEY
       api_base: https://api.z.ai/api/anthropic
-      timeout: 600
-      reasoning: true
-      input: ["text", "image"]
+      timeout: 180
   - model_name: zai/glm-5-flash
     litellm_params:
       model: anthropic/glm-5-flash
       api_key: os.environ/ZAI_API_KEY
       api_base: https://api.z.ai/api/anthropic
-      timeout: 600
-      reasoning: false
-      input: ["text"]
+      timeout: 60
 
-  # === Gemini CLI tier (Google OAuth via Code Assist API) ===
+  # === Gemini CLI tier ===
   - model_name: gemini-cli/gemini-2.5-pro
     litellm_params:
       model: gemini_cli/gemini-2.5-pro
-      timeout: 600
+      timeout: 120
   - model_name: gemini-cli/gemini-2.5-flash
     litellm_params:
       model: gemini_cli/gemini-2.5-flash
-      timeout: 600
+      timeout: 60
   - model_name: gemini-cli/gemini-2.5-flash-lite
     litellm_params:
       model: gemini_cli/gemini-2.5-flash-lite
-      timeout: 600
+      timeout: 45
 
-  # === Qwen Portal tier (Qwen OAuth — free 1k req/day) ===
+  # === Qwen Portal tier ===
   - model_name: qwen-cli/qwen3-coder-plus
     litellm_params:
       model: qwen_portal/qwen3-coder-plus
-      timeout: 600
-  # "vision-model" alias resolves to qwen3-vl-plus (vision + text)
+      timeout: 90
   - model_name: qwen-cli/qwen3-vl-plus
     litellm_params:
       model: qwen_portal/vision-model
-      timeout: 600
+      timeout: 90
 
-  # === Alibaba Cloud Coding Plan (OpenAI + Anthropic-compatible) ===
+  # === Alibaba Cloud ===
   - model_name: alibaba/qwen3.5-plus
     litellm_params:
       model: alibaba/qwen3.5-plus
       api_key: os.environ/DASHSCOPE_API_KEY
+      timeout: 90
   - model_name: alibaba/qwen3-coder-plus
     litellm_params:
       model: alibaba/qwen3-coder-plus
       api_key: os.environ/DASHSCOPE_API_KEY
+      timeout: 90
   - model_name: alibaba/qwen3-coder-next
     litellm_params:
       model: alibaba/qwen3-coder-next
       api_key: os.environ/DASHSCOPE_API_KEY
+      timeout: 60
 
-  # === Kimi Code tier (Kimi OAuth — Allegretto plan, powered by K2.5) ===
+  # === Kimi Code ===
   - model_name: kimi-code/kimi-for-coding
     litellm_params:
       model: kimi_code/kimi-for-coding
-      timeout: 600
+      timeout: 120
 
-  # === Codex tier (ChatGPT Pro/Max via OAuth) ===
+  # === Codex tier ===
   - model_name: codex/gpt-5.3-codex
     model_info:
       mode: responses
     litellm_params:
       model: chatgpt/gpt-5.3-codex
-      timeout: 600
+      timeout: 180
   - model_name: codex/gpt-5.3-codex-spark
     model_info:
       mode: responses
     litellm_params:
       model: chatgpt/gpt-5.3-codex-spark
-      timeout: 600
+      timeout: 120
   - model_name: codex/gpt-5.2-codex
     model_info:
       mode: responses
     litellm_params:
       model: chatgpt/gpt-5.2-codex
-      timeout: 600
+      timeout: 180
   - model_name: codex/gpt-5.1-codex
     model_info:
       mode: responses
     litellm_params:
       model: chatgpt/gpt-5.1-codex
-      timeout: 600
+      timeout: 120
   - model_name: codex/gpt-5.1-codex-mini
     model_info:
       mode: responses
     litellm_params:
       model: chatgpt/gpt-5.1-codex-mini
-      timeout: 600
+      timeout: 60
   - model_name: codex/gpt-5.2
     model_info:
       mode: responses
     litellm_params:
       model: chatgpt/gpt-5.2
-      timeout: 600
+      timeout: 120
   - model_name: codex/gpt-5.1
     model_info:
       mode: responses
     litellm_params:
       model: chatgpt/gpt-5.1
-      timeout: 600
+      timeout: 90
 
-  # === MiniMax tier (Anthropic-compatible endpoint) ===
+  # === MiniMax ===
   - model_name: minimax/MiniMax-M2.5-highspeed
     litellm_params:
       model: anthropic/MiniMax-M2.5-highspeed
       api_key: os.environ/MINIMAX_API_KEY
       api_base: https://api.minimax.io/anthropic
-      timeout: 600
+      timeout: 90
 
-  # === Opus tier ===
+  # === Claude tier ===
   - model_name: claude-opus-4-6
     litellm_params:
       model: anthropic/claude-opus-4-6
       api_key: os.environ/ANTHROPIC_API_KEY
-      timeout: 600
-
-  # === Sonnet tier ===
+      timeout: 180
   - model_name: claude-sonnet-4-5
     litellm_params:
       model: anthropic/claude-sonnet-4-5-20250929
       api_key: os.environ/ANTHROPIC_API_KEY
-      timeout: 600
-
-  # === Haiku tier ===
+      timeout: 120
   - model_name: claude-haiku-4-5
     litellm_params:
       model: anthropic/claude-haiku-4-5-20251001
       api_key: os.environ/ANTHROPIC_API_KEY
-      timeout: 600
+      timeout: 60
 
 router_settings:
-  num_retries: 1
-  timeout: 600
-  retry_after: 2
-  allowed_fails: §
-  cooldown_time: 30
+  num_retries: 2
+  timeout: 120
+  retry_after: 1
+  allowed_fails: 3
+  cooldown_time: 15
+  routing_strategy: simple-shuffle
   fallbacks:
     - claude-opus-4-6:
-        [
-          codex/gpt-5.3-codex,
-          alibaba/qwen3.5-plus,
-          kimi-code/kimi-for-coding,
-          minimax/MiniMax-M2.5-highspeed,
-          zai/glm-5,
-        ]
+        [codex/gpt-5.3-codex, alibaba/qwen3.5-plus, kimi-code/kimi-for-coding, zai/glm-5]
     - claude-sonnet-4-5:
-        [
-          codex/gpt-5.3-codex-spark,
-          qwen-cli/qwen3-coder-plus,
-          alibaba/qwen3-coder-plus,
-          kimi-code/kimi-for-coding,
-          minimax/MiniMax-M2.5-highspeed,
-          zai/glm-4.5-air,
-        ]
+        [codex/gpt-5.3-codex-spark, qwen-cli/qwen3-coder-plus, alibaba/qwen3-coder-plus, zai/glm-4.5-air]
     - claude-haiku-4-5:
-        [
-          codex/gpt-5.1-codex-mini,
-          qwen-cli/qwen3-vl-plus,
-          alibaba/qwen3-coder-next,
-          minimax/MiniMax-M2.5-highspeed,
-          zai/glm-4.5-flash,
-        ]
+        [codex/gpt-5.1-codex-mini, alibaba/qwen3-coder-next, qwen-cli/qwen3-vl-plus, zai/glm-4.5-flash]
 
 litellm_settings:
   drop_params: true
   set_verbose: false
-  request_timeout: 600
+  request_timeout: 120
   cache: true
   cache_params:
     type: local
-    ttl: 600
+    ttl: 300
+  callbacks:
+    - bin.system_prompt_injection.proxy_handler_instance
 
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY

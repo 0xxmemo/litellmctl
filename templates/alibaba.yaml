@@ -10,13 +10,16 @@ tiers:
     - model_name: alibaba/qwen3.5-plus
       model: alibaba/qwen3.5-plus
       api_key: os.environ/DASHSCOPE_API_KEY
+      timeout: 90
   sonnet:
     - model_name: alibaba/qwen3-coder-plus
       model: alibaba/qwen3-coder-plus
       api_key: os.environ/DASHSCOPE_API_KEY
+      timeout: 90
   haiku:
     - model_name: alibaba/qwen3-coder-next
       model: alibaba/qwen3-coder-next
       api_key: os.environ/DASHSCOPE_API_KEY
+      timeout: 60
 
 extra_models: []
