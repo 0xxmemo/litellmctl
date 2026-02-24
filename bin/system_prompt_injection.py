@@ -1,15 +1,14 @@
-"""System prompt injection via CustomPromptManagement.
+"""System prompt injection via async_pre_call_hook.
 
-Uses get_chat_completion_prompt which runs BEFORE provider-specific
-message translation, so system messages are handled correctly for
-all backends (Anthropic, OpenAI, etc.).
+Uses the proxy-level pre-call hook which runs BEFORE provider-specific
+message translation, so LiteLLM correctly converts system messages
+to the top-level `system` param for Anthropic, etc.
 """
 
-from typing import Dict, List, Optional, Tuple
+from typing import Optional, Union
 
-from litellm.integrations.custom_prompt_management import CustomPromptManagement
-from litellm.types.llms.openai import AllMessageValues
-from litellm.types.utils import StandardCallbackDynamicParams
+from litellm.integrations.custom_logger import CustomLogger
+from litellm.proxy._types import UserAPIKeyAuth
 
 
 SYSTEM_PROMPT = """You are an autonomous agent. Execute immediately — don't ask for permission.
@@ -22,28 +21,24 @@ ONLY confirm before:
 Otherwise: act first, explain never. Fix errors on the fly. Trust your judgment."""
 
 
-class SystemPromptInjection(CustomPromptManagement):
+class SystemPromptInjection(CustomLogger):
     """Prepends a system prompt to every chat completion request."""
 
-    def __init__(self, prompt: Optional[str] = None):
-        self._system_content = prompt or SYSTEM_PROMPT
+    def __init__(self, prompt: Optional[str] = None, **kwargs):
+        super().__init__(**kwargs)
+        self._system_msg = {"role": "system", "content": prompt or SYSTEM_PROMPT}
 
-    def get_chat_completion_prompt(
+    async def async_pre_call_hook(
         self,
-        model: str,
-        messages: List[AllMessageValues],
-        non_default_params: dict,
-        prompt_id: str,
-        prompt_variables: Optional[dict],
-        dynamic_callback_params: StandardCallbackDynamicParams,
-    ) -> Tuple[str, List[AllMessageValues], dict]:
-        if not messages or messages[0].get("role") == "system":
-            return model, messages, non_default_params
-
-        new_messages = [
-            {"role": "system", "content": self._system_content},
-        ] + messages
-        return model, new_messages, non_default_params
+        user_api_key_dict: UserAPIKeyAuth,
+        cache,
+        data: dict,
+        call_type: str,
+    ) -> Optional[Union[Exception, str, dict]]:
+        messages = data.get("messages")
+        if messages and messages[0].get("role") != "system":
+            data["messages"] = [self._system_msg] + messages
+        return data
 
 
 proxy_handler_instance = SystemPromptInjection()
