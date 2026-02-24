@@ -147,7 +147,7 @@ get_proxy_port() {
   if [ -f "$PORT_FILE" ]; then
     cat "$PORT_FILE"
   else
-    echo "4000"
+    echo "4040"
   fi
 }
 
@@ -527,7 +527,7 @@ cmd_auth() {
 
 cmd_start() {
   load_env
-  local port=4000
+  local port=4040
   local config="$PROJECT_DIR/config.yaml"
 
   while [[ $# -gt 0 ]]; do
@@ -610,7 +610,7 @@ cmd_proxy() {
   load_env
   unset DEBUG 2>/dev/null || true
 
-  local port=4000
+  local port=4040
   local config="$PROJECT_DIR/config.yaml"
   local extra_args=()
 
