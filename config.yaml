@@ -140,7 +140,7 @@ model_list:
     model_info:
       supports_function_calling: true
       supports_parallel_function_calling: true
-      supports_reasoning: true
+      supports_reasoning: false
       supports_response_schema: true
       supports_system_messages: true
       supports_vision: false
@@ -149,16 +149,16 @@ model_list:
       api_key: os.environ/DASHSCOPE_API_KEY
       api_base: https://coding-intl.dashscope.aliyuncs.com/v1
       timeout: 600
-  - model_name: dashscope/qwen3-max
+  - model_name: dashscope/qwen3-coder-next
     model_info:
       supports_function_calling: true
       supports_parallel_function_calling: true
-      supports_reasoning: true
+      supports_reasoning: false
       supports_response_schema: true
       supports_system_messages: true
       supports_vision: false
     litellm_params:
-      model: openai/qwen3-max
+      model: openai/qwen3-coder-next
       api_key: os.environ/DASHSCOPE_API_KEY
       api_base: https://coding-intl.dashscope.aliyuncs.com/v1
       timeout: 600
@@ -270,7 +270,7 @@ router_settings:
         [
           codex/gpt-5.1-codex-mini,
           qwen-cli/qwen3-vl-plus,
-          dashscope/qwen3-max,
+          dashscope/qwen3-coder-next,
           minimax/MiniMax-M2.5-highspeed,
           zai/glm-4.5-flash,
         ]
