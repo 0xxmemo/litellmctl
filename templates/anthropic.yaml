@@ -16,7 +16,7 @@ tiers:
       api_key: os.environ/ANTHROPIC_API_KEY
   haiku:
     - model_name: anthropic/claude-haiku-4-5
-      model: anthropic/claude-haiku-4-5-20251001
+      model: anthropic/claude-haiku-4-5
       api_key: os.environ/ANTHROPIC_API_KEY
 
 extra_models: []
