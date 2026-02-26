@@ -2,13 +2,19 @@
 """
 litellmctl wizard — interactive config generator.
 
-Walks the user through selecting providers, models, and fallback chains,
-then writes a complete config.yaml (backing up the existing one).
+Walks the user through provider readiness checks, primary/fallback selection,
+and tier assignment, then writes a complete config.yaml using the
+model_group_alias pattern.
 
 Provider templates and defaults are loaded from templates/*.yaml.
+Compatible with macOS (launchd) and Ubuntu/Linux (systemd).
 """
 
+import json
+import os
+import platform
 import shutil
+import subprocess
 import sys
 from collections import OrderedDict
 from pathlib import Path
@@ -19,28 +25,58 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 PROJECT_DIR = SCRIPT_DIR.parent
 TEMPLATES_DIR = PROJECT_DIR / "templates"
 CONFIG_FILE = PROJECT_DIR / "config.yaml"
+ENV_FILE = PROJECT_DIR / ".env"
+ENV_EXAMPLE = PROJECT_DIR / ".env.example"
 
-# ── Terminal helpers ────────────────────────────────────────────────────────
+# ── Terminal helpers ──────────────────────────────────────────────────────
 
 _TTY = sys.stdout.isatty()
-def _c(t, c): return f"\033[{c}m{t}\033[0m" if _TTY else t
+
+def _c(t, c):
+    return f"\033[{c}m{t}\033[0m" if _TTY else str(t)
+
 def _green(t):  return _c(t, "32")
 def _yellow(t): return _c(t, "33")
 def _red(t):    return _c(t, "31")
+def _cyan(t):   return _c(t, "36")
 def _bold(t):   return _c(t, "1")
 def _dim(t):    return _c(t, "2")
+
+TICK  = _green("✓") if _TTY else "[ok]"
+WARN  = _yellow("⚠") if _TTY else "[!!]"
+CROSS = _red("✗") if _TTY else "[--]"
+ARROW = _cyan("→") if _TTY else "->"
+BAR   = _dim("─" * 56)
 
 
 def _ask(prompt, default=""):
     sys.stdout.write(prompt)
     sys.stdout.flush()
-    ans = input().strip()
+    try:
+        ans = input().strip()
+    except EOFError:
+        ans = ""
     return ans if ans else default
 
 
-def _pick_numbers(prompt, count, default="all"):
+def _confirm(prompt, default_yes=True):
+    suffix = "[Y/n]" if default_yes else "[y/N]"
+    ans = _ask(f"{prompt} {suffix}: ", "y" if default_yes else "n")
+    return ans.lower().startswith("y")
+
+
+def _pick_one(prompt, choices, default=1):
+    """Pick a single item from a numbered list. Returns 0-based index."""
+    ans = _ask(prompt, str(default))
+    if ans.isdigit() and 1 <= int(ans) <= len(choices):
+        return int(ans) - 1
+    return default - 1
+
+
+def _pick_many(prompt, count, default="all"):
+    """Pick multiple items from a numbered list. Returns list of 0-based indices."""
     ans = _ask(prompt, default)
-    if ans.lower() == "all":
+    if ans.lower() in ("all", ""):
         return list(range(count))
     indices = []
     for part in ans.replace(" ", ",").split(","):
@@ -49,10 +85,84 @@ def _pick_numbers(prompt, count, default="all"):
             idx = int(part) - 1
             if idx not in indices:
                 indices.append(idx)
-    return indices
+    return indices if indices else list(range(count))
 
 
-# ── Template loading ───────────────────────────────────────────────────────
+def _header(text):
+    print(f"\n{_bold(text)}")
+    print(BAR)
+
+
+def _step(num, text):
+    print(f"\n{_bold(f'Step {num}:')} {text}")
+    print(BAR)
+
+
+# ── Environment scanning ────────────────────────────────────────────────
+
+def _parse_env_file() -> dict[str, str]:
+    """Parse .env into a dict, ignoring comments and blanks."""
+    env = {}
+    if not ENV_FILE.exists():
+        return env
+    for line in ENV_FILE.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        env[key.strip()] = value.strip()
+    return env
+
+
+def _env_var_set(env: dict, var_name: str) -> bool:
+    """Check if an env var is set to a real value (not a placeholder)."""
+    val = env.get(var_name, "")
+    if not val:
+        return False
+    placeholders = ("your-", "sk-ant-...", "change-me", "/path/to/", "")
+    for p in placeholders:
+        if val == p or val.startswith("your-"):
+            return False
+    return True
+
+
+def _auth_file_exists(env: dict, auth_info: dict) -> bool:
+    """Check if an OAuth auth file exists on disk."""
+    filename = auth_info["file"]
+    path = PROJECT_DIR / filename
+    return path.exists() and path.stat().st_size > 10
+
+
+def _auth_file_valid(env: dict, auth_info: dict) -> bool:
+    """Check if auth file contains a non-expired-looking token."""
+    filename = auth_info["file"]
+    path = PROJECT_DIR / filename
+    if not path.exists():
+        return False
+    try:
+        data = json.loads(path.read_text())
+        return bool(data.get("access_token") or data.get("token"))
+    except (json.JSONDecodeError, KeyError):
+        return False
+
+
+def _detect_os():
+    s = platform.system()
+    if s == "Darwin":
+        return "macOS"
+    elif s == "Linux":
+        try:
+            with open("/etc/os-release") as f:
+                for line in f:
+                    if line.startswith("PRETTY_NAME="):
+                        return line.split("=", 1)[1].strip().strip('"')
+        except FileNotFoundError:
+            pass
+        return "Linux"
+    return s
+
+
+# ── Template loading ────────────────────────────────────────────────────
 
 def _load_defaults() -> dict:
     path = TEMPLATES_DIR / "defaults.yaml"
@@ -68,26 +178,72 @@ def _load_providers(load_order: list[str]) -> OrderedDict:
     for pid in load_order:
         path = TEMPLATES_DIR / f"{pid}.yaml"
         if not path.exists():
-            print(_yellow(f"  Warning: template {path.name} not found, skipping"))
             continue
         with open(path) as f:
             data = yaml.safe_load(f)
-        # Normalise optional fields
         data.setdefault("env_vars", [])
         data.setdefault("extra_models", [])
         data.setdefault("tiers", {})
+        data.setdefault("auth", "none")
+        providers[pid] = data
+    # Also pick up any templates not in load_order
+    for path in sorted(TEMPLATES_DIR.glob("*.yaml")):
+        pid = path.stem
+        if pid == "defaults" or pid in providers:
+            continue
+        with open(path) as f:
+            data = yaml.safe_load(f)
+        data.setdefault("env_vars", [])
+        data.setdefault("extra_models", [])
+        data.setdefault("tiers", {})
+        data.setdefault("auth", "none")
         providers[pid] = data
     return providers
 
 
-# ── Config generation ──────────────────────────────────────────────────────
+# ── Provider readiness ──────────────────────────────────────────────────
+
+def _check_provider_ready(pid: str, prov: dict, env: dict,
+                          auth_files: dict) -> tuple[bool, str]:
+    """
+    Returns (ready, reason).
+    A provider is ready if:
+      - api_key auth: all env_vars are set in .env
+      - oauth auth: the corresponding auth file exists and has tokens
+    """
+    auth_type = prov.get("auth", "none")
+
+    if auth_type == "api_key":
+        missing = [v for v in prov.get("env_vars", []) if not _env_var_set(env, v)]
+        if missing:
+            return False, f"missing .env: {', '.join(missing)}"
+        return True, "API key configured"
+
+    elif auth_type == "oauth":
+        af = auth_files.get(pid)
+        if af and _auth_file_exists(env, af):
+            if _auth_file_valid(env, af):
+                return True, "OAuth token present"
+            return False, "auth file exists but token looks invalid"
+        return False, f"not authenticated — run: litellmctl auth {pid.replace('_', ' ').split()[0]}"
+
+    return True, "no auth required"
+
+
+def _readiness_icon(ready: bool) -> str:
+    return TICK if ready else CROSS
+
+
+# ── Config generation ───────────────────────────────────────────────────
 
 def _model_entry(m: dict) -> dict:
     """Build a model_list entry from a template model dict."""
-    entry = {"model_name": m["model_name"]}
+    entry: dict = {"model_name": m["model_name"]}
     if m.get("model_info"):
         entry["model_info"] = dict(m["model_info"])
-    params = {"model": m["model"], "timeout": m.get("timeout", 600)}
+    params: dict = {"model": m["model"]}
+    if m.get("timeout"):
+        params["timeout"] = m["timeout"]
     for key in ("api_key", "api_base"):
         if key in m:
             params[key] = m[key]
@@ -97,57 +253,77 @@ def _model_entry(m: dict) -> dict:
     return entry
 
 
-def _collect_models(selected_providers: list[str], providers: OrderedDict, tiers: list[str]) -> list[dict]:
+def _collect_models(selected_providers: list[str], providers: OrderedDict,
+                    tiers: list[str]) -> list[dict]:
     """Collect all model_list entries for selected providers, deduped."""
-    seen_names: set[str] = set()
+    seen: set[str] = set()
     models: list[dict] = []
     for pid in selected_providers:
         prov = providers[pid]
         for tier in tiers:
             for m in prov["tiers"].get(tier, []):
-                if m["model_name"] not in seen_names:
-                    seen_names.add(m["model_name"])
+                if m["model_name"] not in seen:
+                    seen.add(m["model_name"])
                     models.append(_model_entry(m))
         for m in prov.get("extra_models", []):
-            if m["model_name"] not in seen_names:
-                seen_names.add(m["model_name"])
+            if m["model_name"] not in seen:
+                seen.add(m["model_name"])
                 models.append(_model_entry(m))
     return models
 
 
-def _build_fallbacks(
-    primary_tiers: list[str],
-    primary_provider: str,
-    fallback_providers: list[str],
-    fallback_order: dict[str, list[str]],
-    providers: OrderedDict,
-) -> list[dict]:
+def _build_aliases(tiers: list[str], primary_map: dict[str, str],
+                   providers: OrderedDict) -> dict[str, str]:
+    """Build model_group_alias mapping: tier_name -> primary model_name."""
+    aliases = {}
+    for tier in tiers:
+        pid = primary_map.get(tier)
+        if not pid or pid not in providers:
+            continue
+        tier_models = providers[pid]["tiers"].get(tier, [])
+        if tier_models:
+            aliases[tier] = tier_models[0]["model_name"]
+    return aliases
+
+
+def _build_fallbacks(tiers: list[str], primary_map: dict[str, str],
+                     fallback_map: dict[str, list[str]],
+                     providers: OrderedDict) -> list[dict]:
     """Build the fallback chain list for router_settings."""
     fallbacks: list[dict] = []
-    prov = providers[primary_provider]
-    for tier in primary_tiers:
-        tier_models = prov["tiers"].get(tier, [])
-        if not tier_models:
+    for tier in tiers:
+        primary_pid = primary_map.get(tier)
+        if not primary_pid:
             continue
-        primary_name = tier_models[0]["model_name"]
         chain: list[str] = []
-        for fpid in fallback_order.get(tier, []):
-            if fpid not in fallback_providers:
+        for fpid in fallback_map.get(tier, []):
+            if fpid == primary_pid:
                 continue
-            fp = providers[fpid]
+            fp = providers.get(fpid)
+            if not fp:
+                continue
             for m in fp["tiers"].get(tier, []):
-                if m["model_name"] != primary_name and m["model_name"] not in chain:
+                if m["model_name"] not in chain:
                     chain.append(m["model_name"])
         if chain:
-            fallbacks.append({primary_name: chain})
+            fallbacks.append({tier: chain})
     return fallbacks
 
 
-def _generate_yaml(models: list[dict], fallbacks: list[dict], defaults: dict) -> str:
+def _generate_yaml(models: list[dict], aliases: dict[str, str],
+                   fallbacks: list[dict], defaults: dict) -> str:
     """Render config.yaml as a clean YAML string."""
     lines: list[str] = ["model_list:"]
 
+    # Group models by provider prefix for readability
+    current_prefix = None
     for entry in models:
+        prefix = entry["model_name"].split("/")[0] if "/" in entry["model_name"] else ""
+        if prefix != current_prefix:
+            if current_prefix is not None:
+                lines.append("")
+            current_prefix = prefix
+
         lines.append(f"  - model_name: {entry['model_name']}")
         if "model_info" in entry:
             lines.append("    model_info:")
@@ -163,28 +339,49 @@ def _generate_yaml(models: list[dict], fallbacks: list[dict], defaults: dict) ->
             else:
                 lines.append(f"      {k}: {v}")
 
+    # Router settings
     rs = defaults.get("router_settings", {})
     lines.append("")
     lines.append("router_settings:")
     for k, v in rs.items():
         lines.append(f"  {k}: {v}")
 
+    # model_group_alias
+    if aliases:
+        lines.append("  model_group_alias:")
+        for alias, target in aliases.items():
+            lines.append(f"    {alias}: {target}")
+
+    # Fallbacks
     if fallbacks:
         lines.append("  fallbacks:")
         for fb in fallbacks:
-            for primary, chain in fb.items():
-                lines.append(f"    - {primary}:")
+            for tier_name, chain in fb.items():
+                lines.append(f"    - {tier_name}:")
                 lines.append("        [")
                 for m in chain:
                     lines.append(f"          {m},")
                 lines.append("        ]")
 
+    # litellm_settings
     ls = defaults.get("litellm_settings", {})
     lines.append("")
     lines.append("litellm_settings:")
     for k, v in ls.items():
-        lines.append(f"  {k}: {v}")
+        if isinstance(v, dict):
+            lines.append(f"  {k}:")
+            for sk, sv in v.items():
+                lines.append(f"    {sk}: {sv}")
+        elif isinstance(v, bool):
+            lines.append(f"  {k}: {'true' if v else 'false'}")
+        elif isinstance(v, list):
+            lines.append(f"  {k}:")
+            for item in v:
+                lines.append(f"    - {item}")
+        else:
+            lines.append(f"  {k}: {v}")
 
+    # general_settings
     gs = defaults.get("general_settings", {})
     lines.append("")
     lines.append("general_settings:")
@@ -199,157 +396,319 @@ def _generate_yaml(models: list[dict], fallbacks: list[dict], defaults: dict) ->
     return "\n".join(lines)
 
 
-# ── Interactive wizard ─────────────────────────────────────────────────────
+# ── Interactive wizard ──────────────────────────────────────────────────
 
 def run_wizard():
     defaults = _load_defaults()
     tiers = defaults.get("tiers", ["opus", "sonnet", "haiku"])
     load_order = defaults.get("load_order", [])
-    default_tier_order = defaults.get("fallback_order", {})
+    auth_files_conf = defaults.get("auth_files", {})
+    default_primary = defaults.get("primary", {})
+    default_fallback = defaults.get("fallback_order", {})
 
     providers = _load_providers(load_order)
     if not providers:
         print(_red("No provider templates found in templates/"))
         sys.exit(1)
 
+    env = _parse_env_file()
+
+    # ── Banner ──
     print()
-    print(_bold("litellmctl config wizard"))
-    print(_dim("=" * 50))
+    print(_bold("  litellmctl config wizard"))
+    print(f"  {_dim('─' * 40)}")
+    print(f"  OS: {_detect_os()}  |  Project: {PROJECT_DIR}")
+    print()
 
-    # ── Step 1: Primary provider & tiers ──
-    primaries = [(pid, p) for pid, p in providers.items() if p.get("role") == "primary"]
-    if len(primaries) == 1:
-        primary_id, primary = primaries[0]
-        print(f"\n  Primary provider: {_bold(primary['name'])}")
+    # ── Step 1: Environment scan ──
+    _step(1, "Environment & provider readiness")
+
+    if not ENV_FILE.exists():
+        print(f"  {CROSS} No .env file found.")
+        if ENV_EXAMPLE.exists():
+            if _confirm(f"     Copy {ENV_EXAMPLE.name} to .env?"):
+                shutil.copy2(ENV_EXAMPLE, ENV_FILE)
+                print(f"     {TICK} Created .env from template")
+                env = _parse_env_file()
+            else:
+                print(f"     {WARN} Continuing without .env — some providers will be unavailable")
+        else:
+            print(f"     {WARN} No .env or .env.example found. Create .env manually.")
     else:
-        print(f"\n{_bold('Primary providers:')}")
-        for i, (pid, p) in enumerate(primaries, 1):
-            print(f"  [{i}] {p['name']:<30} {_dim(p.get('desc', ''))}")
-        idx = _pick_numbers("\nSelect primary provider [1]: ", len(primaries), "1")
-        primary_id, primary = primaries[idx[0] if idx else 0]
+        print(f"  {TICK} .env found ({sum(1 for v in env.values() if v)} variables)")
 
-    available_tiers = [t for t in tiers if t in primary["tiers"]]
-    print(f"\n{_bold('Which tiers to expose?')}")
-    for i, t in enumerate(available_tiers, 1):
-        model_name = primary["tiers"][t][0]["model_name"]
-        print(f"  [{i}] {t:<10} -> {model_name}")
-    tier_idx = _pick_numbers(
-        f"\nSelect tiers (comma-separated, or 'all') [all]: ",
-        len(available_tiers),
+    # Master key check
+    if _env_var_set(env, "LITELLM_MASTER_KEY"):
+        print(f"  {TICK} LITELLM_MASTER_KEY is set")
+    else:
+        print(f"  {WARN} LITELLM_MASTER_KEY not set — proxy won't accept requests")
+        print(f"     Add to .env:  LITELLM_MASTER_KEY=sk-litellm-<your-key>")
+
+    print()
+    provider_status: dict[str, tuple[bool, str]] = {}
+    ready_pids: list[str] = []
+    not_ready_pids: list[str] = []
+
+    for pid, prov in providers.items():
+        ready, reason = _check_provider_ready(pid, prov, env, auth_files_conf)
+        provider_status[pid] = (ready, reason)
+        icon = _readiness_icon(ready)
+        auth_type = prov.get("auth", "none")
+        auth_label = {"api_key": "API key", "oauth": "OAuth"}.get(auth_type, "none")
+        name = prov.get("name", pid)
+
+        tier_list = ", ".join(t for t in tiers if t in prov.get("tiers", {}))
+        print(f"  {icon} {name:<28} {auth_label:<10} {_dim(reason)}")
+        if tier_list:
+            print(f"    {_dim('Tiers: ' + tier_list)}")
+
+        if ready:
+            ready_pids.append(pid)
+        else:
+            not_ready_pids.append(pid)
+
+    if not ready_pids:
+        print(f"\n  {_red('No providers are ready.')} Set up API keys in .env or run auth commands first.")
+        print(f"  See .env.example for guidance, or run: litellmctl auth status")
+        sys.exit(1)
+
+    # Offer to fix missing providers
+    if not_ready_pids:
+        print(f"\n  {_dim(f'{len(not_ready_pids)} provider(s) need setup.')}")
+        for pid in not_ready_pids:
+            prov = providers[pid]
+            auth_type = prov.get("auth", "none")
+            if auth_type == "oauth":
+                cmd = prov.get("auth_cmd", f"litellmctl auth {pid}")
+                print(f"    {ARROW} {prov['name']}: run  {_bold(cmd)}")
+            elif auth_type == "api_key":
+                vars_needed = prov.get("env_vars", [])
+                print(f"    {ARROW} {prov['name']}: add to .env  {_bold(', '.join(vars_needed))}")
+
+        if _confirm(f"\n  Include only ready providers?"):
+            pass  # we'll filter below
+        else:
+            print(f"  {_dim('Including all providers (unready ones may fail at runtime)')}")
+            ready_pids = list(providers.keys())
+
+    # ── Step 2: Select providers ──
+    _step(2, "Select providers to include")
+
+    available = [(pid, providers[pid]) for pid in ready_pids if pid in providers]
+    for i, (pid, prov) in enumerate(available, 1):
+        tier_list = ", ".join(t for t in tiers if t in prov.get("tiers", {}))
+        print(f"  [{i}] {prov['name']:<28} {_dim(prov.get('desc', ''))}")
+        if tier_list:
+            print(f"      {_dim('Tiers: ' + tier_list)}")
+
+    sel_idx = _pick_many(
+        f"\n  Select providers (comma-separated, or 'all') [all]: ",
+        len(available),
     )
-    selected_tiers = [available_tiers[i] for i in tier_idx] if tier_idx else available_tiers
-    print(f"  -> {_green(', '.join(selected_tiers))}")
+    selected_pids = [available[i][0] for i in sel_idx]
+    selected_names = [providers[pid]["name"] for pid in selected_pids]
+    print(f"  {ARROW} {_green(', '.join(selected_names))}")
 
-    # ── Step 2: Fallback providers ──
-    fallbacks_list = [(pid, p) for pid, p in providers.items() if p.get("role") == "fallback"]
-    print(f"\n{_bold('Available fallback providers:')}")
-    for i, (pid, p) in enumerate(fallbacks_list, 1):
-        auth_label = "OAuth" if p.get("auth") == "oauth" else "API key"
-        tiers_avail = ", ".join(t for t in tiers if t in p["tiers"])
-        print(f"  [{i}] {p['name']:<28} {auth_label:<10} {_dim(p.get('desc', ''))}")
-        print(f"      {_dim('Tiers: ' + tiers_avail)}")
+    # ── Step 3: Per-tier primary provider ──
+    _step(3, "Choose primary provider for each tier")
+    print(f"  {_dim('The primary is the main model behind the serving alias.')}")
+    print(f"  {_dim('Others become fallbacks, tried in order on failure.')}")
 
-    fb_idx = _pick_numbers(
-        f"\nSelect fallback providers (comma-separated, or 'all') [all]: ",
-        len(fallbacks_list),
-    )
-    selected_fb_ids = (
-        [fallbacks_list[i][0] for i in fb_idx]
-        if fb_idx is not None
-        else [pid for pid, _ in fallbacks_list]
-    )
-    selected_fb_names = [providers[pid]["name"] for pid in selected_fb_ids]
-    print(f"  -> {_green(', '.join(selected_fb_names))}")
+    primary_map: dict[str, str] = {}
 
-    # ── Step 3: Fallback ordering per tier ──
-    fallback_order: dict[str, list[str]] = {}
-    print(f"\n{_bold('Fallback order per tier')}")
-    print(_dim("  (enter reordered numbers, or press Enter to accept default)"))
-
-    for tier in selected_tiers:
-        default_for_tier = default_tier_order.get(tier, [])
-        available_for_tier = [
-            pid for pid in default_for_tier
-            if pid in selected_fb_ids and tier in providers[pid]["tiers"]
+    for tier in tiers:
+        candidates = [
+            pid for pid in selected_pids
+            if tier in providers[pid].get("tiers", {})
         ]
-        for pid in selected_fb_ids:
-            if pid not in available_for_tier and tier in providers[pid]["tiers"]:
-                available_for_tier.append(pid)
-
-        if not available_for_tier:
-            fallback_order[tier] = []
+        if not candidates:
+            print(f"\n  {_yellow(tier)}: no providers have this tier — skipping")
             continue
 
+        # Use existing default if available and in candidates
+        dp = default_primary.get(tier)
+        default_idx = 0
+        if dp in candidates:
+            default_idx = candidates.index(dp)
+
         print(f"\n  {_bold(tier)}:")
-        for i, pid in enumerate(available_for_tier, 1):
+        for i, pid in enumerate(candidates, 1):
+            m = providers[pid]["tiers"][tier][0]
+            marker = " (current)" if pid == dp else ""
+            print(f"    [{i}] {providers[pid]['name']:<24} {ARROW} {m['model_name']}{_dim(marker)}")
+
+        if len(candidates) == 1:
+            choice = 0
+            print(f"    {_dim('(only one option)')}")
+        else:
+            choice = _pick_one(
+                f"  Primary for {tier} [{default_idx + 1}]: ",
+                candidates,
+                default=default_idx + 1,
+            )
+        primary_map[tier] = candidates[choice]
+        prim_model = providers[candidates[choice]]["tiers"][tier][0]["model_name"]
+        print(f"    {TICK} {tier} {ARROW} {_green(prim_model)}")
+
+    active_tiers = [t for t in tiers if t in primary_map]
+
+    # ── Step 4: Fallback ordering per tier ──
+    _step(4, "Fallback order per tier")
+    print(f"  {_dim('Reorder fallback providers, or press Enter for defaults.')}")
+    print(f"  {_dim('The primary is excluded — it is tried first automatically.')}")
+
+    fallback_map: dict[str, list[str]] = {}
+
+    for tier in active_tiers:
+        primary_pid = primary_map[tier]
+
+        # Build candidate list: default order first, then any extras
+        default_order = default_fallback.get(tier, [])
+        candidates = []
+        for pid in default_order:
+            if (pid in selected_pids and pid != primary_pid
+                    and tier in providers[pid].get("tiers", {})):
+                candidates.append(pid)
+        for pid in selected_pids:
+            if (pid not in candidates and pid != primary_pid
+                    and tier in providers[pid].get("tiers", {})):
+                candidates.append(pid)
+
+        if not candidates:
+            print(f"\n  {_bold(tier)}: {_dim('no fallback providers')}")
+            fallback_map[tier] = []
+            continue
+
+        print(f"\n  {_bold(tier)} (primary: {providers[primary_pid]['name']}):")
+        for i, pid in enumerate(candidates, 1):
             m = providers[pid]["tiers"][tier][0]
             print(f"    [{i}] {m['model_name']:<40} ({providers[pid]['name']})")
 
-        default_nums = ",".join(str(i) for i in range(1, len(available_for_tier) + 1))
+        default_nums = ",".join(str(i) for i in range(1, len(candidates) + 1))
         ans = _ask(f"  Order [{default_nums}]: ", default_nums)
 
         order: list[str] = []
         for part in ans.replace(" ", ",").split(","):
             part = part.strip()
-            if part.isdigit() and 1 <= int(part) <= len(available_for_tier):
-                pid = available_for_tier[int(part) - 1]
+            if part.isdigit() and 1 <= int(part) <= len(candidates):
+                pid = candidates[int(part) - 1]
                 if pid not in order:
                     order.append(pid)
-        fallback_order[tier] = order if order else available_for_tier
+        fallback_map[tier] = order if order else candidates
 
-    # ── Step 4: Generate ──
-    all_selected = [primary_id] + selected_fb_ids
+    # ── Step 5: Generate ──
+    _step(5, "Generate config")
+
+    all_selected = list(dict.fromkeys(
+        [primary_map[t] for t in active_tiers] + selected_pids
+    ))
     models = _collect_models(all_selected, providers, tiers)
-    fallbacks = _build_fallbacks(selected_tiers, primary_id, selected_fb_ids, fallback_order, providers)
-    yaml_content = _generate_yaml(models, fallbacks, defaults)
+    aliases = _build_aliases(active_tiers, primary_map, providers)
+    fallbacks = _build_fallbacks(active_tiers, primary_map, fallback_map, providers)
+    yaml_content = _generate_yaml(models, aliases, fallbacks, defaults)
 
-    # Summary
-    print(f"\n{_bold('Summary')}")
-    print(_dim("-" * 50))
-    print(f"  Primary:   {primary['name']} ({', '.join(selected_tiers)})")
-    print(f"  Fallbacks: {', '.join(selected_fb_names)}")
-    print(f"  Models:    {len(models)} total")
+    # ── Summary ──
+    _header("Summary")
 
+    for tier in active_tiers:
+        ppid = primary_map[tier]
+        pmodel = providers[ppid]["tiers"][tier][0]["model_name"]
+        fb_pids = fallback_map.get(tier, [])
+        fb_models = []
+        for fpid in fb_pids:
+            for m in providers[fpid]["tiers"].get(tier, []):
+                fb_models.append(m["model_name"])
+        print(f"  {_bold(tier)}: {_green(pmodel)}")
+        if fb_models:
+            print(f"    fallbacks: {' → '.join(fb_models)}")
+
+    print(f"\n  Models: {len(models)} total  |  Tiers: {', '.join(active_tiers)}")
+    print(f"  Providers: {', '.join(providers[p]['name'] for p in all_selected)}")
+
+    # Required credentials summary
     env_vars_needed: list[str] = []
     auth_cmds_needed: list[str] = []
     for pid in all_selected:
         p = providers[pid]
-        env_vars_needed.extend(p.get("env_vars", []))
-        if p.get("auth_cmd"):
+        for v in p.get("env_vars", []):
+            if v not in env_vars_needed:
+                env_vars_needed.append(v)
+        if p.get("auth_cmd") and p["auth_cmd"] not in auth_cmds_needed:
             auth_cmds_needed.append(p["auth_cmd"])
-    env_vars_needed.append("LITELLM_MASTER_KEY")
+    if "LITELLM_MASTER_KEY" not in env_vars_needed:
+        env_vars_needed.append("LITELLM_MASTER_KEY")
 
-    if env_vars_needed:
-        print(f"\n  {_bold('Required .env vars:')} {', '.join(sorted(set(env_vars_needed)))}")
+    missing_env = [v for v in env_vars_needed if not _env_var_set(env, v)]
+    if missing_env:
+        print(f"\n  {WARN} Missing .env vars: {_yellow(', '.join(missing_env))}")
+        print(f"     Edit {ENV_FILE} and add these before starting the proxy.")
     if auth_cmds_needed:
-        print(f"  {_bold('Auth commands:')}")
-        for cmd in auth_cmds_needed:
-            print(f"    {cmd}")
+        not_authed = [
+            cmd for cmd in auth_cmds_needed
+            if not any(
+                _auth_file_exists(env, auth_files_conf.get(pid, {}))
+                for pid in all_selected
+                if providers[pid].get("auth_cmd") == cmd
+            )
+        ]
+        if not_authed:
+            print(f"\n  {WARN} Run these auth commands:")
+            for cmd in not_authed:
+                print(f"     {_bold(cmd)}")
+
     print()
 
-    ans = _ask("  Write config.yaml? [Y/n]: ", "y")
-    if ans.lower().startswith("n"):
-        print(_yellow("  Aborted."))
+    # ── Write ──
+    if not _confirm("  Write config.yaml?"):
+        print(f"  {_yellow('Aborted.')}")
         return
 
     if CONFIG_FILE.exists():
         backup = CONFIG_FILE.with_suffix(".yaml.bak")
         shutil.copy2(CONFIG_FILE, backup)
-        print(_dim(f"  Backed up -> {backup.name}"))
+        print(f"  {_dim(f'Backed up → {backup.name}')}")
 
     CONFIG_FILE.write_text(yaml_content)
-    print(_green(f"  Written to {CONFIG_FILE}"))
+    print(f"  {TICK} Written to {CONFIG_FILE}")
+
+    # Offer to restart
+    proxy_running = False
+    try:
+        port_file = PROJECT_DIR / ".proxy-port"
+        if port_file.exists():
+            port = port_file.read_text().strip()
+            import socket
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.settimeout(1)
+                proxy_running = s.connect_ex(("127.0.0.1", int(port))) == 0
+    except Exception:
+        pass
+
+    if proxy_running:
+        if _confirm("\n  Proxy is running. Restart now?"):
+            ctl = SCRIPT_DIR / "litellmctl"
+            try:
+                subprocess.run([str(ctl), "restart"], check=True)
+            except (subprocess.CalledProcessError, FileNotFoundError):
+                print(f"  {WARN} Auto-restart failed. Run manually: litellmctl restart")
+        else:
+            print(f"  {_dim('Run litellmctl restart when ready.')}")
+    else:
+        print(f"  {_dim('Start the proxy with: litellmctl start')}")
+
     print()
 
 
-# ── CLI ────────────────────────────────────────────────────────────────────
+# ── CLI ─────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     try:
         run_wizard()
     except KeyboardInterrupt:
-        print(_yellow("\nAborted."))
+        print(_yellow("\n  Aborted."))
         sys.exit(130)
     except Exception as e:
-        print(_red(f"\nError: {e}"))
+        print(_red(f"\n  Error: {e}"))
+        import traceback
+        traceback.print_exc()
         sys.exit(1)

@@ -1,213 +1,156 @@
 model_list:
-  # === Z.AI tier ===
-  - model_name: zai/glm-4.5
-    litellm_params:
-      model: anthropic/glm-4.5
-      api_key: os.environ/ZAI_API_KEY
-      api_base: https://api.z.ai/api/anthropic
-      timeout: 120
-  - model_name: zai/glm-4.5-air
-    litellm_params:
-      model: anthropic/glm-4.5-air
-      api_key: os.environ/ZAI_API_KEY
-      api_base: https://api.z.ai/api/anthropic
-      timeout: 90
-  - model_name: zai/glm-4.5-flash
-    litellm_params:
-      model: anthropic/glm-4.5-flash
-      api_key: os.environ/ZAI_API_KEY
-      api_base: https://api.z.ai/api/anthropic
-      timeout: 60
-  - model_name: zai/glm-4.5v
-    litellm_params:
-      model: anthropic/glm-4.5v
-      api_key: os.environ/ZAI_API_KEY
-      api_base: https://api.z.ai/api/anthropic
-      timeout: 120
-  - model_name: zai/glm-4.6
-    litellm_params:
-      model: anthropic/glm-4.6
-      api_key: os.environ/ZAI_API_KEY
-      api_base: https://api.z.ai/api/anthropic
-      timeout: 120
-  - model_name: zai/glm-4.6v
-    litellm_params:
-      model: anthropic/glm-4.6v
-      api_key: os.environ/ZAI_API_KEY
-      api_base: https://api.z.ai/api/anthropic
-      timeout: 120
-  - model_name: zai/glm-4.7
-    litellm_params:
-      model: anthropic/glm-4.7
-      api_key: os.environ/ZAI_API_KEY
-      api_base: https://api.z.ai/api/anthropic
-      timeout: 120
-  - model_name: zai/glm-4.7-flash
-    litellm_params:
-      model: anthropic/glm-4.7-flash
-      api_key: os.environ/ZAI_API_KEY
-      api_base: https://api.z.ai/api/anthropic
-      timeout: 60
-  - model_name: zai/glm-4.7-flashx
-    litellm_params:
-      model: anthropic/glm-4.7-flashx
-      api_key: os.environ/ZAI_API_KEY
-      api_base: https://api.z.ai/api/anthropic
-      timeout: 60
-  - model_name: zai/glm-5
-    litellm_params:
-      model: anthropic/glm-5
-      api_key: os.environ/ZAI_API_KEY
-      api_base: https://api.z.ai/api/anthropic
-      timeout: 180
-  - model_name: zai/glm-5v
-    litellm_params:
-      model: anthropic/glm-5v
-      api_key: os.environ/ZAI_API_KEY
-      api_base: https://api.z.ai/api/anthropic
-      timeout: 180
-  - model_name: zai/glm-5-flash
-    litellm_params:
-      model: anthropic/glm-5-flash
-      api_key: os.environ/ZAI_API_KEY
-      api_base: https://api.z.ai/api/anthropic
-      timeout: 60
-
-  # === Gemini CLI tier ===
-  - model_name: gemini-cli/gemini-2.5-pro
-    litellm_params:
-      model: gemini_cli/gemini-2.5-pro
-      timeout: 120
-  - model_name: gemini-cli/gemini-2.5-flash
-    litellm_params:
-      model: gemini_cli/gemini-2.5-flash
-      timeout: 60
-  - model_name: gemini-cli/gemini-2.5-flash-lite
-    litellm_params:
-      model: gemini_cli/gemini-2.5-flash-lite
-      timeout: 45
-
-  # === Qwen Portal tier ===
-  - model_name: qwen-cli/qwen3-coder-plus
-    litellm_params:
-      model: qwen_portal/qwen3-coder-plus
-      timeout: 90
-  - model_name: qwen-cli/qwen3-vl-plus
-    litellm_params:
-      model: qwen_portal/vision-model
-      timeout: 90
-
-  # === Alibaba Cloud ===
-  - model_name: alibaba/qwen3.5-plus
-    litellm_params:
-      model: alibaba/qwen3.5-plus
-      api_key: os.environ/DASHSCOPE_API_KEY
-      timeout: 90
-  - model_name: alibaba/qwen3-coder-plus
-    litellm_params:
-      model: alibaba/qwen3-coder-plus
-      api_key: os.environ/DASHSCOPE_API_KEY
-      timeout: 90
-  - model_name: alibaba/qwen3-coder-next
-    litellm_params:
-      model: alibaba/qwen3-coder-next
-      api_key: os.environ/DASHSCOPE_API_KEY
-      timeout: 60
-
-  # === Kimi Code ===
-  - model_name: kimi-code/kimi-for-coding
-    litellm_params:
-      model: kimi_code/kimi-for-coding
-      timeout: 120
-
-  # === Codex tier ===
   - model_name: codex/gpt-5.3-codex
     model_info:
       mode: responses
     litellm_params:
       model: chatgpt/gpt-5.3-codex
-      timeout: 180
   - model_name: codex/gpt-5.3-codex-spark
     model_info:
       mode: responses
     litellm_params:
       model: chatgpt/gpt-5.3-codex-spark
-      timeout: 120
-  - model_name: codex/gpt-5.2-codex
-    model_info:
-      mode: responses
-    litellm_params:
-      model: chatgpt/gpt-5.2-codex
-      timeout: 180
-  - model_name: codex/gpt-5.1-codex
-    model_info:
-      mode: responses
-    litellm_params:
-      model: chatgpt/gpt-5.1-codex
-      timeout: 120
   - model_name: codex/gpt-5.1-codex-mini
     model_info:
       mode: responses
     litellm_params:
       model: chatgpt/gpt-5.1-codex-mini
-      timeout: 60
+  - model_name: codex/gpt-5.2-codex
+    model_info:
+      mode: responses
+    litellm_params:
+      model: chatgpt/gpt-5.2-codex
+  - model_name: codex/gpt-5.1-codex
+    model_info:
+      mode: responses
+    litellm_params:
+      model: chatgpt/gpt-5.1-codex
   - model_name: codex/gpt-5.2
     model_info:
       mode: responses
     litellm_params:
       model: chatgpt/gpt-5.2
-      timeout: 120
   - model_name: codex/gpt-5.1
     model_info:
       mode: responses
     litellm_params:
       model: chatgpt/gpt-5.1
-      timeout: 90
 
-  # === MiniMax ===
+  - model_name: anthropic/claude-opus-4-6
+    litellm_params:
+      model: anthropic/claude-opus-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: anthropic/claude-sonnet-4-6
+    litellm_params:
+      model: anthropic/claude-sonnet-4-6
+      api_key: os.environ/ANTHROPIC_API_KEY
+  - model_name: anthropic/claude-haiku-4-5
+    litellm_params:
+      model: anthropic/claude-haiku-4-5-20251001
+      api_key: os.environ/ANTHROPIC_API_KEY
+
+  - model_name: kimi-code/kimi-for-coding
+    litellm_params:
+      model: kimi_code/kimi-for-coding
+
+  - model_name: gemini-cli/gemini-2.5-pro
+    litellm_params:
+      model: gemini_cli/gemini-2.5-pro
+  - model_name: gemini-cli/gemini-2.5-flash
+    litellm_params:
+      model: gemini_cli/gemini-2.5-flash
+  - model_name: gemini-cli/gemini-2.5-flash-lite
+    litellm_params:
+      model: gemini_cli/gemini-2.5-flash-lite
+
+  - model_name: qwen-cli/qwen3-coder-plus
+    litellm_params:
+      model: qwen_portal/qwen3-coder-plus
+  - model_name: qwen-cli/qwen3-vl-plus
+    litellm_params:
+      model: qwen_portal/vision-model
+
+  - model_name: alibaba/qwen3.5-plus
+    litellm_params:
+      model: alibaba/qwen3.5-plus
+      timeout: 90
+      api_key: os.environ/DASHSCOPE_API_KEY
+  - model_name: alibaba/qwen3-coder-plus
+    litellm_params:
+      model: alibaba/qwen3-coder-plus
+      timeout: 90
+      api_key: os.environ/DASHSCOPE_API_KEY
+  - model_name: alibaba/qwen3-coder-next
+    litellm_params:
+      model: alibaba/qwen3-coder-next
+      timeout: 60
+      api_key: os.environ/DASHSCOPE_API_KEY
+
   - model_name: minimax/MiniMax-M2.5-highspeed
     litellm_params:
       model: anthropic/MiniMax-M2.5-highspeed
       api_key: os.environ/MINIMAX_API_KEY
       api_base: https://api.minimax.io/anthropic
-      timeout: 90
 
-  # === Claude tier (actual Anthropic endpoints) ===
-  - model_name: anthropic/claude-opus-4-6
+  - model_name: zai/glm-5
     litellm_params:
-      model: anthropic/claude-opus-4-6
-      api_key: os.environ/ANTHROPIC_API_KEY
-      timeout: 180
-  - model_name: anthropic/claude-sonnet-4-5
+      model: anthropic/glm-5
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.5-air
     litellm_params:
-      model: anthropic/claude-sonnet-4-5-20250929
-      api_key: os.environ/ANTHROPIC_API_KEY
-      timeout: 120
-  - model_name: anthropic/claude-haiku-4-5
+      model: anthropic/glm-4.5-air
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.5-flash
     litellm_params:
-      model: anthropic/claude-haiku-4-5-20251001
-      api_key: os.environ/ANTHROPIC_API_KEY
-      timeout: 60
-
-  # === Stubs (API-facing names → first non-Anthropic provider) ===
-  - model_name: claude-opus-4-6
-    model_info:
-      mode: responses
+      model: anthropic/glm-4.5-flash
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.5
     litellm_params:
-      model: chatgpt/gpt-5.3-codex
-      timeout: 180
-  - model_name: claude-sonnet-4-5
-    model_info:
-      mode: responses
+      model: anthropic/glm-4.5
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.5v
     litellm_params:
-      model: chatgpt/gpt-5.3-codex-spark
-      timeout: 120
-  - model_name: claude-haiku-4-5
-    model_info:
-      mode: responses
+      model: anthropic/glm-4.5v
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.6
     litellm_params:
-      model: chatgpt/gpt-5.1-codex-mini
-      timeout: 60
+      model: anthropic/glm-4.6
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.6v
+    litellm_params:
+      model: anthropic/glm-4.6v
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.7
+    litellm_params:
+      model: anthropic/glm-4.7
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.7-flash
+    litellm_params:
+      model: anthropic/glm-4.7-flash
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.7-flashx
+    litellm_params:
+      model: anthropic/glm-4.7-flashx
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-5v
+    litellm_params:
+      model: anthropic/glm-5v
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-5-flash
+    litellm_params:
+      model: anthropic/glm-5-flash
+      api_key: os.environ/ZAI_API_KEY
+      api_base: https://api.z.ai/api/anthropic
 
 router_settings:
   num_retries: 2
@@ -216,13 +159,39 @@ router_settings:
   allowed_fails: 3
   cooldown_time: 15
   routing_strategy: simple-shuffle
+  model_group_alias:
+    opus: codex/gpt-5.3-codex
+    sonnet: anthropic/claude-sonnet-4-6
+    haiku: codex/gpt-5.1-codex-mini
   fallbacks:
-    - claude-opus-4-6:
-        [alibaba/qwen3.5-plus, kimi-code/kimi-for-coding, anthropic/claude-opus-4-6, zai/glm-5]
-    - claude-sonnet-4-5:
-        [qwen-cli/qwen3-coder-plus, alibaba/qwen3-coder-plus, anthropic/claude-sonnet-4-5, zai/glm-4.5-air]
-    - claude-haiku-4-5:
-        [alibaba/qwen3-coder-next, qwen-cli/qwen3-vl-plus, anthropic/claude-haiku-4-5, zai/glm-4.5-flash]
+    - opus:
+        [
+          alibaba/qwen3.5-plus,
+          kimi-code/kimi-for-coding,
+          anthropic/claude-opus-4-6,
+          zai/glm-5,
+          gemini-cli/gemini-2.5-pro,
+          minimax/MiniMax-M2.5-highspeed,
+        ]
+    - sonnet:
+        [
+          codex/gpt-5.3-codex-spark,
+          qwen-cli/qwen3-coder-plus,
+          alibaba/qwen3-coder-plus,
+          zai/glm-4.5-air,
+          kimi-code/kimi-for-coding,
+          gemini-cli/gemini-2.5-flash,
+          minimax/MiniMax-M2.5-highspeed,
+        ]
+    - haiku:
+        [
+          qwen-cli/qwen3-vl-plus,
+          alibaba/qwen3-coder-next,
+          anthropic/claude-haiku-4-5,
+          zai/glm-4.5-flash,
+          gemini-cli/gemini-2.5-flash-lite,
+          minimax/MiniMax-M2.5-highspeed,
+        ]
 
 litellm_settings:
   drop_params: true

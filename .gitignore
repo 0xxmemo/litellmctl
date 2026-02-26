@@ -23,3 +23,6 @@ __pycache__/
 .vscode/
 .idea/
 ref/
+
+# Backup files
+*.bak

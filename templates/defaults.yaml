@@ -14,33 +14,49 @@ load_order:
   - anthropic
   - zai
 
-# Per-tier default fallback order (matches the hand-tuned config)
+# Per-tier primary provider and fallback order (matches the hand-tuned config)
+#   primary  = the provider whose model_name the alias points to
+#   fallbacks = tried in order when the primary fails
+primary:
+  opus: chatgpt
+  sonnet: anthropic
+  haiku: chatgpt
+
 fallback_order:
   opus:
-    - kimi_code
     - alibaba
-    - minimax
-    - chatgpt
-    - gemini_cli
+    - kimi_code
     - anthropic
     - zai
   sonnet:
-    - kimi_code
+    - chatgpt
     - qwen_portal
     - alibaba
-    - chatgpt
-    - gemini_cli
-    - minimax
-    - anthropic
     - zai
   haiku:
     - qwen_portal
     - alibaba
-    - chatgpt
-    - gemini_cli
-    - minimax
     - anthropic
     - zai
+
+# OAuth auth-file → .env variable mapping (used by wizard to check readiness)
+auth_files:
+  chatgpt:
+    file: auth.chatgpt.json
+    dir_var: CHATGPT_TOKEN_DIR
+    file_var: CHATGPT_AUTH_FILE
+  gemini_cli:
+    file: auth.gemini_cli.json
+    dir_var: GEMINI_CLI_TOKEN_DIR
+    file_var: GEMINI_CLI_AUTH_FILE
+  qwen_portal:
+    file: auth.qwen_portal.json
+    dir_var: QWEN_PORTAL_TOKEN_DIR
+    file_var: QWEN_PORTAL_AUTH_FILE
+  kimi_code:
+    file: auth.kimi_code.json
+    dir_var: KIMI_CODE_TOKEN_DIR
+    file_var: KIMI_CODE_AUTH_FILE
 
 router_settings:
   num_retries: 2

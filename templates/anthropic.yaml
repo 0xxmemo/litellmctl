@@ -11,8 +11,8 @@ tiers:
       model: anthropic/claude-opus-4-6
       api_key: os.environ/ANTHROPIC_API_KEY
   sonnet:
-    - model_name: anthropic/claude-sonnet-4-5
-      model: anthropic/claude-sonnet-4-5-20250929
+    - model_name: anthropic/claude-sonnet-4-6
+      model: anthropic/claude-sonnet-4-6
       api_key: os.environ/ANTHROPIC_API_KEY
   haiku:
     - model_name: anthropic/claude-haiku-4-5
