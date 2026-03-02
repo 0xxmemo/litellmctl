@@ -25,8 +25,9 @@ litellmctl auth kimi
 litellmctl start           # background service, auto-starts on boot
 ```
 
-`install` and `start` automatically set up a local PostgreSQL database for
-usage tracking, spend logs, and key management — no manual DB step needed.
+`install` now prompts whether to set up a local PostgreSQL database and, by
+default, does it automatically. `start` also ensures DB readiness.
+No manual DB step is required.
 If PostgreSQL is installed but not running, it will be started automatically.
 `DATABASE_URL` is written to `.env` on first run if not already present.
 
@@ -49,10 +50,11 @@ templates live in `templates/*.yaml` and update automatically with
 ```bash
 git clone https://github.com/0xxmemo/litellmctl.git ~/.litellm
 cd ~/.litellm
-bin/install                # also sets up local PostgreSQL database
+bin/install                # installs venv + litellm
 cp .env.example .env       # fill in your API keys
 litellmctl setup-completions
 source ~/.zshrc
+litellmctl install         # prompts for local DB setup (recommended)
 ```
 
 ### Update
@@ -65,7 +67,8 @@ litellmctl update          # pull latest, sync submodule, rebuild & restart
 
 ```
 litellmctl wizard                 Interactive config.yaml generator (providers, tiers, fallbacks)
-litellmctl install                Install / reinstall the LiteLLM fork (includes DB setup)
+litellmctl install [--with-db|--without-db]
+                                  Install / reinstall the LiteLLM fork (prompts for DB setup)
 litellmctl auth chatgpt           Login to ChatGPT / Codex (PKCE)
 litellmctl auth gemini            Login to Gemini CLI (PKCE)
 litellmctl auth qwen              Login to Qwen Portal (device-code)
@@ -95,8 +98,9 @@ Use `proxy` for foreground mode when debugging.
 Usage tracking, spend logs, and key management are stored in a local PostgreSQL
 database. Setup is fully automatic:
 
-- **`install`** — creates the database and runs migrations after the venv is built
+- **`install`** — prompts for DB setup (default: yes), then creates DB + runs migrations
 - **`start` / `restart`** — ensures the database is ready before launching the proxy
+- **Automation flags** — use `litellmctl install --with-db` or `--without-db`
 
 If PostgreSQL is installed via Homebrew but not running, it will be started
 automatically. `DATABASE_URL` (`postgresql://localhost/litellm`) is appended to

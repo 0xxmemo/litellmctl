@@ -47,7 +47,7 @@ _litellmctl_completions() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  commands="auth wizard install init-env setup-db start stop restart r logs proxy status toggle-claude setup-completions help"
+  commands="auth wizard install init-env start stop restart r logs proxy status toggle-claude setup-completions help"
   auth_cmds="chatgpt gemini qwen kimi codex status refresh export import"
 
   case "$prev" in
@@ -63,6 +63,9 @@ _litellmctl_completions() {
     start|proxy)
       COMPREPLY=( $(compgen -W "--port --config" -- "$cur") )
       return ;;
+    install)
+      COMPREPLY=( $(compgen -W "--with-db --without-db" -- "$cur") )
+      return ;;
   esac
 }
 complete -F _litellmctl_completions litellmctl
@@ -76,9 +79,8 @@ _litellmctl_completions() {
   commands=(
     'auth:Manage OAuth tokens'
     'wizard:Interactive config.yaml generator'
-    'install:Install, update, or rebuild LiteLLM'
+    'install:Install, update, or rebuild LiteLLM (prompts for DB setup)'
     'init-env:Detect auth files and update .env paths'
-    'setup-db:Create local PostgreSQL DB and run LiteLLM migrations'
     'start:Start proxy as background service'
     'stop:Stop the proxy service'
     'restart:Restart the proxy service'
@@ -109,6 +111,7 @@ _litellmctl_completions() {
       auth)    _describe 'auth command' auth_cmds ;;
       refresh|export) compadd chatgpt gemini qwen kimi ;;
       start|proxy) compadd -- --port --config ;;
+      install) compadd -- --with-db --without-db ;;
     esac
   elif (( CURRENT == 4 )); then
     case "${words[3]}" in
@@ -507,13 +510,56 @@ eval "$(~/.litellm/bin/litellmctl --completions)"'
 }
 
 cmd_install() {
-  "$BIN_DIR/install" "$@"
+  local install_args=()
+  local db_mode="${LITELLM_INSTALL_DB_SETUP:-}"  # yes|no|empty(auto prompt)
+  local env_file="$PROJECT_DIR/.env"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --with-db|--db)     db_mode="yes"; shift ;;
+      --without-db|--no-db) db_mode="no"; shift ;;
+      *)                  install_args+=("$1"); shift ;;
+    esac
+  done
+
+  if [ ${#install_args[@]} -gt 0 ]; then
+    "$BIN_DIR/install" "${install_args[@]}"
+  else
+    "$BIN_DIR/install"
+  fi
 
   # Set up local DB now that the venv is guaranteed to exist
   activate_venv
   load_env
-  ensure_db_ready
-  load_env  # reload to pick up DATABASE_URL written by ensure_db_ready
+  if [ -z "$db_mode" ]; then
+    if is_interactive; then
+      if grep -q "^DATABASE_URL=" "$env_file" 2>/dev/null; then
+        printf "\n  Local database is already configured. Re-run DB setup now? [Y/n] "
+      else
+        printf "\n  Set up local PostgreSQL database for LiteLLM now? [Y/n] "
+      fi
+      local answer
+      read -r answer </dev/tty || answer="y"
+      case "$answer" in
+        [nN]*) db_mode="no" ;;
+        *)     db_mode="yes" ;;
+      esac
+    else
+      # Non-interactive installs should converge fully without manual follow-up.
+      db_mode="yes"
+    fi
+  fi
+
+  if [ "$db_mode" = "yes" ]; then
+    ensure_db_ready
+    load_env  # reload to pick up DATABASE_URL written by ensure_db_ready
+  else
+    _remove_db_env_config
+    unset DATABASE_URL DISABLE_SCHEMA_UPDATE 2>/dev/null || true
+    warn "Skipped local DB setup during install."
+    info "Any existing local DB config was removed from .env."
+    info "Re-run with 'litellmctl install --with-db' to enable local DB again."
+  fi
 
   # Ask to restart if service is running
   local running=false
@@ -741,6 +787,10 @@ ensure_db_ready() {
   local db_name="litellm"
   local db_user="${PGUSER:-${USER:-postgres}}"
   local default_url="postgresql://${db_user}@localhost/${db_name}"
+  if is_linux; then
+    # Prefer Unix socket on Linux to avoid localhost password-auth traps.
+    default_url="postgresql://${db_user}@/${db_name}"
+  fi
 
   # ── Step -1: Ensure PostgreSQL tooling exists ─────────────────────────────
   if ! _ensure_postgres_tools; then
@@ -802,14 +852,37 @@ ensure_db_ready() {
     postgresql://localhost/*|postgres://localhost/*)
       local db_path normalized_url
       db_path="${db_url#*://localhost/}"
-      normalized_url="postgresql://${db_user}@localhost/${db_path}"
-      warn "DATABASE_URL has no DB user; normalizing to '${db_user}@localhost'."
+      if is_linux; then
+        normalized_url="postgresql://${db_user}@/${db_path}"
+        warn "DATABASE_URL uses localhost; switching to Linux local socket URL."
+      else
+        normalized_url="postgresql://${db_user}@localhost/${db_path}"
+        warn "DATABASE_URL has no DB user; normalizing to '${db_user}@localhost'."
+      fi
       if grep -q "^DATABASE_URL=" "$env_file" 2>/dev/null; then
         sed -i.bak "s|^DATABASE_URL=.*|DATABASE_URL=${normalized_url}|" "$env_file"
         rm -f "$env_file.bak"
       fi
       db_url="$normalized_url"
       export DATABASE_URL="$db_url"
+      ;;
+    postgresql://*@localhost/*|postgres://*@localhost/*)
+      if is_linux; then
+        local prefix host_path user_part socket_url
+        prefix="${db_url%%@localhost/*}"
+        user_part="${prefix#*://}"
+        host_path="${db_url#*@localhost/}"
+        if [[ "$user_part" != *:* ]]; then
+          socket_url="postgresql://${user_part}@/${host_path}"
+          warn "DATABASE_URL uses localhost on Linux; switching to local socket URL."
+          if grep -q "^DATABASE_URL=" "$env_file" 2>/dev/null; then
+            sed -i.bak "s|^DATABASE_URL=.*|DATABASE_URL=${socket_url}|" "$env_file"
+            rm -f "$env_file.bak"
+          fi
+          db_url="$socket_url"
+          export DATABASE_URL="$db_url"
+        fi
+      fi
       ;;
   esac
   local parsed_db
@@ -821,8 +894,10 @@ ensure_db_ready() {
   if ! psql -lqt 2>/dev/null | cut -d'|' -f1 | grep -qw "$parsed_db"; then
     info "Creating database '$parsed_db' ..."
     if ! createdb "$parsed_db" 2>/dev/null; then
-      warn "Could not create database '$parsed_db' — skipping DB setup."
-      return 0
+      if ! _linux_bootstrap_role_and_db "$db_user" "$parsed_db"; then
+        warn "Could not create database '$parsed_db' — skipping DB setup."
+        return 0
+      fi
     fi
   fi
 
@@ -921,6 +996,27 @@ _pg_start_linux() {
   pg_isready -q 2>/dev/null
 }
 
+_linux_bootstrap_role_and_db() {
+  local db_user="$1"
+  local db_name="$2"
+  is_linux || return 1
+  command -v sudo &>/dev/null || return 1
+  [[ "$db_user" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
+  [[ "$db_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
+
+  info "Attempting PostgreSQL bootstrap via postgres superuser ..."
+  sudo -n -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${db_user}'" 2>/dev/null \
+    | grep -q 1 \
+    || sudo -n -u postgres createuser --createdb "$db_user" &>/dev/null \
+    || return 1
+
+  sudo -n -u postgres createdb -O "$db_user" "$db_name" &>/dev/null \
+    || sudo -n -u postgres psql -d postgres -c "ALTER DATABASE \"${db_name}\" OWNER TO \"${db_user}\";" &>/dev/null \
+    || true
+
+  psql -lqt 2>/dev/null | cut -d'|' -f1 | grep -qw "$db_name"
+}
+
 # Ensure postgres client/server tools exist. Returns 0 if psql is available.
 _ensure_postgres_tools() {
   command -v psql &>/dev/null && return 0
@@ -966,11 +1062,13 @@ _ensure_postgres_tools() {
   return 1
 }
 
-cmd_setup_db() {
-  activate_venv
-  load_env
-  ensure_db_ready
-  printf "  DB:  %s\n" "${DATABASE_URL:-not configured}"
+_remove_db_env_config() {
+  local env_file="$PROJECT_DIR/.env"
+  [ -f "$env_file" ] || return 0
+  local tmp
+  tmp="$(mktemp)"
+  awk '!/^DATABASE_URL=|^DISABLE_SCHEMA_UPDATE=/' "$env_file" > "$tmp"
+  mv "$tmp" "$env_file"
 }
 
 cmd_uninstall_service() {
@@ -1143,7 +1241,8 @@ $(printf "\033[1mUsage:\033[0m")  litellmctl <command> [args...]
 
 $(printf "\033[1mCommands:\033[0m")
   wizard               Interactive config.yaml generator (providers, tiers, fallbacks)
-  install              Install, update, or rebuild LiteLLM (includes DB setup)
+  install [--with-db|--without-db]
+                     Install, update, or rebuild LiteLLM (prompts for DB setup)
   init-env             Detect auth files and update .env with correct paths
   auth chatgpt         Login to ChatGPT / Codex (browser PKCE)
   auth gemini          Login to Gemini CLI (browser PKCE)
@@ -1186,7 +1285,6 @@ case "$1" in
   install)           shift; cmd_install "$@" ;;
   update)            warn "'update' has been folded into 'install'."; info "Run: litellmctl install [--local]"; exit 0 ;;
   init-env)          shift; cmd_init_env ;;
-  setup-db)          shift; cmd_setup_db ;;
   auth)              shift; cmd_auth "$@" ;;
   start)             shift; cmd_start "$@" ;;
   stop)              shift; cmd_stop ;;
