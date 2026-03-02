@@ -1222,11 +1222,18 @@ _remove_db_env_config() {
 }
 
 # _patch_db_env_flags — write usage-collection env vars when DB is enabled.
-# All three are read directly from the environment by LiteLLM at startup.
+# All flags are read directly from the environment by LiteLLM at startup.
+# LITELLM_LOCAL_MODEL_COST_MAP is always written (not DB-specific) so that
+# our custom provider entries in model_prices_and_context_window.json are used
+# instead of the remote upstream file which doesn't know about our providers.
 # Idempotent: only appends vars that are not already present.
 _patch_db_env_flags() {
   local env_file="$PROJECT_DIR/.env"
   local dirty=false
+  if ! grep -q '^LITELLM_LOCAL_MODEL_COST_MAP=' "$env_file" 2>/dev/null; then
+    printf 'LITELLM_LOCAL_MODEL_COST_MAP=true\n' >> "$env_file"
+    dirty=true
+  fi
   if ! grep -q '^STORE_MODEL_IN_DB=' "$env_file" 2>/dev/null; then
     printf 'STORE_MODEL_IN_DB=true\n' >> "$env_file"
     dirty=true
