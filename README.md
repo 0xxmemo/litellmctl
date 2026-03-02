@@ -26,7 +26,7 @@ litellmctl start           # background service, auto-starts on boot
 ```
 
 `install` now prompts whether to set up a local PostgreSQL database and, by
-default, does it automatically. `start` also ensures DB readiness.
+default, does it automatically.
 No manual DB step is required.
 If PostgreSQL is installed but not running, it will be started automatically.
 `DATABASE_URL` is written to `.env` on first run if not already present.
@@ -89,8 +89,7 @@ litellmctl setup-completions      Add litellmctl to your shell (alias + tab comp
 ```
 
 `start` and `restart` install a system service (macOS: launchd, Linux: systemd)
-that auto-starts on login and restarts on crash. Both commands automatically
-ensure the local database is running and migrated before starting the proxy.
+that auto-starts on login and restarts on crash.
 Use `proxy` for foreground mode when debugging.
 
 ### Database
@@ -99,12 +98,11 @@ Usage tracking, spend logs, and key management are stored in a local PostgreSQL
 database. Setup is fully automatic:
 
 - **`install`** — prompts for DB setup (default: yes), then creates DB + runs migrations
-- **`start` / `restart`** — ensures the database is ready before launching the proxy
+- **`start` / `restart`** — start the proxy service (do not modify DB setup)
 - **Automation flags** — use `litellmctl install --with-db` or `--without-db`
 
-If PostgreSQL is installed via Homebrew but not running, it will be started
-automatically. `DATABASE_URL` (`postgresql://localhost/litellm`) is appended to
-`.env` on first run if not already present.
+If PostgreSQL is installed but not running, install-time DB setup will start it
+automatically. `DATABASE_URL` is appended to `.env` when DB setup is enabled.
 
 To check database connectivity:
 

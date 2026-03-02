@@ -602,8 +602,7 @@ cmd_start() {
   done
 
   activate_venv
-  ensure_db_ready
-  load_env  # reload to pick up DATABASE_URL written by ensure_db_ready
+  load_env
 
   kill_stale_on_port "$port"
 
@@ -649,8 +648,7 @@ cmd_restart() {
   kill_stale_on_port "$port"
 
   activate_venv
-  ensure_db_ready
-  load_env  # reload to pick up DATABASE_URL written by ensure_db_ready
+  load_env
 
   if is_macos; then
     launchd_install "$port" "$config"
@@ -779,7 +777,7 @@ cmd_init_env() {
 
 # ── Database helpers ────────────────────────────────────────────────────────
 
-# ensure_db_ready — called automatically before start/restart/install.
+# ensure_db_ready — called during install when DB setup is enabled.
 # Idempotent: safe to call every time. Skips gracefully if postgres is absent.
 # Returns 0 on success or skip, 1 only on hard errors that should block start.
 ensure_db_ready() {
