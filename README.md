@@ -104,6 +104,8 @@ database. Setup is fully automatic:
 - **Automation flags** — use `litellmctl install --with-db` or `--without-db`
 - **One-shot DB mode** — if you choose DB mode (`keep` / `--with-db`), install
   attempts full automatic repair and exits non-zero if DB is still not ready
+- **Corrupt DB recovery** — in interactive installs, if migrations still fail,
+  installer can prompt to create a fresh local DB and retry once
 - **Permission handling** — installer attempts automatic Postgres role/database
   bootstrap and privileges repair (uses `sudo` when needed)
 - **Always uses latest logic** — if install pulls a newer repo version, it

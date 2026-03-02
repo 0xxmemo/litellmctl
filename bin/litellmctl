@@ -599,9 +599,15 @@ cmd_install() {
     fi
     load_env  # reload to pick up DATABASE_URL written by ensure_db_ready
     if ! _db_is_ready; then
-      error "Database is not ready after install-time setup."
-      error "Install cannot complete DB mode reliably. Re-run: litellmctl install --with-db"
-      return 1
+      if _maybe_offer_fresh_db_recovery; then
+        ensure_db_ready || true
+        load_env
+      fi
+      if ! _db_is_ready; then
+        error "Database is not ready after install-time setup."
+        error "Install cannot complete DB mode reliably. Re-run: litellmctl install --with-db"
+        return 1
+      fi
     fi
   elif [ "$db_mode" = "keep" ]; then
     if ! _db_is_ready; then
@@ -610,9 +616,15 @@ cmd_install() {
       ensure_db_ready || true
       load_env
       if ! _db_is_ready; then
-        error "Automatic DB repair did not complete successfully."
-        error "DB mode is still enabled but unhealthy. Re-run: litellmctl install --with-db"
-        return 1
+        if _maybe_offer_fresh_db_recovery; then
+          ensure_db_ready || true
+          load_env
+        fi
+        if ! _db_is_ready; then
+          error "Automatic DB repair did not complete successfully."
+          error "DB mode is still enabled but unhealthy. Re-run: litellmctl install --with-db"
+          return 1
+        fi
       else
         info "DB repair complete; keeping DB mode enabled."
       fi
@@ -843,6 +855,18 @@ cmd_init_env() {
 
 # ── Database helpers ────────────────────────────────────────────────────────
 
+# Prisma expects a hostname; on Linux we force socket transport explicitly.
+_append_linux_socket_host_param() {
+  local url="$1"
+  is_linux || { printf '%s\n' "$url"; return 0; }
+  [[ "$url" == *"host="* ]] && { printf '%s\n' "$url"; return 0; }
+  if [[ "$url" == *"?"* ]]; then
+    printf '%s&host=%%2Fvar%%2Frun%%2Fpostgresql\n' "$url"
+  else
+    printf '%s?host=%%2Fvar%%2Frun%%2Fpostgresql\n' "$url"
+  fi
+}
+
 # ensure_db_ready — called during install when DB setup is enabled.
 # Idempotent: safe to call every time. Skips gracefully if postgres is absent.
 # Returns 0 on success or skip, 1 only on hard errors that should block start.
@@ -852,8 +876,7 @@ ensure_db_ready() {
   local db_user="${PGUSER:-${USER:-postgres}}"
   local default_url="postgresql://${db_user}@localhost/${db_name}"
   if is_linux; then
-    # Prefer Unix socket on Linux to avoid localhost password-auth traps.
-    default_url="postgresql://${db_user}@/${db_name}"
+    default_url="$(_append_linux_socket_host_param "$default_url")"
   fi
 
   # ── Step -1: Ensure PostgreSQL tooling exists ─────────────────────────────
@@ -916,11 +939,11 @@ ensure_db_ready() {
     postgresql://localhost/*|postgres://localhost/*)
       local db_path normalized_url
       db_path="${db_url#*://localhost/}"
+      normalized_url="postgresql://${db_user}@localhost/${db_path}"
       if is_linux; then
-        normalized_url="postgresql://${db_user}@/${db_path}"
-        warn "DATABASE_URL uses localhost; switching to Linux local socket URL."
+        normalized_url="$(_append_linux_socket_host_param "$normalized_url")"
+        warn "DATABASE_URL had no DB user; normalizing and forcing Linux socket transport for Prisma."
       else
-        normalized_url="postgresql://${db_user}@localhost/${db_path}"
         warn "DATABASE_URL has no DB user; normalizing to '${db_user}@localhost'."
       fi
       if grep -q "^DATABASE_URL=" "$env_file" 2>/dev/null; then
@@ -930,20 +953,35 @@ ensure_db_ready() {
       db_url="$normalized_url"
       export DATABASE_URL="$db_url"
       ;;
+    postgresql://*@/*|postgres://*@/*)
+      local prefix path_part user_part normalized_socket_url
+      prefix="${db_url%%@/*}"
+      user_part="${prefix#*://}"
+      path_part="${db_url#*@/}"
+      if [ -z "$path_part" ]; then
+        path_part="$db_name"
+      fi
+      normalized_socket_url="postgresql://${user_part}@localhost/${path_part}"
+      normalized_socket_url="$(_append_linux_socket_host_param "$normalized_socket_url")"
+      warn "DATABASE_URL used socket shorthand; converting to Prisma-compatible URL."
+      if grep -q "^DATABASE_URL=" "$env_file" 2>/dev/null; then
+        sed -i.bak "s|^DATABASE_URL=.*|DATABASE_URL=${normalized_socket_url}|" "$env_file"
+        rm -f "$env_file.bak"
+      fi
+      db_url="$normalized_socket_url"
+      export DATABASE_URL="$db_url"
+      ;;
     postgresql://*@localhost/*|postgres://*@localhost/*)
       if is_linux; then
-        local prefix host_path user_part socket_url
-        prefix="${db_url%%@localhost/*}"
-        user_part="${prefix#*://}"
-        host_path="${db_url#*@localhost/}"
-        if [[ "$user_part" != *:* ]]; then
-          socket_url="postgresql://${user_part}@/${host_path}"
-          warn "DATABASE_URL uses localhost on Linux; switching to local socket URL."
+        local linux_url
+        linux_url="$(_append_linux_socket_host_param "$db_url")"
+        if [ "$linux_url" != "$db_url" ]; then
+          warn "DATABASE_URL uses localhost on Linux; forcing socket transport for Prisma."
           if grep -q "^DATABASE_URL=" "$env_file" 2>/dev/null; then
-            sed -i.bak "s|^DATABASE_URL=.*|DATABASE_URL=${socket_url}|" "$env_file"
+            sed -i.bak "s|^DATABASE_URL=.*|DATABASE_URL=${linux_url}|" "$env_file"
             rm -f "$env_file.bak"
           fi
-          db_url="$socket_url"
+          db_url="$linux_url"
           export DATABASE_URL="$db_url"
         fi
       fi
@@ -1038,15 +1076,26 @@ PY
 _run_db_migrations() {
   local parsed_db="$1"
   local schema
+  local mig_log
+  mig_log="$LOG_DIR/db-migrate.log"
+  ensure_log_dir
+  : > "$mig_log"
   schema="$(_resolve_proxy_prisma_schema || true)"
 
   if [ -n "$schema" ] && [ -f "$schema" ] && command -v prisma &>/dev/null; then
-    prisma migrate deploy --schema "$schema" &>/dev/null || true
+    (prisma migrate deploy --schema "$schema" >>"$mig_log" 2>&1) || true
   fi
   # Fallback to LiteLLM's internal migration/bootstrap path.
-  litellm --config "$PROJECT_DIR/config.yaml" --skip_server_startup &>/dev/null || true
+  (litellm --config "$PROJECT_DIR/config.yaml" --skip_server_startup >>"$mig_log" 2>&1) || true
 
-  psql "${DATABASE_URL}" -qc 'SELECT 1 FROM "LiteLLM_SpendLogs" LIMIT 0' &>/dev/null
+  if psql "${DATABASE_URL}" -qc 'SELECT 1 FROM "LiteLLM_SpendLogs" LIMIT 0' &>/dev/null; then
+    return 0
+  fi
+
+  warn "Database migrations are still pending."
+  warn "Recent migration output:"
+  tail -n 25 "$mig_log" 2>/dev/null || true
+  return 1
 }
 
 # Start PostgreSQL via Homebrew; returns 0 if postgres becomes ready, 1 otherwise.
@@ -1175,6 +1224,61 @@ _db_is_ready() {
   command -v psql &>/dev/null || return 1
   pg_isready -q 2>/dev/null || return 1
   psql "$db_url" -qc 'SELECT 1 FROM "LiteLLM_SpendLogs" LIMIT 0' &>/dev/null
+}
+
+_db_name_from_url() {
+  local db_url="${1:-${DATABASE_URL:-}}"
+  [ -n "$db_url" ] || { printf 'litellm\n'; return 0; }
+  python3 -c \
+    "from urllib.parse import urlparse; u=urlparse('${db_url}'); print((u.path.lstrip('/') or 'litellm').split('?')[0])" \
+    2>/dev/null || printf 'litellm\n'
+}
+
+_db_user_from_url() {
+  local db_url="${1:-${DATABASE_URL:-}}"
+  local default_user="${PGUSER:-${USER:-postgres}}"
+  [ -n "$db_url" ] || { printf '%s\n' "$default_user"; return 0; }
+  python3 -c \
+    "from urllib.parse import urlparse; u=urlparse('${db_url}'); print(u.username or '${default_user}')" \
+    2>/dev/null || printf '%s\n' "$default_user"
+}
+
+_maybe_offer_fresh_db_recovery() {
+  is_interactive || return 1
+  local db_url="${DATABASE_URL:-}"
+  [ -n "$db_url" ] || return 1
+
+  local db_name db_user answer
+  db_name="$(_db_name_from_url "$db_url")"
+  db_user="$(_db_user_from_url "$db_url")"
+
+  [[ "$db_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
+  [[ "$db_user" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
+
+  printf "\n  DB migrations are still failing. This can indicate a corrupt local DB state.\n"
+  printf "  Create a fresh local DB now? This will DROP database '%s'. [y/N] " "$db_name"
+  read -r answer </dev/tty || answer="n"
+  case "$answer" in
+    [yY]*)
+      info "Resetting local database '$db_name' ..."
+      if is_linux; then
+        _run_with_sudo_if_needed -u postgres dropdb --if-exists "$db_name" &>/dev/null \
+          || dropdb --if-exists "$db_name" &>/dev/null \
+          || true
+        _run_with_sudo_if_needed -u postgres createdb -O "$db_user" "$db_name" &>/dev/null \
+          || createdb "$db_name" &>/dev/null \
+          || return 1
+        _linux_bootstrap_role_and_db "$db_user" "$db_name" || true
+      else
+        dropdb --if-exists "$db_name" &>/dev/null || true
+        createdb "$db_name" &>/dev/null || return 1
+      fi
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 cmd_uninstall_service() {
