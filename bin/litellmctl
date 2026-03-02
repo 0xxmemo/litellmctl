@@ -527,7 +527,7 @@ eval "$(~/.litellm/bin/litellmctl --completions)"'
 
 cmd_install() {
   local install_args=()
-  local db_mode="${LITELLM_INSTALL_DB_SETUP:-}"  # yes|no|empty(auto prompt)
+  local db_mode="${LITELLM_INSTALL_DB_SETUP:-}"  # yes|no|keep|empty(auto prompt)
   local env_file="$PROJECT_DIR/.env"
 
   while [[ $# -gt 0 ]]; do
@@ -550,19 +550,29 @@ cmd_install() {
   if [ -z "$db_mode" ]; then
     if is_interactive; then
       if grep -q "^DATABASE_URL=" "$env_file" 2>/dev/null; then
-        printf "\n  Local database is already configured. Re-run DB setup now? [Y/n] "
+        printf "\n  Local database is already configured. [K]eep DB mode or [D]isable DB mode? [K/d] "
+        local keep_or_disable
+        read -r keep_or_disable </dev/tty || keep_or_disable="k"
+        case "$keep_or_disable" in
+          [dD]*) db_mode="no" ;;
+          *)     db_mode="keep" ;;
+        esac
       else
         printf "\n  Set up local PostgreSQL database for LiteLLM now? [Y/n] "
+        local answer
+        read -r answer </dev/tty || answer="y"
+        case "$answer" in
+          [nN]*) db_mode="no" ;;
+          *)     db_mode="yes" ;;
+        esac
       fi
-      local answer
-      read -r answer </dev/tty || answer="y"
-      case "$answer" in
-        [nN]*) db_mode="no" ;;
-        *)     db_mode="yes" ;;
-      esac
     else
       # Non-interactive installs should converge fully without manual follow-up.
-      db_mode="yes"
+      if grep -q "^DATABASE_URL=" "$env_file" 2>/dev/null; then
+        db_mode="keep"
+      else
+        db_mode="yes"
+      fi
     fi
   fi
 
@@ -592,6 +602,38 @@ cmd_install() {
         warn "DB setup incomplete in non-interactive mode — disabled DB mode automatically."
         warn "Re-run 'litellmctl install --with-db' when PostgreSQL is healthy."
       fi
+    fi
+  elif [ "$db_mode" = "keep" ]; then
+    if ! _db_is_ready; then
+      warn "Existing DB mode is enabled, but DB is not fully ready."
+      info "Attempting automatic DB repair ..."
+      ensure_db_ready || true
+      load_env
+      if ! _db_is_ready; then
+        warn "Automatic DB repair did not complete successfully."
+        if is_interactive; then
+          printf "  Disable DB mode now to keep proxy healthy? [Y/n] "
+          local disable_answer
+          read -r disable_answer </dev/tty || disable_answer="y"
+          case "$disable_answer" in
+            [nN]*) warn "Keeping DB config as-is (proxy may fail until DB is fixed)." ;;
+            *)
+              _remove_db_env_config
+              load_env
+              info "Disabled DB mode (removed DATABASE_URL / DISABLE_SCHEMA_UPDATE from .env)."
+              info "Re-run with 'litellmctl install --with-db' after fixing PostgreSQL."
+              ;;
+          esac
+        else
+          _remove_db_env_config
+          load_env
+          warn "DB repair incomplete in non-interactive mode — disabled DB mode automatically."
+        fi
+      else
+        info "DB repair complete; keeping DB mode enabled."
+      fi
+    else
+      info "Keeping existing DB mode."
     fi
   else
     _remove_db_env_config

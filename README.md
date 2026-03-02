@@ -98,6 +98,8 @@ Usage tracking, spend logs, and key management are stored in a local PostgreSQL
 database. Setup is fully automatic:
 
 - **`install`** — prompts for DB setup (default: yes), then creates DB + runs migrations
+- **When DB already exists** — installer prompts to **keep** current DB mode or
+  **disable** DB mode (instead of asking to re-run setup)
 - **`start` / `restart`** — start the proxy service (do not modify DB setup)
 - **Automation flags** — use `litellmctl install --with-db` or `--without-db`
 - **Auto-recovery** — if DB setup fails during install, CLI offers to disable DB mode
