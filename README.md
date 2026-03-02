@@ -102,10 +102,12 @@ database. Setup is fully automatic:
   **disable** DB mode (instead of asking to re-run setup)
 - **`start` / `restart`** — start the proxy service (do not modify DB setup)
 - **Automation flags** — use `litellmctl install --with-db` or `--without-db`
-- **Auto-recovery** — if DB setup fails during install, CLI offers to disable DB mode
-  (or does it automatically in non-interactive mode) to keep the proxy healthy
+- **One-shot DB mode** — if you choose DB mode (`keep` / `--with-db`), install
+  attempts full automatic repair and exits non-zero if DB is still not ready
 - **Permission handling** — installer attempts automatic Postgres role/database
   bootstrap and privileges repair (uses `sudo` when needed)
+- **Always uses latest logic** — if install pulls a newer repo version, it
+  automatically reloads the updated `litellmctl` script in the same run
 
 If PostgreSQL is installed but not running, install-time DB setup will start it
 automatically. `DATABASE_URL` is appended to `.env` when DB setup is enabled.
