@@ -214,6 +214,22 @@ kill_stale_on_port() {
 is_macos() { [[ "$(uname -s)" == "Darwin" ]]; }
 is_linux() { [[ "$(uname -s)" == "Linux" ]]; }
 
+_run_with_sudo_if_needed() {
+  # Tries non-interactive sudo first, then interactive sudo when possible.
+  # Usage: _run_with_sudo_if_needed <cmd> [args...]
+  if [ "$EUID" -eq 0 ]; then
+    "$@"
+    return $?
+  fi
+  command -v sudo &>/dev/null || return 1
+  sudo -n "$@" 2>/dev/null && return 0
+  if is_interactive; then
+    sudo "$@"
+    return $?
+  fi
+  return 1
+}
+
 # Build extra CLI flags from env vars (NUM_WORKERS, KEEPALIVE_TIMEOUT).
 _perf_flags() {
   local flags=()
@@ -551,8 +567,32 @@ cmd_install() {
   fi
 
   if [ "$db_mode" = "yes" ]; then
-    ensure_db_ready
+    if ! ensure_db_ready; then
+      warn "Local DB setup reported errors."
+    fi
     load_env  # reload to pick up DATABASE_URL written by ensure_db_ready
+    if ! _db_is_ready; then
+      warn "Database is not fully ready after install-time setup."
+      if is_interactive; then
+        printf "  Disable DB mode now to keep proxy healthy? [Y/n] "
+        local keep_answer
+        read -r keep_answer </dev/tty || keep_answer="y"
+        case "$keep_answer" in
+          [nN]*) warn "Keeping DB config as-is (proxy may fail until DB is fixed)." ;;
+          *)
+            _remove_db_env_config
+            load_env
+            info "Disabled DB mode (removed DATABASE_URL / DISABLE_SCHEMA_UPDATE from .env)."
+            info "Re-run with 'litellmctl install --with-db' after fixing PostgreSQL."
+            ;;
+        esac
+      else
+        _remove_db_env_config
+        load_env
+        warn "DB setup incomplete in non-interactive mode — disabled DB mode automatically."
+        warn "Re-run 'litellmctl install --with-db' when PostgreSQL is healthy."
+      fi
+    fi
   else
     _remove_db_env_config
     unset DATABASE_URL DISABLE_SCHEMA_UPDATE 2>/dev/null || true
@@ -920,7 +960,8 @@ ensure_db_ready() {
     if psql "$db_url" -qc 'SELECT 1 FROM "LiteLLM_SpendLogs" LIMIT 0' &>/dev/null; then
       info "Database ready."
     else
-      warn "Migrations may not have applied cleanly — proxy will start anyway."
+      warn "Migrations may not have applied cleanly."
+      return 1
     fi
   fi
 
@@ -976,15 +1017,15 @@ _pg_start_linux() {
   if command -v pg_ctlcluster &>/dev/null; then
     local v
     for v in 17 16 15 14 13 12; do
-      pg_ctlcluster "$v" main start &>/dev/null || sudo -n pg_ctlcluster "$v" main start &>/dev/null || true
+      pg_ctlcluster "$v" main start &>/dev/null || _run_with_sudo_if_needed pg_ctlcluster "$v" main start &>/dev/null || true
     done
   fi
 
   # systemd / service fallbacks.
   if command -v systemctl &>/dev/null; then
-    systemctl start postgresql &>/dev/null || sudo -n systemctl start postgresql &>/dev/null || true
+    systemctl start postgresql &>/dev/null || _run_with_sudo_if_needed systemctl start postgresql &>/dev/null || true
   elif command -v service &>/dev/null; then
-    service postgresql start &>/dev/null || sudo -n service postgresql start &>/dev/null || true
+    service postgresql start &>/dev/null || _run_with_sudo_if_needed service postgresql start &>/dev/null || true
   fi
 
   local i=0
@@ -998,19 +1039,29 @@ _linux_bootstrap_role_and_db() {
   local db_user="$1"
   local db_name="$2"
   is_linux || return 1
-  command -v sudo &>/dev/null || return 1
   [[ "$db_user" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
   [[ "$db_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
 
   info "Attempting PostgreSQL bootstrap via postgres superuser ..."
-  sudo -n -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${db_user}'" 2>/dev/null \
-    | grep -q 1 \
-    || sudo -n -u postgres createuser --createdb "$db_user" &>/dev/null \
-    || return 1
+  local role_exists
+  role_exists="$(_run_with_sudo_if_needed -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='${db_user}'" 2>/dev/null || true)"
+  if ! echo "$role_exists" | grep -q 1; then
+    _run_with_sudo_if_needed -u postgres createuser --createdb "$db_user" &>/dev/null || return 1
+  else
+    # Ensure role has enough privileges for local lifecycle commands.
+    _run_with_sudo_if_needed -u postgres psql -d postgres -c "ALTER ROLE \"${db_user}\" CREATEDB;" &>/dev/null || true
+  fi
 
-  sudo -n -u postgres createdb -O "$db_user" "$db_name" &>/dev/null \
-    || sudo -n -u postgres psql -d postgres -c "ALTER DATABASE \"${db_name}\" OWNER TO \"${db_user}\";" &>/dev/null \
+  _run_with_sudo_if_needed -u postgres createdb -O "$db_user" "$db_name" &>/dev/null \
+    || _run_with_sudo_if_needed -u postgres psql -d postgres -c "ALTER DATABASE \"${db_name}\" OWNER TO \"${db_user}\";" &>/dev/null \
     || true
+
+  # Repair common permission issues for existing DB/schema objects.
+  _run_with_sudo_if_needed -u postgres psql -d "$db_name" -c "GRANT ALL ON SCHEMA public TO \"${db_user}\";" &>/dev/null || true
+  _run_with_sudo_if_needed -u postgres psql -d "$db_name" -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO \"${db_user}\";" &>/dev/null || true
+  _run_with_sudo_if_needed -u postgres psql -d "$db_name" -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO \"${db_user}\";" &>/dev/null || true
+  _run_with_sudo_if_needed -u postgres psql -d "$db_name" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON TABLES TO \"${db_user}\";" &>/dev/null || true
+  _run_with_sudo_if_needed -u postgres psql -d "$db_name" -c "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO \"${db_user}\";" &>/dev/null || true
 
   psql -lqt 2>/dev/null | cut -d'|' -f1 | grep -qw "$db_name"
 }
@@ -1030,25 +1081,20 @@ _ensure_postgres_tools() {
   if is_linux; then
     info "Installing PostgreSQL dependencies ..."
     if command -v apt-get &>/dev/null; then
-      sudo -n apt-get update -qq &>/dev/null || sudo apt-get update -qq &>/dev/null || true
-      sudo -n apt-get install -y -qq postgresql postgresql-client &>/dev/null \
-        || sudo apt-get install -y -qq postgresql postgresql-client &>/dev/null \
+      _run_with_sudo_if_needed apt-get update -qq &>/dev/null || true
+      _run_with_sudo_if_needed apt-get install -y -qq postgresql postgresql-client &>/dev/null \
         || return 1
     elif command -v dnf &>/dev/null; then
-      sudo -n dnf install -y -q postgresql postgresql-server &>/dev/null \
-        || sudo dnf install -y -q postgresql postgresql-server &>/dev/null \
+      _run_with_sudo_if_needed dnf install -y -q postgresql postgresql-server &>/dev/null \
         || return 1
     elif command -v yum &>/dev/null; then
-      sudo -n yum install -y -q postgresql postgresql-server &>/dev/null \
-        || sudo yum install -y -q postgresql postgresql-server &>/dev/null \
+      _run_with_sudo_if_needed yum install -y -q postgresql postgresql-server &>/dev/null \
         || return 1
     elif command -v pacman &>/dev/null; then
-      sudo -n pacman -S --noconfirm --needed postgresql &>/dev/null \
-        || sudo pacman -S --noconfirm --needed postgresql &>/dev/null \
+      _run_with_sudo_if_needed pacman -S --noconfirm --needed postgresql &>/dev/null \
         || return 1
     elif command -v apk &>/dev/null; then
-      sudo -n apk add --quiet postgresql postgresql-client &>/dev/null \
-        || sudo apk add --quiet postgresql postgresql-client &>/dev/null \
+      _run_with_sudo_if_needed apk add --quiet postgresql postgresql-client &>/dev/null \
         || return 1
     else
       return 1
@@ -1067,6 +1113,14 @@ _remove_db_env_config() {
   tmp="$(mktemp)"
   awk '!/^DATABASE_URL=|^DISABLE_SCHEMA_UPDATE=/' "$env_file" > "$tmp"
   mv "$tmp" "$env_file"
+}
+
+_db_is_ready() {
+  local db_url="${DATABASE_URL:-}"
+  [ -n "$db_url" ] || return 1
+  command -v psql &>/dev/null || return 1
+  pg_isready -q 2>/dev/null || return 1
+  psql "$db_url" -qc 'SELECT 1 FROM "LiteLLM_SpendLogs" LIMIT 0' &>/dev/null
 }
 
 cmd_uninstall_service() {
