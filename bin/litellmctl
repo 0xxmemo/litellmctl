@@ -742,6 +742,13 @@ ensure_db_ready() {
   local db_user="${PGUSER:-${USER:-postgres}}"
   local default_url="postgresql://${db_user}@localhost/${db_name}"
 
+  # ── Step -1: Ensure PostgreSQL tooling exists ─────────────────────────────
+  if ! _ensure_postgres_tools; then
+    warn "PostgreSQL dependencies are missing and could not be auto-installed."
+    warn "Skipping DB setup for now."
+    return 0
+  fi
+
   # ── Step 0: Ensure .env exists (copy from example if needed) ─────────────
   if [ ! -f "$env_file" ]; then
     if [ -f "$PROJECT_DIR/.env.example" ]; then
@@ -754,13 +761,19 @@ ensure_db_ready() {
 
   # ── Step 1: Auto-configure DATABASE_URL if not already set ───────────────
   if ! grep -q "^DATABASE_URL=" "$env_file" 2>/dev/null; then
-    # Only auto-configure if postgres is available (don't force it)
-    if command -v psql &>/dev/null && (pg_isready -q 2>/dev/null || _pg_start_brew); then
+    # Auto-configure if psql exists; postgres can be started in Step 2.
+    if command -v psql &>/dev/null; then
       info "Configuring local database (DATABASE_URL) ..."
       printf '\nDATABASE_URL=%s\n' "$default_url" >> "$env_file"
       # Reload so the variable is visible for the rest of this function
       set -a; source "$env_file"; set +a
     else
+      warn "PostgreSQL client (psql) not found — skipping DB setup."
+      if is_linux; then
+        warn "Install PostgreSQL first (example: sudo apt-get install -y postgresql postgresql-client)."
+      elif is_macos; then
+        warn "Install PostgreSQL first (example: brew install postgresql@14)."
+      fi
       return 0  # postgres not available, skip silently
     fi
   fi
@@ -776,7 +789,7 @@ ensure_db_ready() {
 
   # ── Step 2: Ensure postgres is running ───────────────────────────────────
   if ! pg_isready -q 2>/dev/null; then
-    if ! _pg_start_brew; then
+    if ! _pg_start_local; then
       warn "PostgreSQL not running and could not start it — skipping DB setup."
       warn "Start it manually, then run 'litellmctl start' again."
       return 0  # warn but don't abort proxy start
@@ -851,6 +864,13 @@ _ensure_prisma_installed() {
   return 1
 }
 
+# Start local PostgreSQL service (macOS/Linux); returns 0 if postgres becomes ready.
+_pg_start_local() {
+  _pg_start_brew && return 0
+  _pg_start_linux && return 0
+  return 1
+}
+
 # Ensure prisma client/binaries are generated for this virtualenv.
 _ensure_prisma_generated() {
   local prisma_dir="$PROJECT_DIR/litellm/litellm/proxy"
@@ -873,6 +893,77 @@ _pg_start_brew() {
     sleep 1; (( i++ ))
   done
   pg_isready -q 2>/dev/null
+}
+
+# Start PostgreSQL on Linux via common service managers; returns 0 on readiness.
+_pg_start_linux() {
+  is_linux || return 1
+
+  # Debian/Ubuntu cluster manager (best signal on Ubuntu).
+  if command -v pg_ctlcluster &>/dev/null; then
+    local v
+    for v in 17 16 15 14 13 12; do
+      pg_ctlcluster "$v" main start &>/dev/null || sudo -n pg_ctlcluster "$v" main start &>/dev/null || true
+    done
+  fi
+
+  # systemd / service fallbacks.
+  if command -v systemctl &>/dev/null; then
+    systemctl start postgresql &>/dev/null || sudo -n systemctl start postgresql &>/dev/null || true
+  elif command -v service &>/dev/null; then
+    service postgresql start &>/dev/null || sudo -n service postgresql start &>/dev/null || true
+  fi
+
+  local i=0
+  while ! pg_isready -q 2>/dev/null && [ $i -lt 20 ]; do
+    sleep 1; (( i++ ))
+  done
+  pg_isready -q 2>/dev/null
+}
+
+# Ensure postgres client/server tools exist. Returns 0 if psql is available.
+_ensure_postgres_tools() {
+  command -v psql &>/dev/null && return 0
+
+  if is_macos; then
+    command -v brew &>/dev/null || return 1
+    info "Installing PostgreSQL via Homebrew ..."
+    brew install postgresql@14 &>/dev/null || brew install postgresql &>/dev/null || return 1
+    command -v psql &>/dev/null
+    return $?
+  fi
+
+  if is_linux; then
+    info "Installing PostgreSQL dependencies ..."
+    if command -v apt-get &>/dev/null; then
+      sudo -n apt-get update -qq &>/dev/null || sudo apt-get update -qq &>/dev/null || true
+      sudo -n apt-get install -y -qq postgresql postgresql-client &>/dev/null \
+        || sudo apt-get install -y -qq postgresql postgresql-client &>/dev/null \
+        || return 1
+    elif command -v dnf &>/dev/null; then
+      sudo -n dnf install -y -q postgresql postgresql-server &>/dev/null \
+        || sudo dnf install -y -q postgresql postgresql-server &>/dev/null \
+        || return 1
+    elif command -v yum &>/dev/null; then
+      sudo -n yum install -y -q postgresql postgresql-server &>/dev/null \
+        || sudo yum install -y -q postgresql postgresql-server &>/dev/null \
+        || return 1
+    elif command -v pacman &>/dev/null; then
+      sudo -n pacman -S --noconfirm --needed postgresql &>/dev/null \
+        || sudo pacman -S --noconfirm --needed postgresql &>/dev/null \
+        || return 1
+    elif command -v apk &>/dev/null; then
+      sudo -n apk add --quiet postgresql postgresql-client &>/dev/null \
+        || sudo apk add --quiet postgresql postgresql-client &>/dev/null \
+        || return 1
+    else
+      return 1
+    fi
+    command -v psql &>/dev/null
+    return $?
+  fi
+
+  return 1
 }
 
 cmd_setup_db() {
