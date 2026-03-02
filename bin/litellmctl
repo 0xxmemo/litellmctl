@@ -1029,6 +1029,9 @@ ensure_db_ready() {
     info "Database ready."
   fi
 
+  # ── Step 6: Write usage-collection flags to .env ──────────────────────────
+  _patch_db_env_flags || true
+
   return 0
 }
 
@@ -1214,8 +1217,29 @@ _remove_db_env_config() {
   [ -f "$env_file" ] || return 0
   local tmp
   tmp="$(mktemp)"
-  awk '!/^DATABASE_URL=|^DISABLE_SCHEMA_UPDATE=/' "$env_file" > "$tmp"
+  awk '!/^DATABASE_URL=|^DISABLE_SCHEMA_UPDATE=|^STORE_MODEL_IN_DB=|^PROXY_BATCH_WRITE_AT=|^STORE_PROMPTS_IN_SPEND_LOGS=/' "$env_file" > "$tmp"
   mv "$tmp" "$env_file"
+}
+
+# _patch_db_env_flags — write usage-collection env vars when DB is enabled.
+# All three are read directly from the environment by LiteLLM at startup.
+# Idempotent: only appends vars that are not already present.
+_patch_db_env_flags() {
+  local env_file="$PROJECT_DIR/.env"
+  local dirty=false
+  if ! grep -q '^STORE_MODEL_IN_DB=' "$env_file" 2>/dev/null; then
+    printf 'STORE_MODEL_IN_DB=true\n' >> "$env_file"
+    dirty=true
+  fi
+  if ! grep -q '^PROXY_BATCH_WRITE_AT=' "$env_file" 2>/dev/null; then
+    printf 'PROXY_BATCH_WRITE_AT=10\n' >> "$env_file"
+    dirty=true
+  fi
+  if ! grep -q '^STORE_PROMPTS_IN_SPEND_LOGS=' "$env_file" 2>/dev/null; then
+    printf 'STORE_PROMPTS_IN_SPEND_LOGS=true\n' >> "$env_file"
+    dirty=true
+  fi
+  "$dirty" && info "DB usage-collection flags written to .env." || true
 }
 
 _db_is_ready() {

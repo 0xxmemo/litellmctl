@@ -112,7 +112,15 @@ database. Setup is fully automatic:
   automatically reloads the updated `litellmctl` script in the same run
 
 If PostgreSQL is installed but not running, install-time DB setup will start it
-automatically. `DATABASE_URL` is appended to `.env` when DB setup is enabled.
+automatically. When DB setup is enabled, the following are written to `.env`:
+
+| Variable | Value | Purpose |
+|---|---|---|
+| `DATABASE_URL` | `postgresql://…/litellm` | Prisma connection string |
+| `DISABLE_SCHEMA_UPDATE` | `true` | Skip Prisma schema sync on every boot |
+| `STORE_MODEL_IN_DB` | `true` | Persist model/credential info in the DB |
+| `STORE_PROMPTS_IN_SPEND_LOGS` | `true` | Store prompt + response content in spend logs |
+| `PROXY_BATCH_WRITE_AT` | `10` | Batch-write spend logs every N seconds |
 
 To check database connectivity:
 
