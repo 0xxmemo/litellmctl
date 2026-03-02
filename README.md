@@ -25,6 +25,11 @@ litellmctl auth kimi
 litellmctl start           # background service, auto-starts on boot
 ```
 
+`install` and `start` automatically set up a local PostgreSQL database for
+usage tracking, spend logs, and key management — no manual DB step needed.
+If PostgreSQL is installed but not running, it will be started automatically.
+`DATABASE_URL` is written to `.env` on first run if not already present.
+
 ### Config wizard
 
 Generate a `config.yaml` interactively — pick your primary provider, select
@@ -44,7 +49,7 @@ templates live in `templates/*.yaml` and update automatically with
 ```bash
 git clone https://github.com/0xxmemo/litellmctl.git ~/.litellm
 cd ~/.litellm
-bin/install
+bin/install                # also sets up local PostgreSQL database
 cp .env.example .env       # fill in your API keys
 litellmctl setup-completions
 source ~/.zshrc
@@ -60,7 +65,7 @@ litellmctl update          # pull latest, sync submodule, rebuild & restart
 
 ```
 litellmctl wizard                 Interactive config.yaml generator (providers, tiers, fallbacks)
-litellmctl install                Install / reinstall the LiteLLM fork
+litellmctl install                Install / reinstall the LiteLLM fork (includes DB setup)
 litellmctl auth chatgpt           Login to ChatGPT / Codex (PKCE)
 litellmctl auth gemini            Login to Gemini CLI (PKCE)
 litellmctl auth qwen              Login to Qwen Portal (device-code)
@@ -75,14 +80,33 @@ litellmctl restart                Restart the proxy service
 litellmctl logs                   Tail proxy logs
 litellmctl proxy [--port N]       Start proxy in foreground (for debugging)
 litellmctl uninstall-service      Remove the system service
-litellmctl status                 Auth + proxy status at a glance
+litellmctl status                 Auth + proxy + database status at a glance
 litellmctl toggle-claude          Toggle Claude Code between direct API and proxy
 litellmctl setup-completions      Add litellmctl to your shell (alias + tab completion)
 ```
 
-`start` installs a system service (macOS: launchd, Linux: systemd) that
-auto-starts on login and restarts on crash. Use `proxy` for foreground
-mode when debugging.
+`start` and `restart` install a system service (macOS: launchd, Linux: systemd)
+that auto-starts on login and restarts on crash. Both commands automatically
+ensure the local database is running and migrated before starting the proxy.
+Use `proxy` for foreground mode when debugging.
+
+### Database
+
+Usage tracking, spend logs, and key management are stored in a local PostgreSQL
+database. Setup is fully automatic:
+
+- **`install`** — creates the database and runs migrations after the venv is built
+- **`start` / `restart`** — ensures the database is ready before launching the proxy
+
+If PostgreSQL is installed via Homebrew but not running, it will be started
+automatically. `DATABASE_URL` (`postgresql://localhost/litellm`) is appended to
+`.env` on first run if not already present.
+
+To check database connectivity:
+
+```bash
+litellmctl status   # shows DB URL + connection status
+```
 
 ### Transferring credentials between machines
 
@@ -136,7 +160,7 @@ authenticating, either:
 │   └── zai.yaml        Z.AI (GLM) — fallback
 ├── litellm/            Git submodule → 0xxmemo/litellm fork
 ├── config.yaml         Proxy model routing, fallbacks, environment vars
-├── .env                API keys & OAuth secrets (git-ignored)
+├── .env                API keys & OAuth secrets (git-ignored, DATABASE_URL auto-added)
 ├── .env.example        Template for .env
 ├── auth.chatgpt.json   ChatGPT OAuth tokens (git-ignored, auto-refreshed)
 ├── auth.gemini_cli.json Gemini CLI OAuth tokens (git-ignored, auto-refreshed)

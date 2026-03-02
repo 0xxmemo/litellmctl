@@ -47,7 +47,7 @@ _litellmctl_completions() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  commands="auth wizard install init-env start stop restart r logs proxy status toggle-claude setup-completions help"
+  commands="auth wizard install init-env setup-db start stop restart r logs proxy status toggle-claude setup-completions help"
   auth_cmds="chatgpt gemini qwen kimi codex status refresh export import"
 
   case "$prev" in
@@ -78,6 +78,7 @@ _litellmctl_completions() {
     'wizard:Interactive config.yaml generator'
     'install:Install, update, or rebuild LiteLLM'
     'init-env:Detect auth files and update .env paths'
+    'setup-db:Create local PostgreSQL DB and run LiteLLM migrations'
     'start:Start proxy as background service'
     'stop:Stop the proxy service'
     'restart:Restart the proxy service'
@@ -186,9 +187,12 @@ _litellm_pids_on_port() {
 }
 
 find_proxy_pid() {
-  local port
+  local port pid
   port=$(get_proxy_port)
-  _litellm_pids_on_port "$port" | head -1
+  while IFS= read -r pid; do
+    [ -n "$pid" ] && { echo "$pid"; return 0; }
+  done < <(_litellm_pids_on_port "$port")
+  return 0
 }
 
 kill_stale_on_port() {
@@ -296,7 +300,14 @@ PLIST
   echo "$port" > "$PORT_FILE"
 
   launchctl bootout "gui/$(id -u)/${LAUNCHD_LABEL}" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$LAUNCHD_PLIST"
+  if ! launchctl bootstrap "gui/$(id -u)" "$LAUNCHD_PLIST"; then
+    # launchd can intermittently return bootstrap I/O errors during rapid restarts.
+    # Retry once after an explicit bootout to make restart behavior predictable.
+    warn "launchd bootstrap failed, retrying once ..."
+    launchctl bootout "gui/$(id -u)/${LAUNCHD_LABEL}" 2>/dev/null || true
+    sleep 1
+    launchctl bootstrap "gui/$(id -u)" "$LAUNCHD_PLIST"
+  fi
 
   info "Installed launchd service ($LAUNCHD_LABEL)"
   info "Proxy starting on port $port (auto-starts on login)"
@@ -498,6 +509,12 @@ eval "$(~/.litellm/bin/litellmctl --completions)"'
 cmd_install() {
   "$BIN_DIR/install" "$@"
 
+  # Set up local DB now that the venv is guaranteed to exist
+  activate_venv
+  load_env
+  ensure_db_ready
+  load_env  # reload to pick up DATABASE_URL written by ensure_db_ready
+
   # Ask to restart if service is running
   local running=false
   if is_macos && launchd_is_running; then running=true; fi
@@ -538,6 +555,10 @@ cmd_start() {
     esac
   done
 
+  activate_venv
+  ensure_db_ready
+  load_env  # reload to pick up DATABASE_URL written by ensure_db_ready
+
   kill_stale_on_port "$port"
 
   if is_macos; then
@@ -547,6 +568,7 @@ cmd_start() {
   else
     nohup_start "$port" "$config"
   fi
+  _wait_for_proxy_ready "$port" || true
 }
 
 cmd_stop() {
@@ -580,6 +602,10 @@ cmd_restart() {
   sleep 1
   kill_stale_on_port "$port"
 
+  activate_venv
+  ensure_db_ready
+  load_env  # reload to pick up DATABASE_URL written by ensure_db_ready
+
   if is_macos; then
     launchd_install "$port" "$config"
   elif is_linux && has_systemd_user; then
@@ -589,6 +615,7 @@ cmd_restart() {
   else
     nohup_start "$port" "$config"
   fi
+  _wait_for_proxy_ready "$port" || true
 }
 
 cmd_logs() {
@@ -704,6 +731,157 @@ cmd_init_env() {
   fi
 }
 
+# ── Database helpers ────────────────────────────────────────────────────────
+
+# ensure_db_ready — called automatically before start/restart/install.
+# Idempotent: safe to call every time. Skips gracefully if postgres is absent.
+# Returns 0 on success or skip, 1 only on hard errors that should block start.
+ensure_db_ready() {
+  local env_file="$PROJECT_DIR/.env"
+  local db_name="litellm"
+  local db_user="${PGUSER:-${USER:-postgres}}"
+  local default_url="postgresql://${db_user}@localhost/${db_name}"
+
+  # ── Step 0: Ensure .env exists (copy from example if needed) ─────────────
+  if [ ! -f "$env_file" ]; then
+    if [ -f "$PROJECT_DIR/.env.example" ]; then
+      cp "$PROJECT_DIR/.env.example" "$env_file"
+      warn "Created .env from .env.example — fill in your API keys."
+    else
+      touch "$env_file"
+    fi
+  fi
+
+  # ── Step 1: Auto-configure DATABASE_URL if not already set ───────────────
+  if ! grep -q "^DATABASE_URL=" "$env_file" 2>/dev/null; then
+    # Only auto-configure if postgres is available (don't force it)
+    if command -v psql &>/dev/null && (pg_isready -q 2>/dev/null || _pg_start_brew); then
+      info "Configuring local database (DATABASE_URL) ..."
+      printf '\nDATABASE_URL=%s\n' "$default_url" >> "$env_file"
+      # Reload so the variable is visible for the rest of this function
+      set -a; source "$env_file"; set +a
+    else
+      return 0  # postgres not available, skip silently
+    fi
+  fi
+
+  # ── Step 1b: Avoid expensive Prisma schema updates on every server boot ───
+  # LiteLLM can run prisma schema updates at each startup. On some systems this
+  # can block worker boot and make the proxy appear "running" but unreachable.
+  if ! grep -q "^DISABLE_SCHEMA_UPDATE=" "$env_file" 2>/dev/null; then
+    info "Setting DISABLE_SCHEMA_UPDATE=true (recommended for stable startup) ..."
+    printf '\nDISABLE_SCHEMA_UPDATE=true\n' >> "$env_file"
+    set -a; source "$env_file"; set +a
+  fi
+
+  # ── Step 2: Ensure postgres is running ───────────────────────────────────
+  if ! pg_isready -q 2>/dev/null; then
+    if ! _pg_start_brew; then
+      warn "PostgreSQL not running and could not start it — skipping DB setup."
+      warn "Start it manually, then run 'litellmctl start' again."
+      return 0  # warn but don't abort proxy start
+    fi
+  fi
+
+  # ── Step 3: Determine the DB name from DATABASE_URL ──────────────────────
+  local db_url="${DATABASE_URL:-$default_url}"
+  case "$db_url" in
+    postgresql://localhost/*|postgres://localhost/*)
+      local db_path normalized_url
+      db_path="${db_url#*://localhost/}"
+      normalized_url="postgresql://${db_user}@localhost/${db_path}"
+      warn "DATABASE_URL has no DB user; normalizing to '${db_user}@localhost'."
+      if grep -q "^DATABASE_URL=" "$env_file" 2>/dev/null; then
+        sed -i.bak "s|^DATABASE_URL=.*|DATABASE_URL=${normalized_url}|" "$env_file"
+        rm -f "$env_file.bak"
+      fi
+      db_url="$normalized_url"
+      export DATABASE_URL="$db_url"
+      ;;
+  esac
+  local parsed_db
+  parsed_db=$(python3 -c \
+    "from urllib.parse import urlparse; u=urlparse('${db_url}'); print(u.path.lstrip('/') or '${db_name}')" \
+    2>/dev/null) || parsed_db="$db_name"
+
+  # ── Step 4: Create the database if it doesn't exist ──────────────────────
+  if ! psql -lqt 2>/dev/null | cut -d'|' -f1 | grep -qw "$parsed_db"; then
+    info "Creating database '$parsed_db' ..."
+    if ! createdb "$parsed_db" 2>/dev/null; then
+      warn "Could not create database '$parsed_db' — skipping DB setup."
+      return 0
+    fi
+  fi
+
+  # ── Step 5: Run migrations only if not yet applied ───────────────────────
+  # Use LiteLLM_SpendLogs as a sentinel — present after first migration run.
+  if ! psql "$db_url" -qc 'SELECT 1 FROM "LiteLLM_SpendLogs" LIMIT 0' &>/dev/null; then
+    if ! _ensure_prisma_installed; then
+      warn "Prisma dependency missing — skipping DB migrations."
+      warn "Run 'litellmctl install' to repair the environment."
+      return 0
+    fi
+    if ! _ensure_prisma_generated; then
+      warn "Prisma client generation failed — skipping DB migrations."
+      warn "Run: (cd $PROJECT_DIR/litellm/litellm/proxy && prisma generate && prisma py generate)"
+      return 0
+    fi
+    info "Running database migrations ..."
+    # Export DATABASE_URL so the litellm subprocess can see it
+    export DATABASE_URL="$db_url"
+    litellm --config "$PROJECT_DIR/config.yaml" --skip_server_startup &>/dev/null || true
+    # Verify migrations landed
+    if psql "$db_url" -qc 'SELECT 1 FROM "LiteLLM_SpendLogs" LIMIT 0' &>/dev/null; then
+      info "Database ready."
+    else
+      warn "Migrations may not have applied cleanly — proxy will start anyway."
+    fi
+  fi
+
+  return 0
+}
+
+# Ensure prisma is installed in the current virtualenv.
+_ensure_prisma_installed() {
+  python3 -c 'import prisma' &>/dev/null && return 0
+  info "Installing missing prisma dependency for DB migrations ..."
+  if pip install --quiet prisma; then
+    return 0
+  fi
+  return 1
+}
+
+# Ensure prisma client/binaries are generated for this virtualenv.
+_ensure_prisma_generated() {
+  local prisma_dir="$PROJECT_DIR/litellm/litellm/proxy"
+  local prisma_schema="$prisma_dir/schema.prisma"
+  [ -f "$prisma_schema" ] || return 1
+  command -v prisma &>/dev/null || return 1
+
+  (cd "$prisma_dir" && prisma generate &>/dev/null && prisma py generate &>/dev/null)
+}
+
+# Start PostgreSQL via Homebrew; returns 0 if postgres becomes ready, 1 otherwise.
+_pg_start_brew() {
+  is_macos || return 1
+  command -v brew &>/dev/null || return 1
+  brew services start postgresql@14 &>/dev/null \
+    || brew services start postgresql &>/dev/null \
+    || return 1
+  local i=0
+  while ! pg_isready -q 2>/dev/null && [ $i -lt 12 ]; do
+    sleep 1; (( i++ ))
+  done
+  pg_isready -q 2>/dev/null
+}
+
+cmd_setup_db() {
+  activate_venv
+  load_env
+  ensure_db_ready
+  printf "  DB:  %s\n" "${DATABASE_URL:-not configured}"
+}
+
 cmd_uninstall_service() {
   if is_macos; then
     launchd_uninstall
@@ -716,34 +894,136 @@ cmd_uninstall_service() {
   fi
 }
 
+_db_status() {
+  local db_url="${DATABASE_URL:-}"
+
+  printf "\033[1mDatabase\033[0m\n"
+  if [ -z "$db_url" ]; then
+    printf "  \033[33mNot configured\033[0m\n\n"
+    return
+  fi
+
+  printf "  URL: %s\n" "$db_url"
+
+  if ! command -v psql &>/dev/null; then
+    printf "  Status: \033[33mpsql not found\033[0m\n\n"
+    return
+  fi
+
+  if ! pg_isready -q 2>/dev/null; then
+    printf "  Status: \033[31mPostgreSQL not running\033[0m\n\n"
+    return
+  fi
+
+  if psql "$db_url" -qc 'SELECT 1 FROM "LiteLLM_SpendLogs" LIMIT 0' &>/dev/null; then
+    printf "  Status: \033[32mready\033[0m\n"
+  elif psql "$db_url" -c '\q' &>/dev/null; then
+    printf "  Status: \033[33mconnected, migrations pending\033[0m\n"
+  else
+    printf "  Status: \033[31mcannot connect\033[0m\n"
+  fi
+  printf "\n"
+}
+
+_proxy_http_health() {
+  local port="$1"
+  local health_url="http://127.0.0.1:${port}/health/readiness"
+  if python3 - <<PY
+import urllib.request
+try:
+    with urllib.request.urlopen("${health_url}", timeout=3) as r:
+        raise SystemExit(0 if 200 <= r.status < 300 else 1)
+except Exception:
+    raise SystemExit(1)
+PY
+  then
+    echo "healthy"
+  else
+    echo "unhealthy"
+  fi
+}
+
+_wait_for_proxy_ready() {
+  local port="$1"
+  local tries=30
+  local i=1
+  while [ "$i" -le "$tries" ]; do
+    if [ "$(_proxy_http_health "$port")" = "healthy" ]; then
+      info "Proxy is healthy on port $port."
+      return 0
+    fi
+    sleep 1
+    (( i++ ))
+  done
+  warn "Proxy did not become healthy within ${tries}s."
+  warn "Check logs with: litellmctl logs"
+  return 1
+}
+
 cmd_status() {
   activate_venv
   load_env
   python3 "$BIN_DIR/auth" status
 
-  local port pid
+  local port pid health
   port=$(get_proxy_port)
 
   printf "\033[1mProxy\033[0m\n"
 
   if is_macos && launchd_is_running; then
     pid=$(find_proxy_pid)
-    printf "  Service: \033[32mrunning\033[0m (launchd, auto-start enabled)\n"
+    if [ -n "$pid" ]; then
+      printf "  Service: \033[32mrunning\033[0m (launchd, auto-start enabled)\n"
+    else
+      printf "  Service: \033[33mloaded, but proxy not listening\033[0m (launchd)\n"
+    fi
     printf "  Port:    %s\n" "$port"
     [ -n "$pid" ] && printf "  PID:     %s\n" "$pid"
+    if [ -n "$pid" ]; then
+      health=$(_proxy_http_health "$port")
+      if [ "$health" = "healthy" ]; then
+        printf "  Health:  \033[32mhealthy\033[0m\n"
+      else
+        printf "  Health:  \033[31munhealthy (HTTP checks timing out/failing)\033[0m\n"
+      fi
+    fi
     printf "\n"
   elif is_linux && systemd_is_running; then
     pid=$(find_proxy_pid)
-    printf "  Service: \033[32mrunning\033[0m (systemd, auto-start enabled)\n"
+    if [ -n "$pid" ]; then
+      printf "  Service: \033[32mrunning\033[0m (systemd, auto-start enabled)\n"
+    else
+      printf "  Service: \033[33mloaded, but proxy not listening\033[0m (systemd)\n"
+    fi
     printf "  Port:    %s\n" "$port"
     [ -n "$pid" ] && printf "  PID:     %s\n" "$pid"
+    if [ -n "$pid" ]; then
+      health=$(_proxy_http_health "$port")
+      if [ "$health" = "healthy" ]; then
+        printf "  Health:  \033[32mhealthy\033[0m\n"
+      else
+        printf "  Health:  \033[31munhealthy (HTTP checks timing out/failing)\033[0m\n"
+      fi
+    fi
     printf "\n"
   elif nohup_is_running; then
     pid=$(find_proxy_pid)
     [ -z "$pid" ] && [ -f "$PIDFILE" ] && pid=$(cat "$PIDFILE")
-    printf "  Service: \033[32mrunning\033[0m (nohup, background)\n"
+    if [ -n "$pid" ]; then
+      printf "  Service: \033[32mrunning\033[0m (nohup, background)\n"
+    else
+      printf "  Service: \033[33mstarted, but proxy not listening\033[0m (nohup)\n"
+    fi
     printf "  Port:    %s\n" "$port"
     [ -n "$pid" ] && printf "  PID:     %s\n" "$pid"
+    if [ -n "$pid" ]; then
+      health=$(_proxy_http_health "$port")
+      if [ "$health" = "healthy" ]; then
+        printf "  Health:  \033[32mhealthy\033[0m\n"
+      else
+        printf "  Health:  \033[31munhealthy (HTTP checks timing out/failing)\033[0m\n"
+      fi
+    fi
     printf "\n"
   else
     pid=$(find_proxy_pid)
@@ -753,6 +1033,8 @@ cmd_status() {
       printf "  \033[33mNot running\033[0m\n\n"
     fi
   fi
+
+  _db_status
 }
 
 cmd_wizard() {
@@ -770,7 +1052,7 @@ $(printf "\033[1mUsage:\033[0m")  litellmctl <command> [args...]
 
 $(printf "\033[1mCommands:\033[0m")
   wizard               Interactive config.yaml generator (providers, tiers, fallbacks)
-  install              Install, update, or rebuild LiteLLM
+  install              Install, update, or rebuild LiteLLM (includes DB setup)
   init-env             Detect auth files and update .env with correct paths
   auth chatgpt         Login to ChatGPT / Codex (browser PKCE)
   auth gemini          Login to Gemini CLI (browser PKCE)
@@ -813,6 +1095,7 @@ case "$1" in
   install)           shift; cmd_install "$@" ;;
   update)            warn "'update' has been folded into 'install'."; info "Run: litellmctl install [--local]"; exit 0 ;;
   init-env)          shift; cmd_init_env ;;
+  setup-db)          shift; cmd_setup_db ;;
   auth)              shift; cmd_auth "$@" ;;
   start)             shift; cmd_start "$@" ;;
   stop)              shift; cmd_stop ;;

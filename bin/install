@@ -14,8 +14,9 @@ error() { printf "\033[1;31m==> %s\033[0m\n" "$*" >&2; }
 
 is_interactive() { [ -t 0 ]; }
 
-# Prevent git from blocking on credential/password prompts.
+# Prevent git from blocking on credential/password prompts or opening a pager.
 export GIT_TERMINAL_PROMPT=0
+export GIT_PAGER=cat
 export GIT_SSH_COMMAND="${GIT_SSH_COMMAND:-ssh -o BatchMode=yes -o ConnectTimeout=10}"
 
 # Run a command with a hard timeout (GNU coreutils only).
@@ -53,8 +54,8 @@ prompt_local_changes() {
   {
     echo ""
     warn "Local changes detected in $label:"
-    git -C "$dir" diff --stat 2>/dev/null || true
-    git -C "$dir" diff --cached --stat 2>/dev/null || true
+    git -C "$dir" --no-pager diff --stat 2>/dev/null || true
+    git -C "$dir" --no-pager diff --cached --stat 2>/dev/null || true
     local ahead
     ahead=$(git -C "$dir" rev-list --count @{u}..HEAD 2>/dev/null || echo "0")
     [ "$ahead" -gt 0 ] && info "$ahead unpushed commit(s) ahead of remote"
@@ -256,6 +257,15 @@ pip install --upgrade pip --quiet
 info "Installing litellm[proxy] (editable) ..."
 pip install -e "$SUBMODULE_DIR[proxy]" --quiet
 info "litellm installed."
+
+# Prisma is required for DB migrations triggered by litellmctl start/restart/install.
+# Keep this best-effort so non-DB setups still complete installation.
+info "Ensuring prisma dependency for DB migrations ..."
+if pip install --quiet prisma; then
+  info "prisma installed."
+else
+  warn "Could not install prisma now; DB migrations may be skipped until fixed."
+fi
 
 # ── .env setup ──
 
