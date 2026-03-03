@@ -609,6 +609,8 @@ cmd_install() {
         return 1
       fi
     fi
+    # Doctor: ensure all usage-collection flags are present (idempotent)
+    _patch_db_env_flags || true
   elif [ "$db_mode" = "keep" ]; then
     if ! _db_is_ready; then
       warn "Existing DB mode is enabled, but DB is not fully ready."
@@ -631,6 +633,8 @@ cmd_install() {
     else
       info "Keeping existing DB mode."
     fi
+    # Doctor: ensure usage-collection flags are present even on keep path
+    _patch_db_env_flags || true
   else
     _remove_db_env_config
     unset DATABASE_URL DISABLE_SCHEMA_UPDATE 2>/dev/null || true
