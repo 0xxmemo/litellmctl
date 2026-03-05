@@ -609,7 +609,10 @@ _install_local_servers() {
 
     if command -v uv &>/dev/null; then
       info "Installing faster-whisper-server ..."
-      uv tool install faster-whisper-server || warn "uv install failed"
+      # Install from git — the PyPI wheel omits pyproject.toml causing an import crash.
+      uv tool install \
+        "faster-whisper-server @ git+https://github.com/fedirz/faster-whisper-server.git" \
+        || warn "uv install failed"
     elif command -v docker &>/dev/null; then
       info "Starting faster-whisper-server via Docker ..."
       docker run -d --name faster-whisper -p 10300:8000 \
@@ -619,6 +622,16 @@ _install_local_servers() {
       warn "No uv or docker found — install uv to enable transcription:"
       warn "  curl -LsSf https://astral.sh/uv/install.sh | sh"
       warn "  uv tool install faster-whisper-server"
+    fi
+  fi
+
+  # If the binary exists but crashes on import (PyPI packaging bug), reinstall from git.
+  if command -v faster-whisper-server &>/dev/null; then
+    if ! faster-whisper-server --help &>/dev/null; then
+      warn "faster-whisper-server binary is broken — reinstalling from git ..."
+      uv tool install --reinstall \
+        "faster-whisper-server @ git+https://github.com/fedirz/faster-whisper-server.git" \
+        || warn "Reinstall failed"
     fi
   fi
 
