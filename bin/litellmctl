@@ -596,11 +596,20 @@ _install_local_servers() {
     warn "Ollama install failed — re-run after installing manually: litellmctl install --with-local"
   fi
 
-  # ── faster-whisper-server (transcription) ─────────────────────────────────
+  # ── speaches / faster-whisper-server (transcription) ─────────────────────
   # uv tools land in ~/.local/bin — ensure it's in PATH on every run
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
-  if ! command -v faster-whisper-server &>/dev/null; then
+  # Detect usable binary: prefer speaches (new name), accept faster-whisper-server if healthy.
+  local transcr_bin=""
+  if command -v speaches &>/dev/null; then
+    transcr_bin="speaches"
+  elif command -v faster-whisper-server &>/dev/null \
+       && faster-whisper-server --help &>/dev/null; then
+    transcr_bin="faster-whisper-server"
+  fi
+
+  if [ -z "$transcr_bin" ]; then
     if ! command -v uv &>/dev/null && command -v curl &>/dev/null; then
       info "Installing uv ..."
       curl -LsSf https://astral.sh/uv/install.sh | sh || true
@@ -608,42 +617,31 @@ _install_local_servers() {
     fi
 
     if command -v uv &>/dev/null; then
-      info "Installing faster-whisper-server ..."
-      # Install from git — the PyPI wheel omits pyproject.toml causing an import crash.
-      uv tool install \
-        "faster-whisper-server @ git+https://github.com/fedirz/faster-whisper-server.git" \
-        || warn "uv install failed"
+      info "Installing speaches (transcription server) ..."
+      # The project was renamed faster-whisper-server → speaches on PyPI.
+      uv tool install speaches || warn "uv install failed"
+      command -v speaches &>/dev/null && transcr_bin="speaches"
     elif command -v docker &>/dev/null; then
-      info "Starting faster-whisper-server via Docker ..."
+      info "Starting transcription server via Docker ..."
       docker run -d --name faster-whisper -p 10300:8000 \
         ghcr.io/fedirz/faster-whisper-server:latest-cpu \
         || warn "Docker run failed — start manually"
     else
       warn "No uv or docker found — install uv to enable transcription:"
       warn "  curl -LsSf https://astral.sh/uv/install.sh | sh"
-      warn "  uv tool install faster-whisper-server"
+      warn "  uv tool install speaches"
     fi
   fi
 
-  # If the binary exists but crashes on import (PyPI packaging bug), reinstall from git.
-  if command -v faster-whisper-server &>/dev/null; then
-    if ! faster-whisper-server --help &>/dev/null; then
-      warn "faster-whisper-server binary is broken — reinstalling from git ..."
-      uv tool install --reinstall \
-        "faster-whisper-server @ git+https://github.com/fedirz/faster-whisper-server.git" \
-        || warn "Reinstall failed"
-    fi
-  fi
-
-  if command -v faster-whisper-server &>/dev/null; then
+  if [ -n "$transcr_bin" ]; then
     if _proxy_http_check "${transcr_base%/}/v1/models" 2; then
-      info "faster-whisper-server already running at ${transcr_base}"
+      info "Transcription server already running at ${transcr_base}"
     else
-      info "Starting faster-whisper-server (first start downloads model — may take a minute) ..."
+      info "Starting ${transcr_bin} (first start downloads model — may take a minute) ..."
       local transcr_port="${transcr_base##*:}"; transcr_port="${transcr_port%%/*}"
       local transcr_log="$PROJECT_DIR/logs/faster-whisper.log"
       mkdir -p "$PROJECT_DIR/logs"
-      faster-whisper-server --port "$transcr_port" >"$transcr_log" 2>&1 &
+      "$transcr_bin" --port "$transcr_port" >"$transcr_log" 2>&1 &
       local transcr_pid=$!
       local j=0
       printf "  Waiting"
@@ -652,15 +650,15 @@ _install_local_servers() {
         printf "."
         if ! kill -0 "$transcr_pid" 2>/dev/null; then
           printf "\n"
-          warn "faster-whisper-server exited unexpectedly. Logs: $transcr_log"
+          warn "${transcr_bin} exited unexpectedly. Logs: $transcr_log"
           break
         fi
         _proxy_http_check "${transcr_base%/}/v1/models" 2 && printf "\n" && break
       done
       if _proxy_http_check "${transcr_base%/}/v1/models" 2; then
-        info "faster-whisper-server started at ${transcr_base}"
+        info "${transcr_bin} started at ${transcr_base}"
       elif kill -0 "$transcr_pid" 2>/dev/null; then
-        warn "faster-whisper-server still loading — check later: curl ${transcr_base}/v1/models"
+        warn "${transcr_bin} still loading — check later: curl ${transcr_base}/v1/models"
         info "Logs: $transcr_log"
       fi
     fi
