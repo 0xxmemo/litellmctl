@@ -306,8 +306,9 @@ client.embeddings.create(model="local/nomic-embed-text", input="hello")
 client.embeddings.create(model="local/mxbai-embed-large", input="hello")
 ```
 
-**Transcription (faster-whisper-server)** — default URL: `http://localhost:10300`.
+**Transcription (faster-whisper-server)** — default URL: `http://localhost:10300/v1`.
 Override with `LOCAL_TRANSCRIPTION_API_BASE` in `.env`.
+The `/v1` suffix is required: LiteLLM's OpenAI SDK appends `/audio/transcriptions` directly to this base.
 
 ```python
 client.audio.transcriptions.create(model="local/whisper-large-v3-turbo", file=audio)

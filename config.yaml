@@ -188,7 +188,7 @@ model_list:
       api_base: os.environ/LOCAL_EMBEDDING_API_BASE
 
   # ── Local transcription models (faster-whisper-server / OpenAI-compatible) ──
-  # Base URL: LOCAL_TRANSCRIPTION_API_BASE env var  (default: http://localhost:10300)
+  # Base URL: LOCAL_TRANSCRIPTION_API_BASE env var  (default: http://localhost:10300/v1)
   - model_name: local/whisper
     model_info:
       mode: audio_transcription

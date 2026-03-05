@@ -43,6 +43,7 @@ embedding_models:
 
 # Local transcription models
 # Served by faster-whisper-server at LOCAL_TRANSCRIPTION_API_BASE (written to .env by litellmctl install --with-transcription)
+# /v1 suffix required in LOCAL_TRANSCRIPTION_API_BASE: LiteLLM appends /audio/transcriptions directly to api_base.
 # Uses litellm's openai provider with api_base override pointing to the local server.
 transcription_models:
   - model_name: local/whisper

@@ -607,7 +607,7 @@ _install_embedding() {
 }
 
 _install_transcription_server() {
-  local transcr_base="${LOCAL_TRANSCRIPTION_API_BASE:-http://localhost:10300}"
+  local transcr_base="${LOCAL_TRANSCRIPTION_API_BASE:-http://localhost:10300/v1}"
 
   # uv tools land in ~/.local/bin — ensure it's in PATH on every run
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
@@ -676,7 +676,7 @@ _install_transcription_server() {
       if _transcr_http_check "${transcr_base%/}" 2; then
         info "${transcr_bin} started at ${transcr_base}"
       elif kill -0 "$transcr_pid" 2>/dev/null; then
-        warn "${transcr_bin} still loading — check later: curl ${transcr_base}/v1/audio/transcriptions"
+        warn "${transcr_bin} still loading — check later: curl ${transcr_base}/audio/transcriptions"
         info "Logs: $transcr_log"
       fi
     fi
@@ -1510,11 +1510,11 @@ _patch_local_env_defaults() {
   local env_file="$PROJECT_DIR/.env"
   local dirty=false
   if ! grep -q '^LOCAL_EMBEDDING_API_BASE=' "$env_file" 2>/dev/null; then
-    printf 'LOCAL_EMBEDDING_API_BASE=http://localhost:11434\n' >> "$env_file"
+    printf 'LOCAL_EMBEDDING_API_BASE="http://localhost:11434"\n' >> "$env_file"
     dirty=true
   fi
   if ! grep -q '^LOCAL_TRANSCRIPTION_API_BASE=' "$env_file" 2>/dev/null; then
-    printf 'LOCAL_TRANSCRIPTION_API_BASE=http://localhost:10300\n' >> "$env_file"
+    printf 'LOCAL_TRANSCRIPTION_API_BASE="http://localhost:10300/v1"\n' >> "$env_file"
     dirty=true
   fi
   "$dirty" && info "Local server defaults written to .env." || true
@@ -1600,7 +1600,7 @@ _uninstall_embedding() {
 
 _uninstall_transcription() {
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
-  local transcr_base="${LOCAL_TRANSCRIPTION_API_BASE:-http://localhost:10300}"
+  local transcr_base="${LOCAL_TRANSCRIPTION_API_BASE:-http://localhost:10300/v1}"
   printf "\n  \033[1mTranscription server\033[0m\n"
   local found=0
   local transcr_bin=""
@@ -1718,7 +1718,7 @@ _transcr_http_check() {
   python3 - <<PY 2>/dev/null
 import urllib.request, urllib.error
 try:
-    urllib.request.urlopen("${1%/}/v1/audio/transcriptions", timeout=${2:-3})
+    urllib.request.urlopen("${1%/}/audio/transcriptions", timeout=${2:-3})
     raise SystemExit(0)
 except urllib.error.HTTPError:
     raise SystemExit(0)  # any HTTP response = server is up
@@ -1760,7 +1760,7 @@ _db_status() {
 
 _local_status() {
   local embed_base="${LOCAL_EMBEDDING_API_BASE:-${OLLAMA_API_BASE:-http://localhost:11434}}"
-  local transcr_base="${LOCAL_TRANSCRIPTION_API_BASE:-http://localhost:10300}"
+  local transcr_base="${LOCAL_TRANSCRIPTION_API_BASE:-http://localhost:10300/v1}"
 
   printf "\033[1mLocal inference servers\033[0m\n"
 

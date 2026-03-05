@@ -110,7 +110,11 @@ def _parse_env_file() -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        env[key.strip()] = value.strip()
+        v = value.strip()
+        # Strip surrounding single or double quotes (systemd requires quoted URLs)
+        if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+            v = v[1:-1]
+        env[key.strip()] = v
     return env
 
 
@@ -238,12 +242,12 @@ def _check_local_servers(env: dict) -> tuple[bool, str]:
     ).rstrip("/")
     transcr_base = (
         env.get("LOCAL_TRANSCRIPTION_API_BASE")
-        or "http://localhost:10300"
+        or "http://localhost:10300/v1"
     ).rstrip("/")
 
     embed_up = _probe_http(f"{embed_base}/v1/models")
-    # faster-whisper-server returns 404 for /v1/models — check the transcription endpoint instead
-    transcr_up = _probe_http_any(f"{transcr_base}/v1/audio/transcriptions")
+    # faster-whisper-server: api_base includes /v1, so append /audio/transcriptions directly
+    transcr_up = _probe_http_any(f"{transcr_base}/audio/transcriptions")
 
     if embed_up and transcr_up:
         return True, "both servers reachable"
@@ -433,7 +437,7 @@ def _generate_yaml(models: list[dict], aliases: dict[str, str],
     if transcription_models:
         lines.append("")
         lines.append("  # ── Local transcription models ──────────────────────────────────────────")
-        lines.append("  # Base URL: LOCAL_TRANSCRIPTION_API_BASE env var  (default: http://localhost:10300)")
+        lines.append("  # Base URL: LOCAL_TRANSCRIPTION_API_BASE env var  (default: http://localhost:10300/v1)")
         _write_model_entries(lines, transcription_models)
 
     # Router settings
