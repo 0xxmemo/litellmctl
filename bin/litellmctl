@@ -845,6 +845,10 @@ cmd_install() {
     info "Run 'litellmctl install --with-db' to enable."
   fi
 
+  # Ensure local server env var defaults are always in .env (config.yaml references them).
+  _patch_local_env_defaults || true
+  load_env
+
   # ── Local inference servers ──────────────────────────────────────────────
   # Auto-restore: if already installed, default to yes without prompting.
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
@@ -1497,6 +1501,23 @@ _patch_db_env_flags() {
     dirty=true
   fi
   "$dirty" && info "DB usage-collection flags written to .env." || true
+}
+
+# _patch_local_env_defaults — write LOCAL_EMBEDDING_API_BASE and LOCAL_TRANSCRIPTION_API_BASE
+# defaults to .env so that config.yaml's os.environ/ references always resolve.
+# Safe to call unconditionally — idempotent, uses the same defaults as the servers.
+_patch_local_env_defaults() {
+  local env_file="$PROJECT_DIR/.env"
+  local dirty=false
+  if ! grep -q '^LOCAL_EMBEDDING_API_BASE=' "$env_file" 2>/dev/null; then
+    printf 'LOCAL_EMBEDDING_API_BASE=http://localhost:11434\n' >> "$env_file"
+    dirty=true
+  fi
+  if ! grep -q '^LOCAL_TRANSCRIPTION_API_BASE=' "$env_file" 2>/dev/null; then
+    printf 'LOCAL_TRANSCRIPTION_API_BASE=http://localhost:10300\n' >> "$env_file"
+    dirty=true
+  fi
+  "$dirty" && info "Local server defaults written to .env." || true
 }
 
 _db_is_ready() {

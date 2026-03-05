@@ -217,6 +217,18 @@ def _probe_http(url: str, timeout: float = 1.5) -> bool:
         return False
 
 
+def _probe_http_any(url: str, timeout: float = 1.5) -> bool:
+    """Return True if url accepts the TCP connection and returns any HTTP response."""
+    try:
+        import urllib.request, urllib.error
+        urllib.request.urlopen(url, timeout=timeout)
+        return True
+    except urllib.error.HTTPError:
+        return True   # server is up, just returned an error status
+    except Exception:
+        return False
+
+
 def _check_local_servers(env: dict) -> tuple[bool, str]:
     """Probe local embedding + transcription endpoints. Returns (all_up, summary)."""
     embed_base = (
@@ -230,7 +242,8 @@ def _check_local_servers(env: dict) -> tuple[bool, str]:
     ).rstrip("/")
 
     embed_up = _probe_http(f"{embed_base}/v1/models")
-    transcr_up = _probe_http(f"{transcr_base}/v1/models")
+    # faster-whisper-server returns 404 for /v1/models — check the transcription endpoint instead
+    transcr_up = _probe_http_any(f"{transcr_base}/v1/audio/transcriptions")
 
     if embed_up and transcr_up:
         return True, "both servers reachable"

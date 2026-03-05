@@ -152,7 +152,7 @@ model_list:
       api_key: os.environ/ZAI_API_KEY
       api_base: https://api.z.ai/api/anthropic
 
-  # ── Local embedding models (Ollama / LM Studio / any OpenAI-compatible) ──
+  # ── Local embedding models (Ollama) ──────────────────────────────────────
   # Base URL: LOCAL_EMBEDDING_API_BASE env var  (default: http://localhost:11434)
   - model_name: local/nomic-embed-text
     model_info:
@@ -160,51 +160,63 @@ model_list:
       input_cost_per_token: 0
       output_cost_per_token: 0
     litellm_params:
-      model: local/nomic-embed-text
+      model: ollama/nomic-embed-text
+      api_base: os.environ/LOCAL_EMBEDDING_API_BASE
   - model_name: local/mxbai-embed-large
     model_info:
       mode: embedding
       input_cost_per_token: 0
       output_cost_per_token: 0
     litellm_params:
-      model: local/mxbai-embed-large
+      model: ollama/mxbai-embed-large
+      api_base: os.environ/LOCAL_EMBEDDING_API_BASE
   - model_name: local/bge-m3
     model_info:
       mode: embedding
       input_cost_per_token: 0
       output_cost_per_token: 0
     litellm_params:
-      model: local/bge-m3
+      model: ollama/bge-m3
+      api_base: os.environ/LOCAL_EMBEDDING_API_BASE
   - model_name: local/all-minilm
     model_info:
       mode: embedding
       input_cost_per_token: 0
       output_cost_per_token: 0
     litellm_params:
-      model: local/all-minilm
+      model: ollama/all-minilm
+      api_base: os.environ/LOCAL_EMBEDDING_API_BASE
 
-  # ── Local transcription models (faster-whisper-server / whisper.cpp / LocalAI) ──
+  # ── Local transcription models (faster-whisper-server / OpenAI-compatible) ──
   # Base URL: LOCAL_TRANSCRIPTION_API_BASE env var  (default: http://localhost:10300)
   - model_name: local/whisper
     model_info:
       mode: audio_transcription
     litellm_params:
-      model: local/whisper
+      model: openai/whisper
+      api_base: os.environ/LOCAL_TRANSCRIPTION_API_BASE
+      api_key: sk-local
   - model_name: local/whisper-large-v3
     model_info:
       mode: audio_transcription
     litellm_params:
-      model: local/whisper-large-v3
+      model: openai/whisper-large-v3
+      api_base: os.environ/LOCAL_TRANSCRIPTION_API_BASE
+      api_key: sk-local
   - model_name: local/whisper-large-v3-turbo
     model_info:
       mode: audio_transcription
     litellm_params:
-      model: local/whisper-large-v3-turbo
+      model: openai/whisper-large-v3-turbo
+      api_base: os.environ/LOCAL_TRANSCRIPTION_API_BASE
+      api_key: sk-local
   - model_name: local/distil-whisper-large-v3
     model_info:
       mode: audio_transcription
     litellm_params:
-      model: local/distil-whisper-large-v3
+      model: openai/distil-whisper-large-v3
+      api_base: os.environ/LOCAL_TRANSCRIPTION_API_BASE
+      api_key: sk-local
 
 router_settings:
   num_retries: 2
