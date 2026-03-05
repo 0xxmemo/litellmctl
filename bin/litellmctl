@@ -596,17 +596,31 @@ _install_local_servers() {
     warn "Ollama install failed — re-run after installing manually: litellmctl install --with-local"
   fi
 
-  # ── speaches / faster-whisper-server (transcription) ─────────────────────
+  # ── faster-whisper-server (transcription) ─────────────────────────────────
   # uv tools land in ~/.local/bin — ensure it's in PATH on every run
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
-  # Detect usable binary: prefer speaches (new name), accept faster-whisper-server if healthy.
+  # The PyPI wheel omits pyproject.toml, causing _get_version() to crash on import.
+  # Inject a minimal stub so the import succeeds — no reinstall needed.
+  _fws_patch_pyproject() {
+    local uv_python="$HOME/.local/share/uv/tools/faster-whisper-server/bin/python"
+    [ -x "$uv_python" ] || return 0
+    local site_pkgs
+    site_pkgs="$("$uv_python" -c \
+      "import sysconfig; print(sysconfig.get_paths()['purelib'])" 2>/dev/null)" || return 0
+    [ -d "$site_pkgs/faster_whisper_server" ] || return 0
+    [ -f "$site_pkgs/pyproject.toml" ] && return 0
+    printf '[project]\nname = "faster-whisper-server"\nversion = "0.0.0"\n' \
+      > "$site_pkgs/pyproject.toml"
+  }
+
+  # Detect usable binary; patch broken install before giving up.
   local transcr_bin=""
-  if command -v speaches &>/dev/null; then
-    transcr_bin="speaches"
-  elif command -v faster-whisper-server &>/dev/null \
-       && faster-whisper-server --help &>/dev/null; then
-    transcr_bin="faster-whisper-server"
+  if command -v faster-whisper-server &>/dev/null; then
+    if ! faster-whisper-server --help &>/dev/null; then
+      _fws_patch_pyproject
+    fi
+    faster-whisper-server --help &>/dev/null && transcr_bin="faster-whisper-server"
   fi
 
   if [ -z "$transcr_bin" ]; then
@@ -617,10 +631,15 @@ _install_local_servers() {
     fi
 
     if command -v uv &>/dev/null; then
-      info "Installing speaches (transcription server) ..."
-      # The project was renamed faster-whisper-server → speaches on PyPI.
-      uv tool install speaches || warn "uv install failed"
-      command -v speaches &>/dev/null && transcr_bin="speaches"
+      info "Installing faster-whisper-server (transcription server) ..."
+      uv tool install faster-whisper-server || true
+      _fws_patch_pyproject
+      if command -v faster-whisper-server &>/dev/null \
+         && faster-whisper-server --help &>/dev/null; then
+        transcr_bin="faster-whisper-server"
+      else
+        warn "faster-whisper-server install failed"
+      fi
     elif command -v docker &>/dev/null; then
       info "Starting transcription server via Docker ..."
       docker run -d --name faster-whisper -p 10300:8000 \
@@ -629,7 +648,7 @@ _install_local_servers() {
     else
       warn "No uv or docker found — install uv to enable transcription:"
       warn "  curl -LsSf https://astral.sh/uv/install.sh | sh"
-      warn "  uv tool install speaches"
+      warn "  uv tool install faster-whisper-server"
     fi
   fi
 
