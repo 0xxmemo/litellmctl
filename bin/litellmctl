@@ -547,7 +547,7 @@ _ollama_start() {
   fi
   local i=0
   while [ "$i" -lt 12 ]; do
-    sleep 1; (( i++ ))
+    sleep 1; i=$(( i + 1 ))
     _proxy_http_check "${embed_base%/}/v1/models" 2 && return 0
   done
   return 1
@@ -630,7 +630,7 @@ _install_local_servers() {
       faster-whisper-server --port "$transcr_port" &>/dev/null &
       local j=0
       while [ "$j" -lt 12 ]; do
-        sleep 1; (( j++ ))
+        sleep 1; j=$(( j + 1 ))
         _proxy_http_check "${transcr_base%/}/v1/models" 2 && break
       done
       if _proxy_http_check "${transcr_base%/}/v1/models" 2; then
@@ -1294,7 +1294,7 @@ _pg_start_brew() {
     || return 1
   local i=0
   while ! pg_isready -q 2>/dev/null && [ $i -lt 12 ]; do
-    sleep 1; (( i++ ))
+    sleep 1; i=$(( i + 1 ))
   done
   pg_isready -q 2>/dev/null
 }
@@ -1320,7 +1320,7 @@ _pg_start_linux() {
 
   local i=0
   while ! pg_isready -q 2>/dev/null && [ $i -lt 20 ]; do
-    sleep 1; (( i++ ))
+    sleep 1; i=$(( i + 1 ))
   done
   pg_isready -q 2>/dev/null
 }
