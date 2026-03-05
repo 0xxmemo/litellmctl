@@ -597,8 +597,10 @@ _install_local_servers() {
   fi
 
   # ── faster-whisper-server (transcription) ─────────────────────────────────
+  # uv tools land in ~/.local/bin — ensure it's in PATH on every run
+  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+
   if ! command -v faster-whisper-server &>/dev/null; then
-    # Ensure uv is available, installing it if needed
     if ! command -v uv &>/dev/null && command -v curl &>/dev/null; then
       info "Installing uv ..."
       curl -LsSf https://astral.sh/uv/install.sh | sh || true
@@ -608,7 +610,6 @@ _install_local_servers() {
     if command -v uv &>/dev/null; then
       info "Installing faster-whisper-server ..."
       uv tool install faster-whisper-server || warn "uv install failed"
-      export PATH="$HOME/.local/bin:$PATH"  # uv tools land here
     elif command -v docker &>/dev/null; then
       info "Starting faster-whisper-server via Docker ..."
       docker run -d --name faster-whisper -p 10300:8000 \
@@ -625,18 +626,29 @@ _install_local_servers() {
     if _proxy_http_check "${transcr_base%/}/v1/models" 2; then
       info "faster-whisper-server already running at ${transcr_base}"
     else
-      info "Starting faster-whisper-server ..."
+      info "Starting faster-whisper-server (first start downloads model — may take a minute) ..."
       local transcr_port="${transcr_base##*:}"; transcr_port="${transcr_port%%/*}"
-      faster-whisper-server --port "$transcr_port" &>/dev/null &
+      local transcr_log="$PROJECT_DIR/logs/faster-whisper.log"
+      mkdir -p "$PROJECT_DIR/logs"
+      faster-whisper-server --port "$transcr_port" >"$transcr_log" 2>&1 &
+      local transcr_pid=$!
       local j=0
-      while [ "$j" -lt 12 ]; do
+      printf "  Waiting"
+      while [ "$j" -lt 90 ]; do
         sleep 1; j=$(( j + 1 ))
-        _proxy_http_check "${transcr_base%/}/v1/models" 2 && break
+        printf "."
+        if ! kill -0 "$transcr_pid" 2>/dev/null; then
+          printf "\n"
+          warn "faster-whisper-server exited unexpectedly. Logs: $transcr_log"
+          break
+        fi
+        _proxy_http_check "${transcr_base%/}/v1/models" 2 && printf "\n" && break
       done
       if _proxy_http_check "${transcr_base%/}/v1/models" 2; then
         info "faster-whisper-server started at ${transcr_base}"
-      else
-        warn "faster-whisper-server did not respond — start manually: faster-whisper-server --port 10300"
+      elif kill -0 "$transcr_pid" 2>/dev/null; then
+        warn "faster-whisper-server still loading — check later: curl ${transcr_base}/v1/models"
+        info "Logs: $transcr_log"
       fi
     fi
   elif _proxy_http_check "${transcr_base%/}/v1/models" 2; then
