@@ -9,6 +9,7 @@ Usage:
     auth kimi                 Device-code login for Kimi Code
     auth refresh <name>       Refresh existing token
     auth status               Show token status for all providers
+    auth providers            List available providers (key|label, one per line)
     auth export [providers]   Copy credentials as a paste-able transfer script
     auth import               Read credentials from stdin
 """
@@ -1432,6 +1433,7 @@ USAGE = f"""\
   auth kimi                 Login to Kimi Code (device code)
   auth refresh <name>       Refresh token (chatgpt|gemini|qwen|kimi)
   auth status               Show token status
+  auth providers            List available providers (key|label, one per line)
   auth export [providers]   Copy credentials as a paste-able transfer script
   auth import               Read credentials from stdin
 """
@@ -1462,6 +1464,9 @@ def main():
             elif t in ("qwen", "qwen_portal", "qwen-portal"): qwen_refresh()
             elif t in ("kimi", "kimi_code", "kimi-code"): kimi_refresh()
             else: print(_red(f"Unknown provider: {t}")); sys.exit(1)
+        elif cmd == "providers":
+            for key, label, _ in _AUTH_PROVIDERS:
+                print(f"{key}|{label}")
         elif cmd == "export":
             export_creds(args[1:] if len(args) > 1 else None)
         elif cmd == "import":

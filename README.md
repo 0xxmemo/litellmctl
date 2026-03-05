@@ -67,8 +67,8 @@ litellmctl update          # pull latest, sync submodule, rebuild & restart
 
 ```
 litellmctl wizard                       Interactive config.yaml generator (providers, tiers, fallbacks)
-litellmctl install [--with-db|--without-db]
-                                        Install / reinstall the LiteLLM fork (prompts for DB setup)
+litellmctl install [--with-db|--without-db] [--with-local|--without-local]
+                                        Install / rebuild LiteLLM (prompts for DB + local server setup)
 litellmctl auth chatgpt                 Login to ChatGPT / Codex (PKCE)
 litellmctl auth gemini                  Login to Gemini CLI (PKCE)
 litellmctl auth qwen                    Login to Qwen Portal (device-code)
@@ -82,11 +82,10 @@ litellmctl stop                         Stop the proxy service
 litellmctl restart                      Restart the proxy service
 litellmctl logs                         Tail proxy logs
 litellmctl proxy [--port N]             Start proxy in foreground (for debugging)
-litellmctl uninstall-service            Remove the system service
 litellmctl status                       Auth + proxy + local servers + database status at a glance
 litellmctl local [status]               Check local inference server reachability
-litellmctl local setup [embedding|transcription|all]
-                                        Platform-specific setup instructions for local servers
+litellmctl uninstall [service|db|embedding|transcription]
+                                        Stop and remove the proxy service, DB config, or local servers
 litellmctl toggle-claude                Toggle Claude Code between direct API and proxy
 litellmctl setup-completions            Add litellmctl to your shell (alias + tab completion)
 ```
@@ -100,19 +99,14 @@ Use `proxy` for foreground mode when debugging.
 Usage tracking, spend logs, and key management are stored in a local PostgreSQL
 database. Setup is fully automatic:
 
-- **`install`** — prompts for DB setup (default: yes), then creates DB + runs migrations
-- **When DB already exists** — installer prompts to **keep** current DB mode or
-  **disable** DB mode (instead of asking to re-run setup)
+- **`install`** — prompts for DB setup (default: yes); if already configured, re-ensures it's ready
 - **`start` / `restart`** — start the proxy service (do not modify DB setup)
-- **Automation flags** — use `litellmctl install --with-db` or `--without-db`
-- **One-shot DB mode** — if you choose DB mode (`keep` / `--with-db`), install
-  attempts full automatic repair and exits non-zero if DB is still not ready
-- **Corrupt DB recovery** — in interactive installs, if migrations still fail,
-  installer can prompt to create a fresh local DB and retry once
+- **Automation flags** — `litellmctl install --with-db` or `--without-db`
 - **Permission handling** — installer attempts automatic Postgres role/database
   bootstrap and privileges repair (uses `sudo` when needed)
 - **Always uses latest logic** — if install pulls a newer repo version, it
   automatically reloads the updated `litellmctl` script in the same run
+- **To disable DB** — use `litellmctl uninstall db` (removes config from `.env`; database is not dropped)
 
 If PostgreSQL is installed but not running, install-time DB setup will start it
 automatically. When DB setup is enabled, the following are written to `.env`:
@@ -287,28 +281,30 @@ OpenAI-compatible endpoint at `coding-intl.dashscope.aliyuncs.com/v1`.
 The fork adds a `local` provider for embedding and transcription models served
 by a process running on the same machine — no API key required.
 
-### Embedding (Ollama)
+### Setup
+
+Local server setup is part of `litellmctl install`:
 
 ```bash
-litellmctl local setup embedding   # shows install + pull instructions
+litellmctl install --with-local   # starts Ollama, pulls embedding models, guides transcription setup
 ```
 
-Default base URL: `http://localhost:11434` (Ollama).
+Or interactively — `install` will prompt after the DB phase:
+
+```
+Set up local inference servers (embedding + transcription)? [y/N]
+```
+
+**Embedding (Ollama)** — default URL: `http://localhost:11434`.
 Override with `LOCAL_EMBEDDING_API_BASE` in `.env`.
 
 ```python
-# Example — OpenAI SDK pointed at the proxy
+# OpenAI SDK pointed at the proxy
 client.embeddings.create(model="local/nomic-embed-text", input="hello")
 client.embeddings.create(model="local/mxbai-embed-large", input="hello")
 ```
 
-### Transcription (faster-whisper-server)
-
-```bash
-litellmctl local setup transcription   # shows install options (uv / Docker)
-```
-
-Default base URL: `http://localhost:10300` (faster-whisper-server).
+**Transcription (faster-whisper-server)** — default URL: `http://localhost:10300`.
 Override with `LOCAL_TRANSCRIPTION_API_BASE` in `.env`.
 
 ```python
@@ -320,6 +316,16 @@ client.audio.transcriptions.create(model="local/whisper-large-v3-turbo", file=au
 ```bash
 litellmctl local           # or: litellmctl local status
 litellmctl status          # combined: auth + proxy + local + DB
+```
+
+### Uninstall
+
+```bash
+litellmctl uninstall                 # service + DB config + local servers
+litellmctl uninstall embedding       # Ollama stop/uninstall guide
+litellmctl uninstall transcription   # faster-whisper-server stop/uninstall guide
+litellmctl uninstall db              # remove DB config from .env
+litellmctl uninstall service         # stop and remove launchd/systemd service
 ```
 
 ## Syncing with Upstream

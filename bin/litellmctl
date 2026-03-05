@@ -42,16 +42,14 @@ SYSTEMD_FILE="$SYSTEMD_DIR/${SYSTEMD_UNIT}.service"
 generate_completions() {
   cat <<'COMP'
 _litellmctl_completions() {
-  local cur prev pprev commands auth_cmds local_cmds local_setup_targets
+  local cur prev commands auth_cmds uninstall_cmds
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
-  pprev="${COMP_WORDS[COMP_CWORD-2]:-}"
 
-  commands="auth wizard install init-env start stop restart r logs proxy status local toggle-claude setup-completions help"
+  commands="auth wizard install init-env start stop restart r logs proxy status local uninstall toggle-claude setup-completions help"
   auth_cmds="chatgpt gemini qwen kimi codex status refresh export import"
-  local_cmds="setup status"
-  local_setup_targets="embedding transcription all"
+  uninstall_cmds="service db embedding transcription"
 
   case "$prev" in
     litellmctl)
@@ -60,12 +58,8 @@ _litellmctl_completions() {
     auth)
       COMPREPLY=( $(compgen -W "$auth_cmds" -- "$cur") )
       return ;;
-    local)
-      COMPREPLY=( $(compgen -W "$local_cmds" -- "$cur") )
-      return ;;
-    setup)
-      [[ "$pprev" == "local" ]] &&
-        COMPREPLY=( $(compgen -W "$local_setup_targets" -- "$cur") )
+    uninstall)
+      COMPREPLY=( $(compgen -W "$uninstall_cmds" -- "$cur") )
       return ;;
     refresh|export)
       COMPREPLY=( $(compgen -W "chatgpt gemini qwen kimi" -- "$cur") )
@@ -74,7 +68,7 @@ _litellmctl_completions() {
       COMPREPLY=( $(compgen -W "--port --config" -- "$cur") )
       return ;;
     install)
-      COMPREPLY=( $(compgen -W "--with-db --without-db" -- "$cur") )
+      COMPREPLY=( $(compgen -W "--with-db --without-db --with-local --without-local" -- "$cur") )
       return ;;
   esac
 }
@@ -85,11 +79,11 @@ COMP
 generate_zsh_completions() {
   cat <<'COMP'
 _litellmctl_completions() {
-  local -a commands auth_cmds local_cmds local_setup_targets
+  local -a commands auth_cmds uninstall_cmds
   commands=(
     'auth:Manage OAuth tokens'
     'wizard:Interactive config.yaml generator'
-    'install:Install, update, or rebuild LiteLLM (prompts for DB setup)'
+    'install:Install / rebuild LiteLLM (prompts for DB + local server setup)'
     'init-env:Detect auth files and update .env paths'
     'start:Start proxy as background service'
     'stop:Stop the proxy service'
@@ -98,7 +92,8 @@ _litellmctl_completions() {
     'logs:Tail proxy logs'
     'proxy:Start proxy in foreground (debug)'
     'status:Show auth + proxy + local server status'
-    'local:Manage local inference servers (embedding + transcription)'
+    'local:Check local inference server reachability'
+    'uninstall:Uninstall service, database config, or local servers'
     'toggle-claude:Toggle Claude Code between direct API and proxy'
     'setup-completions:Add litellmctl to your shell'
     'help:Show help'
@@ -114,30 +109,26 @@ _litellmctl_completions() {
     'export:Copy credentials as transfer script'
     'import:Read credentials from stdin'
   )
-  local_cmds=(
-    'setup:Show setup instructions for local inference servers'
-    'status:Check reachability of local inference servers'
-  )
-  local_setup_targets=(
-    'embedding:Ollama setup for embedding models'
-    'transcription:faster-whisper-server setup for audio transcription'
-    'all:Setup both embedding and transcription servers'
+  uninstall_cmds=(
+    'service:Stop and remove the proxy service'
+    'db:Remove database config from .env'
+    'embedding:Show Ollama stop and uninstall commands'
+    'transcription:Show faster-whisper-server stop and uninstall commands'
   )
 
   if (( CURRENT == 2 )); then
     _describe 'command' commands
   elif (( CURRENT == 3 )); then
     case "${words[2]}" in
-      auth)    _describe 'auth command' auth_cmds ;;
-      local)   _describe 'local command' local_cmds ;;
+      auth)      _describe 'auth command' auth_cmds ;;
+      uninstall) _describe 'uninstall target' uninstall_cmds ;;
       refresh|export) compadd chatgpt gemini qwen kimi ;;
       start|proxy) compadd -- --port --config ;;
-      install) compadd -- --with-db --without-db ;;
+      install) compadd -- --with-db --without-db --with-local --without-local ;;
     esac
   elif (( CURRENT == 4 )); then
     case "${words[3]}" in
       refresh|export) compadd chatgpt gemini qwen kimi ;;
-      setup) _describe 'target' local_setup_targets ;;
     esac
   fi
 }
@@ -547,21 +538,177 @@ eval "$(~/.litellm/bin/litellmctl --completions)"'
   info "Run: source $rc_file  (or open a new terminal)"
 }
 
+_install_local_servers() {
+  local embed_base="${LOCAL_EMBEDDING_API_BASE:-${OLLAMA_API_BASE:-http://localhost:11434}}"
+  local transcr_base="${LOCAL_TRANSCRIPTION_API_BASE:-http://localhost:10300}"
+
+  printf "\n"
+  info "Local inference servers"
+
+  # ── Ollama (embedding) ────────────────────────────────────────────────────
+  if command -v ollama &>/dev/null; then
+    if _proxy_http_check "${embed_base%/}/v1/models" 2; then
+      info "Ollama is running at ${embed_base}"
+    else
+      info "Ollama is installed but not running. Starting ..."
+      if is_macos && command -v brew &>/dev/null; then
+        brew services start ollama &>/dev/null || ollama serve &>/dev/null &
+      else
+        ollama serve &>/dev/null &
+      fi
+      local i=0
+      while [ "$i" -lt 8 ]; do
+        sleep 1; (( i++ ))
+        _proxy_http_check "${embed_base%/}/v1/models" 2 && break
+      done
+      if _proxy_http_check "${embed_base%/}/v1/models" 2; then
+        info "Ollama started at ${embed_base}"
+      else
+        warn "Ollama did not respond — start it manually: ollama serve"
+      fi
+    fi
+
+    # Pull recommended models that are not already present
+    local model
+    for model in nomic-embed-text mxbai-embed-large; do
+      if ! ollama list 2>/dev/null | grep -q "^${model}"; then
+        info "Pulling ${model} ..."
+        ollama pull "$model" || warn "Could not pull ${model} — run manually: ollama pull ${model}"
+      else
+        info "${model} already present"
+      fi
+    done
+  else
+    warn "Ollama not found — embedding models unavailable."
+    if is_macos && command -v brew &>/dev/null; then
+      info "Install with:  brew install ollama"
+    else
+      info "Install with:  curl -fsSL https://ollama.com/install.sh | sh"
+    fi
+    info "Then re-run:   litellmctl install"
+  fi
+
+  # ── faster-whisper-server (transcription) ────────────────────────────────
+  if command -v faster-whisper-server &>/dev/null; then
+    if _proxy_http_check "${transcr_base%/}/v1/models" 2; then
+      info "faster-whisper-server is running at ${transcr_base}"
+    else
+      info "faster-whisper-server installed but not running."
+      info "Start it with:  faster-whisper-server --port 10300"
+    fi
+  else
+    warn "faster-whisper-server not found — transcription unavailable."
+    if command -v uv &>/dev/null; then
+      info "Install with:  uv tool install faster-whisper-server"
+    elif command -v docker &>/dev/null; then
+      info "Or via Docker: docker run -d --name faster-whisper -p 10300:8000 ghcr.io/fedirz/faster-whisper-server:latest-cpu"
+    else
+      info "Install uv first: curl -LsSf https://astral.sh/uv/install.sh | sh"
+      info "Then:  uv tool install faster-whisper-server"
+    fi
+  fi
+}
+
+# ── Interrupt helpers ────────────────────────────────────────────────────────
+
+_trap_cancelled() {
+  printf "\n"
+  warn "${1:-Cancelled.}"
+  trap - INT TERM
+  exit 130
+}
+
+_trap_logs_stopped() {
+  printf "\n"
+  info "Stopped tailing."
+  trap '_trap_cancelled "Goodbye."' INT TERM
+}
+
+_quick_status_line() {
+  local port pid
+  port=$(get_proxy_port)
+  pid=$(find_proxy_pid)
+  if [ -n "$pid" ]; then
+    printf "  Proxy  \033[32mrunning\033[0m  :%s\n" "$port"
+  else
+    printf "  Proxy  \033[33mstopped\033[0m\n"
+  fi
+}
+
+# ── Auth sub-menu (interactive) ───────────────────────────────────────────────
+
+_auth_interactive() {
+  local providers_raw
+  providers_raw=$(python3 "$BIN_DIR/auth" providers 2>/dev/null) || providers_raw=""
+
+  printf "\n\033[1mAuth — select provider:\033[0m\n\n"
+
+  if [ -z "$providers_raw" ]; then
+    warn "Could not read provider list from bin/auth."
+    return 1
+  fi
+
+  local -a pkeys plabels
+  while IFS='|' read -r k l; do
+    pkeys+=("$k")
+    plabels+=("$l")
+  done <<< "$providers_raw"
+
+  local i
+  for i in "${!pkeys[@]}"; do
+    printf "  %d) %-12s %s\n" $((i+1)) "${pkeys[$i]}" "${plabels[$i]}"
+  done
+  printf "\033[2m  ──\033[0m\n"
+  printf "  s) status    Show token expiry\n"
+  printf "  r) refresh   Refresh a token\n"
+  printf "  e) export    Copy credentials\n"
+  printf "  q) cancel\n\n"
+  printf "Select: "
+
+  local choice
+  read -r choice </dev/tty || choice="q"
+  printf "\n"
+
+  local n="${#pkeys[@]}"
+  if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= n )); then
+    python3 "$BIN_DIR/auth" "${pkeys[$((choice-1))]}" || true
+    return
+  fi
+
+  case "$choice" in
+    s|S) python3 "$BIN_DIR/auth" status || true ;;
+    r|R)
+      local plist; plist=$(IFS='/'; echo "${pkeys[*]}")
+      printf "  Refresh which provider (%s): " "$plist"
+      local provider
+      read -r provider </dev/tty || provider=""
+      [ -n "$provider" ] && { python3 "$BIN_DIR/auth" refresh "$provider" || true; } ;;
+    e|E) python3 "$BIN_DIR/auth" export || true ;;
+    q|Q|"") ;;
+    *) warn "Unknown selection: '$choice'" ;;
+  esac
+}
+
 cmd_install() {
   local install_args=()
-  local db_mode="${LITELLM_INSTALL_DB_SETUP:-}"  # yes|no|keep|empty(auto prompt)
+  local db_mode="${LITELLM_INSTALL_DB_SETUP:-}"     # yes|no|empty(auto prompt)
+  local local_mode="${LITELLM_INSTALL_LOCAL_SETUP:-}" # yes|no|empty(auto prompt)
   local db_mode_flag=""
   local post_sync_only=false
   local env_file="$PROJECT_DIR/.env"
   local pre_sha=""
   local post_sha=""
 
+  trap '_trap_cancelled "Install cancelled."' INT TERM
+
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --with-db|--db)     db_mode="yes"; db_mode_flag="--with-db"; shift ;;
+      --with-db|--db)       db_mode="yes"; db_mode_flag="--with-db"; shift ;;
       --without-db|--no-db) db_mode="no"; db_mode_flag="--without-db"; shift ;;
-      --_post-sync)       post_sync_only=true; shift ;;
-      *)                  install_args+=("$1"); shift ;;
+      --with-local)         local_mode="yes"; shift ;;
+      --without-local)      local_mode="no"; shift ;;
+      --_post-sync)         post_sync_only=true; shift ;;
+      *)                    install_args+=("$1"); shift ;;
     esac
   done
 
@@ -587,82 +734,48 @@ cmd_install() {
   activate_venv
   load_env
   if [ -z "$db_mode" ]; then
-    if is_interactive; then
-      if grep -q "^DATABASE_URL=" "$env_file" 2>/dev/null; then
-        printf "\n  Local database is already configured. [K]eep DB mode or [D]isable DB mode? [K/d] "
-        local keep_or_disable
-        read -r keep_or_disable </dev/tty || keep_or_disable="k"
-        case "$keep_or_disable" in
-          [dD]*) db_mode="no" ;;
-          *)     db_mode="keep" ;;
-        esac
-      else
-        printf "\n  Set up local PostgreSQL database for LiteLLM now? [Y/n] "
-        local answer
-        read -r answer </dev/tty || answer="y"
-        case "$answer" in
-          [nN]*) db_mode="no" ;;
-          *)     db_mode="yes" ;;
-        esac
-      fi
+    if grep -q "^DATABASE_URL=" "$env_file" 2>/dev/null; then
+      db_mode="yes"  # already configured — re-ensure
+    elif is_interactive; then
+      printf "\n  Set up local PostgreSQL database for LiteLLM now? [Y/n] "
+      local answer
+      read -r answer </dev/tty || answer="y"
+      case "$answer" in
+        [nN]*) db_mode="no" ;;
+        *)     db_mode="yes" ;;
+      esac
     else
-      # Non-interactive installs should converge fully without manual follow-up.
-      if grep -q "^DATABASE_URL=" "$env_file" 2>/dev/null; then
-        db_mode="keep"
-      else
-        db_mode="yes"
-      fi
+      db_mode="yes"
     fi
   fi
 
   if [ "$db_mode" = "yes" ]; then
     if ! ensure_db_ready; then
-      warn "Local DB setup reported errors."
+      warn "DB setup incomplete. Run 'litellmctl install --with-db' to retry."
     fi
-    load_env  # reload to pick up DATABASE_URL written by ensure_db_ready
-    if ! _db_is_ready; then
-      if _maybe_offer_fresh_db_recovery; then
-        ensure_db_ready || true
-        load_env
-      fi
-      if ! _db_is_ready; then
-        error "Database is not ready after install-time setup."
-        error "Install cannot complete DB mode reliably. Re-run: litellmctl install --with-db"
-        return 1
-      fi
-    fi
-    # Doctor: ensure all usage-collection flags are present (idempotent)
-    _patch_db_env_flags || true
-  elif [ "$db_mode" = "keep" ]; then
-    if ! _db_is_ready; then
-      warn "Existing DB mode is enabled, but DB is not fully ready."
-      info "Attempting automatic DB repair ..."
-      ensure_db_ready || true
-      load_env
-      if ! _db_is_ready; then
-        if _maybe_offer_fresh_db_recovery; then
-          ensure_db_ready || true
-          load_env
-        fi
-        if ! _db_is_ready; then
-          error "Automatic DB repair did not complete successfully."
-          error "DB mode is still enabled but unhealthy. Re-run: litellmctl install --with-db"
-          return 1
-        fi
-      else
-        info "DB repair complete; keeping DB mode enabled."
-      fi
-    else
-      info "Keeping existing DB mode."
-    fi
-    # Doctor: ensure usage-collection flags are present even on keep path
+    load_env
     _patch_db_env_flags || true
   else
-    _remove_db_env_config
-    unset DATABASE_URL DISABLE_SCHEMA_UPDATE 2>/dev/null || true
-    warn "Skipped local DB setup during install."
-    info "Any existing local DB config was removed from .env."
-    info "Re-run with 'litellmctl install --with-db' to enable local DB again."
+    warn "Skipped local DB setup."
+    info "Run 'litellmctl install --with-db' to enable."
+  fi
+
+  # ── Local inference servers ──────────────────────────────────────────────
+  if [ -z "$local_mode" ]; then
+    if is_interactive; then
+      printf "\n  Set up local inference servers (embedding + transcription)? [y/N] "
+      local ans_local
+      read -r ans_local </dev/tty || ans_local="n"
+      case "$ans_local" in
+        [yY]*) local_mode="yes" ;;
+        *)     local_mode="no" ;;
+      esac
+    else
+      local_mode="no"
+    fi
+  fi
+  if [ "$local_mode" = "yes" ]; then
+    _install_local_servers
   fi
 
   # Ask to restart if service is running
@@ -684,12 +797,20 @@ cmd_install() {
       info "Proxy is running. Run 'litellmctl restart' to apply changes."
     fi
   fi
+
+  trap - INT TERM
 }
 
 cmd_auth() {
   activate_venv
   load_env
-  exec python3 "$BIN_DIR/auth" "$@"
+  if [ $# -eq 0 ] && is_interactive; then
+    _auth_interactive
+    return
+  fi
+  trap '_trap_cancelled "Auth cancelled."' INT TERM
+  python3 "$BIN_DIR/auth" "$@" || true
+  trap - INT TERM
 }
 
 cmd_start() {
@@ -1300,45 +1421,7 @@ _db_user_from_url() {
     2>/dev/null || printf '%s\n' "$default_user"
 }
 
-_maybe_offer_fresh_db_recovery() {
-  is_interactive || return 1
-  local db_url="${DATABASE_URL:-}"
-  [ -n "$db_url" ] || return 1
-
-  local db_name db_user answer
-  db_name="$(_db_name_from_url "$db_url")"
-  db_user="$(_db_user_from_url "$db_url")"
-
-  [[ "$db_name" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
-  [[ "$db_user" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || return 1
-
-  printf "\n  DB migrations are still failing. This can indicate a corrupt local DB state.\n"
-  printf "  Create a fresh local DB now? This will DROP database '%s'. [y/N] " "$db_name"
-  read -r answer </dev/tty || answer="n"
-  case "$answer" in
-    [yY]*)
-      info "Resetting local database '$db_name' ..."
-      if is_linux; then
-        _run_with_sudo_if_needed -u postgres dropdb --if-exists "$db_name" &>/dev/null \
-          || dropdb --if-exists "$db_name" &>/dev/null \
-          || true
-        _run_with_sudo_if_needed -u postgres createdb -O "$db_user" "$db_name" &>/dev/null \
-          || createdb "$db_name" &>/dev/null \
-          || return 1
-        _linux_bootstrap_role_and_db "$db_user" "$db_name" || true
-      else
-        dropdb --if-exists "$db_name" &>/dev/null || true
-        createdb "$db_name" &>/dev/null || return 1
-      fi
-      return 0
-      ;;
-    *)
-      return 1
-      ;;
-  esac
-}
-
-cmd_uninstall_service() {
+_uninstall_service() {
   if is_macos; then
     launchd_uninstall
   elif is_linux && [ -f "$SYSTEMD_FILE" ]; then
@@ -1348,6 +1431,142 @@ cmd_uninstall_service() {
     rm -f "$PIDFILE" "$PORT_FILE"
     info "Cleaned up nohup-managed proxy."
   fi
+}
+
+_uninstall_db() {
+  local env_file="$PROJECT_DIR/.env"
+  if ! grep -q "^DATABASE_URL=" "$env_file" 2>/dev/null; then
+    info "No database configuration found in .env."
+    return
+  fi
+  local db_url="${DATABASE_URL:-postgresql://localhost/litellm}"
+  local db_name
+  db_name="$(_db_name_from_url "$db_url")"
+  _remove_db_env_config
+  unset DATABASE_URL DISABLE_SCHEMA_UPDATE 2>/dev/null || true
+  info "Removed database config from .env."
+  printf "  The database '%s' was not dropped. To remove it:\n\n" "$db_name"
+  printf "      dropdb %s\n\n" "$db_name"
+}
+
+_uninstall_embedding() {
+  local embed_base="${LOCAL_EMBEDDING_API_BASE:-${OLLAMA_API_BASE:-http://localhost:11434}}"
+  printf "\n  \033[1mOllama (embedding)\033[0m\n"
+  if ! command -v ollama &>/dev/null; then
+    printf "  Not installed.\n\n"
+    return
+  fi
+  if _proxy_http_check "${embed_base%/}/v1/models" 2; then
+    printf "  Running at %s. Stop it:\n\n" "${embed_base}"
+    if is_macos && command -v brew &>/dev/null; then
+      printf "      brew services stop ollama\n\n"
+    else
+      printf "      systemctl --user stop ollama 2>/dev/null || pkill ollama\n\n"
+    fi
+  else
+    printf "  Not running.\n\n"
+  fi
+  printf "  Uninstall:\n\n"
+  if is_macos && command -v brew &>/dev/null; then
+    printf "      brew uninstall ollama && rm -rf ~/.ollama\n\n"
+  else
+    printf "      sudo rm /usr/local/bin/ollama && rm -rf ~/.ollama\n\n"
+  fi
+}
+
+_uninstall_transcription() {
+  local transcr_base="${LOCAL_TRANSCRIPTION_API_BASE:-http://localhost:10300}"
+  printf "\n  \033[1mfaster-whisper-server (transcription)\033[0m\n"
+  local found=0
+  if command -v faster-whisper-server &>/dev/null; then
+    found=1
+    if _proxy_http_check "${transcr_base%/}/v1/models" 2; then
+      printf "  Running at %s. Stop it:\n\n" "${transcr_base}"
+      printf "      pkill -f faster-whisper-server\n\n"
+    else
+      printf "  Not running.\n\n"
+    fi
+    printf "  Uninstall:\n\n"
+    if command -v uv &>/dev/null; then
+      printf "      uv tool uninstall faster-whisper-server\n\n"
+    else
+      printf "      pip uninstall faster-whisper-server\n\n"
+    fi
+  fi
+  if command -v docker &>/dev/null; then
+    local cid running
+    cid=$(docker ps -aq --filter name=faster-whisper 2>/dev/null) || cid=""
+    if [ -n "$cid" ]; then
+      found=1
+      running=$(docker ps -q --filter name=faster-whisper 2>/dev/null) || running=""
+      if [ -n "$running" ]; then
+        printf "  Docker container running. Stop and remove:\n\n"
+        printf "      docker stop faster-whisper && docker rm faster-whisper\n\n"
+      else
+        printf "  Docker container stopped. Remove:\n\n"
+        printf "      docker rm faster-whisper\n\n"
+      fi
+    fi
+  fi
+  [ "$found" -eq 0 ] && printf "  Not installed.\n\n"
+}
+
+cmd_uninstall() {
+  load_env
+  trap '_trap_cancelled "Uninstall cancelled."' INT TERM
+
+  local target="${1:-}"
+
+  if [ -z "$target" ] && is_interactive; then
+    printf "\n\033[1mUninstall — select component:\033[0m\n\n"
+    printf "  1) service        Stop and remove proxy service\n"
+    printf "  2) db             Remove database config from .env\n"
+    printf "  3) embedding      Ollama stop/uninstall guide\n"
+    printf "  4) transcription  faster-whisper-server stop/uninstall guide\n"
+    printf "\033[2m  ──\033[0m\n"
+    printf "  a) all            All of the above\n"
+    printf "  q) cancel\n\n"
+    printf "Select: "
+    read -r target </dev/tty || target="q"
+    printf "\n"
+    case "$target" in
+      1) target="service" ;;
+      2) target="db" ;;
+      3) target="embedding" ;;
+      4) target="transcription" ;;
+      a|A) target="all" ;;
+      q|Q|"") trap - INT TERM; return 0 ;;
+    esac
+  fi
+
+  case "${target:-all}" in
+    service)
+      _uninstall_service ;;
+    db)
+      _uninstall_db ;;
+    embedding)
+      printf "\033[1mUninstall — embedding\033[0m\n"
+      _uninstall_embedding ;;
+    transcription)
+      printf "\033[1mUninstall — transcription\033[0m\n"
+      _uninstall_transcription ;;
+    all)
+      info "Stopping and removing proxy service ..."
+      _uninstall_service
+      printf "\n"
+      info "Removing database config ..."
+      _uninstall_db
+      printf "\n\033[1mLocal inference servers\033[0m"
+      _uninstall_embedding
+      _uninstall_transcription ;;
+    *)
+      error "Unknown target: $target"
+      printf "  Usage: litellmctl uninstall [service|db|embedding|transcription]\n"
+      trap - INT TERM
+      exit 1 ;;
+  esac
+
+  trap - INT TERM
 }
 
 # _proxy_http_check <url> [timeout_secs]
@@ -1404,117 +1623,28 @@ _local_status() {
     printf "  Embedding     (%s): \033[32mreachable\033[0m\n" "${embed_base}"
   else
     printf "  Embedding     (%s): \033[33mnot running\033[0m\n" "${embed_base}"
-    printf "    \033[2mRun: litellmctl local setup embedding\033[0m\n"
+    printf "    \033[2mRun: litellmctl install --with-local\033[0m\n"
   fi
 
   if _proxy_http_check "${transcr_base%/}/v1/models"; then
     printf "  Transcription (%s): \033[32mreachable\033[0m\n" "${transcr_base}"
   else
     printf "  Transcription (%s): \033[33mnot running\033[0m\n" "${transcr_base}"
-    printf "    \033[2mRun: litellmctl local setup transcription\033[0m\n"
+    printf "    \033[2mRun: litellmctl install --with-local\033[0m\n"
   fi
 
   printf "\n"
 }
 
-# ── Local server setup guidance ──────────────────────────────────────────────
-
-_local_setup_embedding() {
-  local embed_base="${LOCAL_EMBEDDING_API_BASE:-${OLLAMA_API_BASE:-http://localhost:11434}}"
-
-  printf "\n\033[1mEmbedding server — Ollama\033[0m\n"
-
-  if command -v ollama &>/dev/null; then
-    printf "  \033[32m✓\033[0m Ollama installed\n"
-  else
-    printf "  Install Ollama:\n\n"
-    if is_macos && command -v brew &>/dev/null; then
-      printf "      brew install ollama\n\n"
-    else
-      printf "      curl -fsSL https://ollama.com/install.sh | sh\n\n"
-    fi
-  fi
-
-  if _proxy_http_check "${embed_base%/}/v1/models"; then
-    printf "  \033[32m✓\033[0m Running at %s\n" "${embed_base}"
-  else
-    printf "  Start Ollama:\n\n"
-    if is_macos && command -v brew &>/dev/null; then
-      printf "      brew services start ollama\n\n"
-    else
-      printf "      ollama serve\n\n"
-    fi
-  fi
-
-  printf "  Pull embedding models:\n\n"
-  printf "      ollama pull nomic-embed-text\n"
-  printf "      ollama pull mxbai-embed-large\n\n"
-
-  printf "  Use via proxy:  model: local/nomic-embed-text\n"
-  printf "  Override URL:   LOCAL_EMBEDDING_API_BASE=http://localhost:11434\n\n"
-}
-
-_local_setup_transcription() {
-  local transcr_base="${LOCAL_TRANSCRIPTION_API_BASE:-http://localhost:10300}"
-
-  printf "\n\033[1mTranscription server — faster-whisper-server\033[0m\n"
-
-  if _proxy_http_check "${transcr_base%/}/v1/models"; then
-    printf "  \033[32m✓\033[0m Running at %s\n\n" "${transcr_base}"
-    return 0
-  fi
-
-  if command -v uv &>/dev/null; then
-    printf "  Install and start:\n\n"
-    printf "      uv tool install faster-whisper-server\n"
-    printf "      faster-whisper-server --port 10300\n\n"
-  elif command -v docker &>/dev/null; then
-    printf "  Start with Docker:\n\n"
-    printf "      docker run -d --name faster-whisper -p 10300:8000 \\\\\n"
-    printf "        ghcr.io/fedirz/faster-whisper-server:latest-cpu\n\n"
-  else
-    printf "  Install uv, then:\n\n"
-    printf "      curl -LsSf https://astral.sh/uv/install.sh | sh\n"
-    printf "      uv tool install faster-whisper-server\n"
-    printf "      faster-whisper-server --port 10300\n\n"
-  fi
-
-  if ! is_macos; then
-    printf "  To auto-start on Linux, create a systemd user unit:\n\n"
-    printf "      ~/.config/systemd/user/faster-whisper.service\n\n"
-    printf "      [Service] ExecStart=faster-whisper-server --port 10300\n"
-    printf "      systemctl --user enable --now faster-whisper\n\n"
-  fi
-
-  printf "  Use via proxy:  model: local/whisper-large-v3-turbo\n"
-  printf "  Override URL:   LOCAL_TRANSCRIPTION_API_BASE=http://localhost:10300\n\n"
-}
-
 cmd_local() {
   load_env
-  local sub="${1:-}"
-  local target="${2:-}"
-
-  case "$sub" in
-    setup)
-      case "$target" in
-        embedding|embed)
-          _local_setup_embedding ;;
-        transcription|transcribe|whisper)
-          _local_setup_transcription ;;
-        ""|all)
-          _local_setup_embedding
-          _local_setup_transcription ;;
-        *)
-          error "Unknown local setup target: $target"
-          printf "  Usage: litellmctl local setup [embedding|transcription|all]\n"
-          exit 1 ;;
-      esac ;;
-    status|"")
-      _local_status ;;
+  case "${1:-status}" in
+    status) _local_status ;;
     *)
-      error "Unknown local subcommand: $sub"
-      printf "  Usage: litellmctl local [setup [embedding|transcription]|status]\n"
+      error "Unknown subcommand: $1"
+      printf "  Usage: litellmctl local [status]\n"
+      printf "  To set up:   litellmctl install --with-local\n"
+      printf "  To uninstall: litellmctl uninstall [embedding|transcription]\n"
       exit 1 ;;
   esac
 }
@@ -1625,7 +1755,63 @@ cmd_status() {
 cmd_wizard() {
   activate_venv
   load_env
-  exec python3 "$BIN_DIR/wizard" "$@"
+  trap '_trap_cancelled "Wizard cancelled."' INT TERM
+  python3 "$BIN_DIR/wizard" "$@" || true
+  trap - INT TERM
+}
+
+cmd_interactive() {
+  load_env
+  trap '_trap_cancelled "Goodbye."' INT TERM
+
+  while true; do
+    printf "\n\033[1mlitellmctl — LiteLLM Proxy Control\033[0m\n"
+    printf "\033[2m──────────────────────────────────────\033[0m\n"
+    _quick_status_line
+    printf "\n"
+    printf "  \033[1m1\033[0m) start        Start proxy service\n"
+    printf "  \033[1m2\033[0m) stop         Stop proxy service\n"
+    printf "  \033[1m3\033[0m) restart      Restart proxy service\n"
+    printf "  \033[1m4\033[0m) status       Full status\n"
+    printf "  \033[1m5\033[0m) logs         Tail proxy logs\n"
+    printf "\033[2m  ──\033[0m\n"
+    printf "  \033[1m6\033[0m) install      Install / rebuild LiteLLM\n"
+    printf "  \033[1m7\033[0m) auth         Manage authentication\n"
+    printf "  \033[1m8\033[0m) wizard       Config wizard\n"
+    printf "  \033[1m9\033[0m) uninstall    Remove components\n"
+    printf "\033[2m  ──\033[0m\n"
+    printf "  \033[1mh\033[0m) help         Show help\n"
+    printf "  \033[1mq\033[0m) quit\n\n"
+    printf "Select: "
+
+    local choice
+    read -r choice </dev/tty || break
+    printf "\n"
+
+    # Re-arm after each command (sub-commands reset the trap on exit).
+    trap '_trap_cancelled "Goodbye."' INT TERM
+
+    case "$choice" in
+      1) cmd_start ;;
+      2) cmd_stop ;;
+      3) cmd_restart ;;
+      4) cmd_status ;;
+      5)
+        # Allow Ctrl+C to stop tailing without exiting the menu.
+        trap '_trap_logs_stopped' INT TERM
+        cmd_logs || true
+        trap '_trap_cancelled "Goodbye."' INT TERM ;;
+      6) cmd_install ;;
+      7) cmd_auth ;;
+      8) cmd_wizard ;;
+      9) cmd_uninstall ;;
+      h|H) show_help ;;
+      q|Q|0|"") info "Goodbye."; break ;;
+      *) warn "Unknown selection: '$choice'" ;;
+    esac
+  done
+
+  trap - INT TERM
 }
 
 show_help() {
@@ -1637,8 +1823,8 @@ $(printf "\033[1mUsage:\033[0m")  litellmctl <command> [args...]
 
 $(printf "\033[1mCommands:\033[0m")
   wizard               Interactive config.yaml generator (providers, tiers, fallbacks)
-  install [--with-db|--without-db]
-                     Install, update, or rebuild LiteLLM (prompts for DB setup)
+  install [--with-db|--without-db] [--with-local|--without-local]
+                     Install / rebuild LiteLLM (prompts for DB + local server setup)
   init-env             Detect auth files and update .env with correct paths
   auth chatgpt         Login to ChatGPT / Codex (browser PKCE)
   auth gemini          Login to Gemini CLI (browser PKCE)
@@ -1653,11 +1839,10 @@ $(printf "\033[1mCommands:\033[0m")
   restart | r          Restart the proxy service
   logs                 Tail proxy logs
   proxy [--port N]     Start proxy in foreground (for debugging)
-  uninstall-service    Remove the system service
   status               Show auth + proxy + local server status
   local [status]       Check local inference server reachability
-  local setup [embedding|transcription|all]
-                     Show platform-specific setup instructions for local servers
+  uninstall [service|db|embedding|transcription]
+                     Stop and remove the proxy service, database config, or local servers
   toggle-claude        Toggle Claude Code between direct API and proxy
   setup-completions    Add litellmctl to your shell
   help                 Show this help
@@ -1673,7 +1858,11 @@ EOF
 # ── Main ────────────────────────────────────────────────────────────────────
 
 if [[ $# -eq 0 ]]; then
-  show_help
+  if is_interactive; then
+    cmd_interactive
+  else
+    show_help
+  fi
   exit 0
 fi
 
@@ -1682,7 +1871,6 @@ case "$1" in
   --zsh-completions) generate_zsh_completions; exit 0 ;;
   wizard)            shift; cmd_wizard "$@" ;;
   install)           shift; cmd_install "$@" ;;
-  update)            warn "'update' has been folded into 'install'."; info "Run: litellmctl install [--local]"; exit 0 ;;
   init-env)          shift; cmd_init_env ;;
   auth)              shift; cmd_auth "$@" ;;
   start)             shift; cmd_start "$@" ;;
@@ -1690,7 +1878,7 @@ case "$1" in
   restart|r)         shift; cmd_restart ;;
   logs)              shift; cmd_logs ;;
   proxy)             shift; cmd_proxy "$@" ;;
-  uninstall-service) shift; cmd_uninstall_service ;;
+  uninstall)         shift; cmd_uninstall "$@" ;;
   setup-completions) shift; cmd_setup_completions ;;
   status)            shift; cmd_status "$@" ;;
   local)             shift; cmd_local "$@" ;;
