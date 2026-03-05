@@ -1,0 +1,59 @@
+name: Local Models
+desc: No auth — local inference server (Ollama, LM Studio, whisper.cpp, etc.)
+auth: none
+env_vars: []
+role: supplemental
+
+# Chat tiers (empty — local is for embedding + transcription only)
+tiers: {}
+extra_models: []
+
+# Local embedding models
+# Served by Ollama (localhost:11434) or any OpenAI-compatible /v1/embeddings
+# Override base URL with LOCAL_EMBEDDING_API_BASE in .env
+embedding_models:
+  - model_name: local/nomic-embed-text
+    model: local/nomic-embed-text
+    model_info:
+      mode: embedding
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+  - model_name: local/mxbai-embed-large
+    model: local/mxbai-embed-large
+    model_info:
+      mode: embedding
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+  - model_name: local/bge-m3
+    model: local/bge-m3
+    model_info:
+      mode: embedding
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+  - model_name: local/all-minilm
+    model: local/all-minilm
+    model_info:
+      mode: embedding
+      input_cost_per_token: 0
+      output_cost_per_token: 0
+
+# Local transcription models
+# Served by faster-whisper-server (localhost:10300), whisper.cpp (localhost:8080), or LocalAI
+# Override base URL with LOCAL_TRANSCRIPTION_API_BASE in .env
+transcription_models:
+  - model_name: local/whisper
+    model: local/whisper
+    model_info:
+      mode: audio_transcription
+  - model_name: local/whisper-large-v3
+    model: local/whisper-large-v3
+    model_info:
+      mode: audio_transcription
+  - model_name: local/whisper-large-v3-turbo
+    model: local/whisper-large-v3-turbo
+    model_info:
+      mode: audio_transcription
+  - model_name: local/distil-whisper-large-v3
+    model: local/distil-whisper-large-v3
+    model_info:
+      mode: audio_transcription

@@ -13,6 +13,7 @@ load_order:
   - minimax
   - anthropic
   - zai
+  - local
 
 # Per-tier primary provider and fallback order (matches the hand-tuned config)
 #   primary  = the provider whose model_name the alias points to

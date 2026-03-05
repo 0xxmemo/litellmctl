@@ -185,6 +185,8 @@ def _load_providers(load_order: list[str]) -> OrderedDict:
         data.setdefault("extra_models", [])
         data.setdefault("tiers", {})
         data.setdefault("auth", "none")
+        data.setdefault("embedding_models", [])
+        data.setdefault("transcription_models", [])
         providers[pid] = data
     # Also pick up any templates not in load_order
     for path in sorted(TEMPLATES_DIR.glob("*.yaml")):
@@ -197,11 +199,48 @@ def _load_providers(load_order: list[str]) -> OrderedDict:
         data.setdefault("extra_models", [])
         data.setdefault("tiers", {})
         data.setdefault("auth", "none")
+        data.setdefault("embedding_models", [])
+        data.setdefault("transcription_models", [])
         providers[pid] = data
     return providers
 
 
 # ── Provider readiness ──────────────────────────────────────────────────
+
+def _probe_http(url: str, timeout: float = 1.5) -> bool:
+    """Return True if url responds with 2xx within timeout."""
+    try:
+        import urllib.request
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return 200 <= r.status < 300
+    except Exception:
+        return False
+
+
+def _check_local_servers(env: dict) -> tuple[bool, str]:
+    """Probe local embedding + transcription endpoints. Returns (all_up, summary)."""
+    embed_base = (
+        env.get("LOCAL_EMBEDDING_API_BASE")
+        or env.get("OLLAMA_API_BASE")
+        or "http://localhost:11434"
+    ).rstrip("/")
+    transcr_base = (
+        env.get("LOCAL_TRANSCRIPTION_API_BASE")
+        or "http://localhost:10300"
+    ).rstrip("/")
+
+    embed_up = _probe_http(f"{embed_base}/v1/models")
+    transcr_up = _probe_http(f"{transcr_base}/v1/models")
+
+    if embed_up and transcr_up:
+        return True, "both servers reachable"
+    parts = []
+    if not embed_up:
+        parts.append(f"embedding offline ({embed_base})")
+    if not transcr_up:
+        parts.append(f"transcription offline ({transcr_base})")
+    return False, "; ".join(parts) + " — run: litellmctl local setup"
+
 
 def _check_provider_ready(pid: str, prov: dict, env: dict,
                           auth_files: dict) -> tuple[bool, str]:
@@ -210,6 +249,8 @@ def _check_provider_ready(pid: str, prov: dict, env: dict,
     A provider is ready if:
       - api_key auth: all env_vars are set in .env
       - oauth auth: the corresponding auth file exists and has tokens
+      - local: embedding/transcription servers are reachable (checked only
+        when the provider has embedding_models or transcription_models)
     """
     auth_type = prov.get("auth", "none")
 
@@ -226,6 +267,15 @@ def _check_provider_ready(pid: str, prov: dict, env: dict,
                 return True, "OAuth token present"
             return False, "auth file exists but token looks invalid"
         return False, f"not authenticated — run: litellmctl auth {pid.replace('_', ' ').split()[0]}"
+
+    # auth: none — may still have local server requirements
+    has_embed = bool(prov.get("embedding_models"))
+    has_transcr = bool(prov.get("transcription_models"))
+    if has_embed or has_transcr:
+        up, reason = _check_local_servers(env)
+        if up:
+            return True, "local servers reachable"
+        return False, reason
 
     return True, "no auth required"
 
@@ -272,6 +322,20 @@ def _collect_models(selected_providers: list[str], providers: OrderedDict,
     return models
 
 
+def _collect_task_models(selected_providers: list[str], providers: OrderedDict,
+                         task_key: str) -> list[dict]:
+    """Collect embedding_models or transcription_models from selected providers."""
+    seen: set[str] = set()
+    models: list[dict] = []
+    for pid in selected_providers:
+        prov = providers[pid]
+        for m in prov.get(task_key, []):
+            if m["model_name"] not in seen:
+                seen.add(m["model_name"])
+                models.append(_model_entry(m))
+    return models
+
+
 def _build_aliases(tiers: list[str], primary_map: dict[str, str],
                    providers: OrderedDict) -> dict[str, str]:
     """Build model_group_alias mapping: tier_name -> primary model_name."""
@@ -310,12 +374,8 @@ def _build_fallbacks(tiers: list[str], primary_map: dict[str, str],
     return fallbacks
 
 
-def _generate_yaml(models: list[dict], aliases: dict[str, str],
-                   fallbacks: list[dict], defaults: dict) -> str:
-    """Render config.yaml as a clean YAML string."""
-    lines: list[str] = ["model_list:"]
-
-    # Group models by provider prefix for readability
+def _write_model_entries(lines: list[str], models: list[dict]) -> None:
+    """Append model_list entries to lines, grouped by provider prefix."""
     current_prefix = None
     for entry in models:
         prefix = entry["model_name"].split("/")[0] if "/" in entry["model_name"] else ""
@@ -323,7 +383,6 @@ def _generate_yaml(models: list[dict], aliases: dict[str, str],
             if current_prefix is not None:
                 lines.append("")
             current_prefix = prefix
-
         lines.append(f"  - model_name: {entry['model_name']}")
         if "model_info" in entry:
             lines.append("    model_info:")
@@ -338,6 +397,31 @@ def _generate_yaml(models: list[dict], aliases: dict[str, str],
                     lines.append(f"        {sk}: {sv}")
             else:
                 lines.append(f"      {k}: {v}")
+
+
+def _generate_yaml(models: list[dict], aliases: dict[str, str],
+                   fallbacks: list[dict], defaults: dict,
+                   embedding_models: list[dict] | None = None,
+                   transcription_models: list[dict] | None = None) -> str:
+    """Render config.yaml as a clean YAML string."""
+    lines: list[str] = ["model_list:"]
+
+    # Chat completion models, grouped by provider prefix
+    _write_model_entries(lines, models)
+
+    # Embedding models (from supplemental providers, e.g. local)
+    if embedding_models:
+        lines.append("")
+        lines.append("  # ── Local embedding models ──────────────────────────────────────────────")
+        lines.append("  # Base URL: LOCAL_EMBEDDING_API_BASE env var  (default: http://localhost:11434)")
+        _write_model_entries(lines, embedding_models)
+
+    # Transcription models (from supplemental providers, e.g. local)
+    if transcription_models:
+        lines.append("")
+        lines.append("  # ── Local transcription models ──────────────────────────────────────────")
+        lines.append("  # Base URL: LOCAL_TRANSCRIPTION_API_BASE env var  (default: http://localhost:10300)")
+        _write_model_entries(lines, transcription_models)
 
     # Router settings
     rs = defaults.get("router_settings", {})
@@ -484,6 +568,9 @@ def run_wizard():
             elif auth_type == "api_key":
                 vars_needed = prov.get("env_vars", [])
                 print(f"    {ARROW} {prov['name']}: add to .env  {_bold(', '.join(vars_needed))}")
+            elif auth_type == "none" and (prov.get("embedding_models") or prov.get("transcription_models")):
+                print(f"    {ARROW} {prov['name']}: start local inference servers")
+                print(f"         run  {_bold('litellmctl local setup')}")
 
         if _confirm(f"\n  Include only ready providers?"):
             pass  # we'll filter below
@@ -605,7 +692,11 @@ def run_wizard():
     models = _collect_models(all_selected, providers, tiers)
     aliases = _build_aliases(active_tiers, primary_map, providers)
     fallbacks = _build_fallbacks(active_tiers, primary_map, fallback_map, providers)
-    yaml_content = _generate_yaml(models, aliases, fallbacks, defaults)
+    embedding_models = _collect_task_models(all_selected, providers, "embedding_models")
+    transcription_models = _collect_task_models(all_selected, providers, "transcription_models")
+    yaml_content = _generate_yaml(models, aliases, fallbacks, defaults,
+                                  embedding_models=embedding_models or None,
+                                  transcription_models=transcription_models or None)
 
     # ── Summary ──
     _header("Summary")

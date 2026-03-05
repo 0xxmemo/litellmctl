@@ -42,13 +42,16 @@ SYSTEMD_FILE="$SYSTEMD_DIR/${SYSTEMD_UNIT}.service"
 generate_completions() {
   cat <<'COMP'
 _litellmctl_completions() {
-  local cur prev commands auth_cmds
+  local cur prev pprev commands auth_cmds local_cmds local_setup_targets
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
+  pprev="${COMP_WORDS[COMP_CWORD-2]:-}"
 
-  commands="auth wizard install init-env start stop restart r logs proxy status toggle-claude setup-completions help"
+  commands="auth wizard install init-env start stop restart r logs proxy status local toggle-claude setup-completions help"
   auth_cmds="chatgpt gemini qwen kimi codex status refresh export import"
+  local_cmds="setup status"
+  local_setup_targets="embedding transcription all"
 
   case "$prev" in
     litellmctl)
@@ -56,6 +59,13 @@ _litellmctl_completions() {
       return ;;
     auth)
       COMPREPLY=( $(compgen -W "$auth_cmds" -- "$cur") )
+      return ;;
+    local)
+      COMPREPLY=( $(compgen -W "$local_cmds" -- "$cur") )
+      return ;;
+    setup)
+      [[ "$pprev" == "local" ]] &&
+        COMPREPLY=( $(compgen -W "$local_setup_targets" -- "$cur") )
       return ;;
     refresh|export)
       COMPREPLY=( $(compgen -W "chatgpt gemini qwen kimi" -- "$cur") )
@@ -75,7 +85,7 @@ COMP
 generate_zsh_completions() {
   cat <<'COMP'
 _litellmctl_completions() {
-  local -a commands auth_cmds
+  local -a commands auth_cmds local_cmds local_setup_targets
   commands=(
     'auth:Manage OAuth tokens'
     'wizard:Interactive config.yaml generator'
@@ -87,7 +97,8 @@ _litellmctl_completions() {
     'r:Alias for restart'
     'logs:Tail proxy logs'
     'proxy:Start proxy in foreground (debug)'
-    'status:Show auth + proxy status'
+    'status:Show auth + proxy + local server status'
+    'local:Manage local inference servers (embedding + transcription)'
     'toggle-claude:Toggle Claude Code between direct API and proxy'
     'setup-completions:Add litellmctl to your shell'
     'help:Show help'
@@ -103,12 +114,22 @@ _litellmctl_completions() {
     'export:Copy credentials as transfer script'
     'import:Read credentials from stdin'
   )
+  local_cmds=(
+    'setup:Show setup instructions for local inference servers'
+    'status:Check reachability of local inference servers'
+  )
+  local_setup_targets=(
+    'embedding:Ollama setup for embedding models'
+    'transcription:faster-whisper-server setup for audio transcription'
+    'all:Setup both embedding and transcription servers'
+  )
 
   if (( CURRENT == 2 )); then
     _describe 'command' commands
   elif (( CURRENT == 3 )); then
     case "${words[2]}" in
       auth)    _describe 'auth command' auth_cmds ;;
+      local)   _describe 'local command' local_cmds ;;
       refresh|export) compadd chatgpt gemini qwen kimi ;;
       start|proxy) compadd -- --port --config ;;
       install) compadd -- --with-db --without-db ;;
@@ -116,6 +137,7 @@ _litellmctl_completions() {
   elif (( CURRENT == 4 )); then
     case "${words[3]}" in
       refresh|export) compadd chatgpt gemini qwen kimi ;;
+      setup) _describe 'target' local_setup_targets ;;
     esac
   fi
 }
@@ -1328,6 +1350,19 @@ cmd_uninstall_service() {
   fi
 }
 
+# _proxy_http_check <url> [timeout_secs]
+# Returns 0 if url responds 2xx, 1 otherwise.  No output.
+_proxy_http_check() {
+  python3 - <<PY 2>/dev/null
+import urllib.request
+try:
+    with urllib.request.urlopen("$1", timeout=${2:-3}) as r:
+        raise SystemExit(0 if 200 <= r.status < 300 else 1)
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
 _db_status() {
   local db_url="${DATABASE_URL:-}"
 
@@ -1359,18 +1394,134 @@ _db_status() {
   printf "\n"
 }
 
+_local_status() {
+  local embed_base="${LOCAL_EMBEDDING_API_BASE:-${OLLAMA_API_BASE:-http://localhost:11434}}"
+  local transcr_base="${LOCAL_TRANSCRIPTION_API_BASE:-http://localhost:10300}"
+
+  printf "\033[1mLocal inference servers\033[0m\n"
+
+  if _proxy_http_check "${embed_base%/}/v1/models"; then
+    printf "  Embedding     (%s): \033[32mreachable\033[0m\n" "${embed_base}"
+  else
+    printf "  Embedding     (%s): \033[33mnot running\033[0m\n" "${embed_base}"
+    printf "    \033[2mRun: litellmctl local setup embedding\033[0m\n"
+  fi
+
+  if _proxy_http_check "${transcr_base%/}/v1/models"; then
+    printf "  Transcription (%s): \033[32mreachable\033[0m\n" "${transcr_base}"
+  else
+    printf "  Transcription (%s): \033[33mnot running\033[0m\n" "${transcr_base}"
+    printf "    \033[2mRun: litellmctl local setup transcription\033[0m\n"
+  fi
+
+  printf "\n"
+}
+
+# ── Local server setup guidance ──────────────────────────────────────────────
+
+_local_setup_embedding() {
+  local embed_base="${LOCAL_EMBEDDING_API_BASE:-${OLLAMA_API_BASE:-http://localhost:11434}}"
+
+  printf "\n\033[1mEmbedding server — Ollama\033[0m\n"
+
+  if command -v ollama &>/dev/null; then
+    printf "  \033[32m✓\033[0m Ollama installed\n"
+  else
+    printf "  Install Ollama:\n\n"
+    if is_macos && command -v brew &>/dev/null; then
+      printf "      brew install ollama\n\n"
+    else
+      printf "      curl -fsSL https://ollama.com/install.sh | sh\n\n"
+    fi
+  fi
+
+  if _proxy_http_check "${embed_base%/}/v1/models"; then
+    printf "  \033[32m✓\033[0m Running at %s\n" "${embed_base}"
+  else
+    printf "  Start Ollama:\n\n"
+    if is_macos && command -v brew &>/dev/null; then
+      printf "      brew services start ollama\n\n"
+    else
+      printf "      ollama serve\n\n"
+    fi
+  fi
+
+  printf "  Pull embedding models:\n\n"
+  printf "      ollama pull nomic-embed-text\n"
+  printf "      ollama pull mxbai-embed-large\n\n"
+
+  printf "  Use via proxy:  model: local/nomic-embed-text\n"
+  printf "  Override URL:   LOCAL_EMBEDDING_API_BASE=http://localhost:11434\n\n"
+}
+
+_local_setup_transcription() {
+  local transcr_base="${LOCAL_TRANSCRIPTION_API_BASE:-http://localhost:10300}"
+
+  printf "\n\033[1mTranscription server — faster-whisper-server\033[0m\n"
+
+  if _proxy_http_check "${transcr_base%/}/v1/models"; then
+    printf "  \033[32m✓\033[0m Running at %s\n\n" "${transcr_base}"
+    return 0
+  fi
+
+  if command -v uv &>/dev/null; then
+    printf "  Install and start:\n\n"
+    printf "      uv tool install faster-whisper-server\n"
+    printf "      faster-whisper-server --port 10300\n\n"
+  elif command -v docker &>/dev/null; then
+    printf "  Start with Docker:\n\n"
+    printf "      docker run -d --name faster-whisper -p 10300:8000 \\\\\n"
+    printf "        ghcr.io/fedirz/faster-whisper-server:latest-cpu\n\n"
+  else
+    printf "  Install uv, then:\n\n"
+    printf "      curl -LsSf https://astral.sh/uv/install.sh | sh\n"
+    printf "      uv tool install faster-whisper-server\n"
+    printf "      faster-whisper-server --port 10300\n\n"
+  fi
+
+  if ! is_macos; then
+    printf "  To auto-start on Linux, create a systemd user unit:\n\n"
+    printf "      ~/.config/systemd/user/faster-whisper.service\n\n"
+    printf "      [Service] ExecStart=faster-whisper-server --port 10300\n"
+    printf "      systemctl --user enable --now faster-whisper\n\n"
+  fi
+
+  printf "  Use via proxy:  model: local/whisper-large-v3-turbo\n"
+  printf "  Override URL:   LOCAL_TRANSCRIPTION_API_BASE=http://localhost:10300\n\n"
+}
+
+cmd_local() {
+  load_env
+  local sub="${1:-}"
+  local target="${2:-}"
+
+  case "$sub" in
+    setup)
+      case "$target" in
+        embedding|embed)
+          _local_setup_embedding ;;
+        transcription|transcribe|whisper)
+          _local_setup_transcription ;;
+        ""|all)
+          _local_setup_embedding
+          _local_setup_transcription ;;
+        *)
+          error "Unknown local setup target: $target"
+          printf "  Usage: litellmctl local setup [embedding|transcription|all]\n"
+          exit 1 ;;
+      esac ;;
+    status|"")
+      _local_status ;;
+    *)
+      error "Unknown local subcommand: $sub"
+      printf "  Usage: litellmctl local [setup [embedding|transcription]|status]\n"
+      exit 1 ;;
+  esac
+}
+
 _proxy_http_health() {
   local port="$1"
-  local health_url="http://127.0.0.1:${port}/health/readiness"
-  if python3 - <<PY
-import urllib.request
-try:
-    with urllib.request.urlopen("${health_url}", timeout=3) as r:
-        raise SystemExit(0 if 200 <= r.status < 300 else 1)
-except Exception:
-    raise SystemExit(1)
-PY
-  then
+  if _proxy_http_check "http://127.0.0.1:${port}/health/readiness"; then
     echo "healthy"
   else
     echo "unhealthy"
@@ -1379,10 +1530,9 @@ PY
 
 _wait_for_proxy_ready() {
   local port="$1"
-  local tries=30
-  local i=1
+  local tries=30 i=1
   while [ "$i" -le "$tries" ]; do
-    if [ "$(_proxy_http_health "$port")" = "healthy" ]; then
+    if _proxy_http_check "http://127.0.0.1:${port}/health/readiness"; then
       info "Proxy is healthy on port $port."
       return 0
     fi
@@ -1468,6 +1618,7 @@ cmd_status() {
     fi
   fi
 
+  _local_status
   _db_status
 }
 
@@ -1503,7 +1654,10 @@ $(printf "\033[1mCommands:\033[0m")
   logs                 Tail proxy logs
   proxy [--port N]     Start proxy in foreground (for debugging)
   uninstall-service    Remove the system service
-  status               Show auth + proxy status
+  status               Show auth + proxy + local server status
+  local [status]       Check local inference server reachability
+  local setup [embedding|transcription|all]
+                     Show platform-specific setup instructions for local servers
   toggle-claude        Toggle Claude Code between direct API and proxy
   setup-completions    Add litellmctl to your shell
   help                 Show this help
@@ -1539,6 +1693,7 @@ case "$1" in
   uninstall-service) shift; cmd_uninstall_service ;;
   setup-completions) shift; cmd_setup_completions ;;
   status)            shift; cmd_status "$@" ;;
+  local)             shift; cmd_local "$@" ;;
   toggle-claude)     exec "$BIN_DIR/toggle-claude" ;;
   help|-h|--help)    show_help ;;
   *)                 error "Unknown command: $1"; show_help; exit 1 ;;

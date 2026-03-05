@@ -66,26 +66,29 @@ litellmctl update          # pull latest, sync submodule, rebuild & restart
 ## CLI
 
 ```
-litellmctl wizard                 Interactive config.yaml generator (providers, tiers, fallbacks)
+litellmctl wizard                       Interactive config.yaml generator (providers, tiers, fallbacks)
 litellmctl install [--with-db|--without-db]
-                                  Install / reinstall the LiteLLM fork (prompts for DB setup)
-litellmctl auth chatgpt           Login to ChatGPT / Codex (PKCE)
-litellmctl auth gemini            Login to Gemini CLI (PKCE)
-litellmctl auth qwen              Login to Qwen Portal (device-code)
-litellmctl auth kimi              Login to Kimi Code (device-code)
-litellmctl auth refresh <p>       Refresh token for chatgpt, gemini, qwen, or kimi
-litellmctl auth export [p...]     Copy credentials as a paste-able transfer script
-litellmctl auth import            Read credentials from stdin
-litellmctl auth status            Show token expiry info
-litellmctl start [--port N]       Start proxy as background service (auto-start on boot)
-litellmctl stop                   Stop the proxy service
-litellmctl restart                Restart the proxy service
-litellmctl logs                   Tail proxy logs
-litellmctl proxy [--port N]       Start proxy in foreground (for debugging)
-litellmctl uninstall-service      Remove the system service
-litellmctl status                 Auth + proxy + database status at a glance
-litellmctl toggle-claude          Toggle Claude Code between direct API and proxy
-litellmctl setup-completions      Add litellmctl to your shell (alias + tab completion)
+                                        Install / reinstall the LiteLLM fork (prompts for DB setup)
+litellmctl auth chatgpt                 Login to ChatGPT / Codex (PKCE)
+litellmctl auth gemini                  Login to Gemini CLI (PKCE)
+litellmctl auth qwen                    Login to Qwen Portal (device-code)
+litellmctl auth kimi                    Login to Kimi Code (device-code)
+litellmctl auth refresh <p>             Refresh token for chatgpt, gemini, qwen, or kimi
+litellmctl auth export [p...]           Copy credentials as a paste-able transfer script
+litellmctl auth import                  Read credentials from stdin
+litellmctl auth status                  Show token expiry info
+litellmctl start [--port N]             Start proxy as background service (auto-start on boot)
+litellmctl stop                         Stop the proxy service
+litellmctl restart                      Restart the proxy service
+litellmctl logs                         Tail proxy logs
+litellmctl proxy [--port N]             Start proxy in foreground (for debugging)
+litellmctl uninstall-service            Remove the system service
+litellmctl status                       Auth + proxy + local servers + database status at a glance
+litellmctl local [status]               Check local inference server reachability
+litellmctl local setup [embedding|transcription|all]
+                                        Platform-specific setup instructions for local servers
+litellmctl toggle-claude                Toggle Claude Code between direct API and proxy
+litellmctl setup-completions            Add litellmctl to your shell (alias + tab completion)
 ```
 
 `start` and `restart` install a system service (macOS: launchd, Linux: systemd)
@@ -177,7 +180,8 @@ authenticating, either:
 │   ├── dashscope.yaml  Alibaba Cloud Coding Plan — fallback
 │   ├── chatgpt.yaml    ChatGPT / Codex — fallback
 │   ├── minimax.yaml    MiniMax — fallback
-│   └── zai.yaml        Z.AI (GLM) — fallback
+│   ├── zai.yaml        Z.AI (GLM) — fallback
+│   └── local.yaml      Local inference servers — embedding + transcription
 ├── litellm/            Git submodule → 0xxmemo/litellm fork
 ├── config.yaml         Proxy model routing, fallbacks, environment vars
 ├── .env                API keys & OAuth secrets (git-ignored, DATABASE_URL auto-added)
@@ -215,6 +219,7 @@ All backend models are also directly addressable by their full name
 | **Gemini CLI**  | Google OAuth             | `gemini-cli/gemini-2.5-pro`, `gemini-cli/gemini-2.5-flash`, `gemini-cli/gemini-2.5-flash-lite`                               |
 | **MiniMax**     | API key                  | `minimax/MiniMax-M2.5-highspeed`                                                                                             |
 | **Z.AI**        | API key                  | `zai/glm-5`, `zai/glm-5v`, `zai/glm-4.7`, `zai/glm-4.6`, `zai/glm-4.5`, etc.                                                 |
+| **Local**       | none                     | Embedding: `local/nomic-embed-text`, `local/mxbai-embed-large`, `local/bge-m3`, `local/all-minilm` · Transcription: `local/whisper`, `local/whisper-large-v3`, `local/whisper-large-v3-turbo`, `local/distil-whisper-large-v3` |
 
 ## Gemini CLI Provider
 
@@ -276,6 +281,46 @@ Free tier: 60 requests/minute, 1,000 requests/day. For higher quotas, subscribe 
 the [Alibaba Cloud Coding Plan](https://bailian.console.aliyun.com) and set
 `DASHSCOPE_API_KEY` — the `dashscope/` models route through the Coding Plan's
 OpenAI-compatible endpoint at `coding-intl.dashscope.aliyuncs.com/v1`.
+
+## Local Models
+
+The fork adds a `local` provider for embedding and transcription models served
+by a process running on the same machine — no API key required.
+
+### Embedding (Ollama)
+
+```bash
+litellmctl local setup embedding   # shows install + pull instructions
+```
+
+Default base URL: `http://localhost:11434` (Ollama).
+Override with `LOCAL_EMBEDDING_API_BASE` in `.env`.
+
+```python
+# Example — OpenAI SDK pointed at the proxy
+client.embeddings.create(model="local/nomic-embed-text", input="hello")
+client.embeddings.create(model="local/mxbai-embed-large", input="hello")
+```
+
+### Transcription (faster-whisper-server)
+
+```bash
+litellmctl local setup transcription   # shows install options (uv / Docker)
+```
+
+Default base URL: `http://localhost:10300` (faster-whisper-server).
+Override with `LOCAL_TRANSCRIPTION_API_BASE` in `.env`.
+
+```python
+client.audio.transcriptions.create(model="local/whisper-large-v3-turbo", file=audio)
+```
+
+### Status
+
+```bash
+litellmctl local           # or: litellmctl local status
+litellmctl status          # combined: auth + proxy + local + DB
+```
 
 ## Syncing with Upstream
 
