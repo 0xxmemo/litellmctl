@@ -68,6 +68,8 @@ litellmctl update          # pull latest, sync submodule, rebuild & restart
 ```
 litellmctl wizard                       Interactive config.yaml generator (providers, tiers, fallbacks)
 litellmctl install [--with-db|--without-db] [--with-local|--without-local]
+                   [--with-embedding|--without-embedding]
+                   [--with-transcription|--without-transcription]
                                         Install / rebuild LiteLLM (prompts for DB + local server setup)
 litellmctl auth chatgpt                 Login to ChatGPT / Codex (PKCE)
 litellmctl auth gemini                  Login to Gemini CLI (PKCE)

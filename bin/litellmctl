@@ -68,7 +68,7 @@ _litellmctl_completions() {
       COMPREPLY=( $(compgen -W "--port --config" -- "$cur") )
       return ;;
     install)
-      COMPREPLY=( $(compgen -W "--with-db --without-db --with-local --without-local" -- "$cur") )
+      COMPREPLY=( $(compgen -W "--with-db --without-db --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription" -- "$cur") )
       return ;;
   esac
 }
@@ -124,7 +124,7 @@ _litellmctl_completions() {
       uninstall) _describe 'uninstall target' uninstall_cmds ;;
       refresh|export) compadd chatgpt gemini qwen kimi ;;
       start|proxy) compadd -- --port --config ;;
-      install) compadd -- --with-db --without-db --with-local --without-local ;;
+      install) compadd -- --with-db --without-db --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription ;;
     esac
   elif (( CURRENT == 4 )); then
     case "${words[3]}" in
@@ -553,14 +553,23 @@ _ollama_start() {
   return 1
 }
 
-_install_local_servers() {
+# The PyPI faster-whisper-server wheel omits pyproject.toml, causing _get_version() to
+# crash on import. Inject a minimal stub so the import succeeds — no reinstall needed.
+_fws_patch_pyproject() {
+  local uv_python="$HOME/.local/share/uv/tools/faster-whisper-server/bin/python"
+  [ -x "$uv_python" ] || return 0
+  local site_pkgs
+  site_pkgs="$("$uv_python" -c \
+    "import sysconfig; print(sysconfig.get_paths()['purelib'])" 2>/dev/null)" || return 0
+  [ -d "$site_pkgs/faster_whisper_server" ] || return 0
+  [ -f "$site_pkgs/pyproject.toml" ] && return 0
+  printf '[project]\nname = "faster-whisper-server"\nversion = "0.0.0"\n' \
+    > "$site_pkgs/pyproject.toml"
+}
+
+_install_embedding() {
   local embed_base="${LOCAL_EMBEDDING_API_BASE:-${OLLAMA_API_BASE:-http://localhost:11434}}"
-  local transcr_base="${LOCAL_TRANSCRIPTION_API_BASE:-http://localhost:10300}"
 
-  printf "\n"
-  info "Setting up local inference servers"
-
-  # ── Ollama (embedding) ────────────────────────────────────────────────────
   if ! command -v ollama &>/dev/null; then
     info "Ollama not found — installing ..."
     if is_macos && command -v brew &>/dev/null; then
@@ -593,28 +602,17 @@ _install_local_servers() {
       fi
     done
   else
-    warn "Ollama install failed — re-run after installing manually: litellmctl install --with-local"
+    warn "Ollama install failed — re-run after installing manually: litellmctl install --with-embedding"
   fi
+}
 
-  # ── faster-whisper-server (transcription) ─────────────────────────────────
+_install_transcription_server() {
+  local transcr_base="${LOCAL_TRANSCRIPTION_API_BASE:-http://localhost:10300}"
+
   # uv tools land in ~/.local/bin — ensure it's in PATH on every run
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
-  # The PyPI wheel omits pyproject.toml, causing _get_version() to crash on import.
-  # Inject a minimal stub so the import succeeds — no reinstall needed.
-  _fws_patch_pyproject() {
-    local uv_python="$HOME/.local/share/uv/tools/faster-whisper-server/bin/python"
-    [ -x "$uv_python" ] || return 0
-    local site_pkgs
-    site_pkgs="$("$uv_python" -c \
-      "import sysconfig; print(sysconfig.get_paths()['purelib'])" 2>/dev/null)" || return 0
-    [ -d "$site_pkgs/faster_whisper_server" ] || return 0
-    [ -f "$site_pkgs/pyproject.toml" ] && return 0
-    printf '[project]\nname = "faster-whisper-server"\nversion = "0.0.0"\n' \
-      > "$site_pkgs/pyproject.toml"
-  }
-
-  # Detect usable binary; patch broken install before giving up.
+  # Detect usable binary; patch broken PyPI install before giving up.
   local transcr_bin=""
   if command -v faster-whisper-server &>/dev/null; then
     if ! faster-whisper-server --help &>/dev/null; then
@@ -685,7 +683,7 @@ _install_local_servers() {
   elif _transcr_http_check "${transcr_base%/}" 2; then
     info "Transcription server running at ${transcr_base}"
   else
-    warn "Transcription server unavailable — re-run after setup: litellmctl install --with-local"
+    warn "Transcription server unavailable — re-run: litellmctl install --with-transcription"
   fi
 }
 
@@ -771,8 +769,9 @@ _auth_interactive() {
 
 cmd_install() {
   local install_args=()
-  local db_mode="${LITELLM_INSTALL_DB_SETUP:-}"     # yes|no|empty(auto prompt)
-  local local_mode="${LITELLM_INSTALL_LOCAL_SETUP:-}" # yes|no|empty(auto prompt)
+  local db_mode="${LITELLM_INSTALL_DB_SETUP:-}"       # yes|no|empty(auto)
+  local embed_mode="${LITELLM_INSTALL_EMBED_SETUP:-}"  # yes|no|empty(auto)
+  local transcr_mode="${LITELLM_INSTALL_TRANSCR_SETUP:-}" # yes|no|empty(auto)
   local db_mode_flag=""
   local post_sync_only=false
   local env_file="$PROJECT_DIR/.env"
@@ -783,12 +782,16 @@ cmd_install() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
-      --with-db|--db)       db_mode="yes"; db_mode_flag="--with-db"; shift ;;
-      --without-db|--no-db) db_mode="no"; db_mode_flag="--without-db"; shift ;;
-      --with-local)         local_mode="yes"; shift ;;
-      --without-local)      local_mode="no"; shift ;;
-      --_post-sync)         post_sync_only=true; shift ;;
-      *)                    install_args+=("$1"); shift ;;
+      --with-db|--db)            db_mode="yes"; db_mode_flag="--with-db"; shift ;;
+      --without-db|--no-db)      db_mode="no"; db_mode_flag="--without-db"; shift ;;
+      --with-embedding)          embed_mode="yes"; shift ;;
+      --without-embedding)       embed_mode="no"; shift ;;
+      --with-transcription)      transcr_mode="yes"; shift ;;
+      --without-transcription)   transcr_mode="no"; shift ;;
+      --with-local)              embed_mode="yes"; transcr_mode="yes"; shift ;;
+      --without-local)           embed_mode="no"; transcr_mode="no"; shift ;;
+      --_post-sync)              post_sync_only=true; shift ;;
+      *)                         install_args+=("$1"); shift ;;
     esac
   done
 
@@ -803,9 +806,11 @@ cmd_install() {
     if [ -n "$pre_sha" ] && [ -n "$post_sha" ] && [ "$pre_sha" != "$post_sha" ]; then
       info "Repository updated during install. Reloading latest litellmctl ..."
       local reexec=("$PROJECT_DIR/bin/litellmctl" "install" "--_post-sync")
-      if [ -n "$db_mode_flag" ]; then
-        reexec+=("$db_mode_flag")
-      fi
+      [ -n "$db_mode_flag" ]       && reexec+=("$db_mode_flag")
+      [ "$embed_mode"  = "yes" ]   && reexec+=("--with-embedding")
+      [ "$embed_mode"  = "no"  ]   && reexec+=("--without-embedding")
+      [ "$transcr_mode" = "yes" ]  && reexec+=("--with-transcription")
+      [ "$transcr_mode" = "no"  ]  && reexec+=("--without-transcription")
       exec "${reexec[@]}"
     fi
   fi
@@ -841,21 +846,35 @@ cmd_install() {
   fi
 
   # ── Local inference servers ──────────────────────────────────────────────
-  if [ -z "$local_mode" ]; then
-    if is_interactive; then
-      printf "\n  Set up local inference servers (embedding + transcription)? [y/N] "
-      local ans_local
-      read -r ans_local </dev/tty || ans_local="n"
-      case "$ans_local" in
-        [yY]*) local_mode="yes" ;;
-        *)     local_mode="no" ;;
-      esac
-    else
-      local_mode="no"
-    fi
+  # Auto-restore: if already installed, default to yes without prompting.
+  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+  if [ -z "$embed_mode" ] && command -v ollama &>/dev/null; then
+    embed_mode="yes"
   fi
-  if [ "$local_mode" = "yes" ]; then
-    _install_local_servers
+  if [ -z "$transcr_mode" ] && \
+     { command -v faster-whisper-server &>/dev/null || command -v speaches &>/dev/null; }; then
+    transcr_mode="yes"
+  fi
+
+  # Prompt separately for anything not already decided.
+  if [ -z "$embed_mode" ] && is_interactive; then
+    printf "\n  Set up local embedding server (Ollama)? [y/N] "
+    local ans_embed
+    read -r ans_embed </dev/tty || ans_embed="n"
+    case "$ans_embed" in [yY]*) embed_mode="yes" ;; *) embed_mode="no" ;; esac
+  fi
+  if [ -z "$transcr_mode" ] && is_interactive; then
+    printf "\n  Set up local transcription server (faster-whisper-server)? [y/N] "
+    local ans_transcr
+    read -r ans_transcr </dev/tty || ans_transcr="n"
+    case "$ans_transcr" in [yY]*) transcr_mode="yes" ;; *) transcr_mode="no" ;; esac
+  fi
+
+  if [ "$embed_mode" = "yes" ] || [ "$transcr_mode" = "yes" ]; then
+    printf "\n"
+    info "Setting up local inference servers"
+    [ "$embed_mode"   = "yes" ] && _install_embedding
+    [ "$transcr_mode" = "yes" ] && _install_transcription_server
   fi
 
   # Ask to restart if service is running
@@ -1461,6 +1480,10 @@ _patch_db_env_flags() {
     printf 'LITELLM_LOCAL_MODEL_COST_MAP=true\n' >> "$env_file"
     dirty=true
   fi
+  if ! grep -q '^DISABLE_SCHEMA_UPDATE=' "$env_file" 2>/dev/null; then
+    printf 'DISABLE_SCHEMA_UPDATE=true\n' >> "$env_file"
+    dirty=true
+  fi
   if ! grep -q '^STORE_MODEL_IN_DB=' "$env_file" 2>/dev/null; then
     printf 'STORE_MODEL_IN_DB=true\n' >> "$env_file"
     dirty=true
@@ -1925,6 +1948,7 @@ $(printf "\033[1mUsage:\033[0m")  litellmctl <command> [args...]
 $(printf "\033[1mCommands:\033[0m")
   wizard               Interactive config.yaml generator (providers, tiers, fallbacks)
   install [--with-db|--without-db] [--with-local|--without-local]
+          [--with-embedding|--without-embedding] [--with-transcription|--without-transcription]
                      Install / rebuild LiteLLM (prompts for DB + local server setup)
   init-env             Detect auth files and update .env with correct paths
   auth chatgpt         Login to ChatGPT / Codex (browser PKCE)
