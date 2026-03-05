@@ -653,7 +653,7 @@ _install_local_servers() {
   fi
 
   if [ -n "$transcr_bin" ]; then
-    if _proxy_http_check "${transcr_base%/}/v1/models" 2; then
+    if _transcr_http_check "${transcr_base%/}" 2; then
       info "Transcription server already running at ${transcr_base}"
     else
       info "Starting ${transcr_bin} (first start downloads model — may take a minute) ..."
@@ -673,16 +673,16 @@ _install_local_servers() {
           warn "${transcr_bin} exited unexpectedly. Logs: $transcr_log"
           break
         fi
-        _proxy_http_check "${transcr_base%/}/v1/models" 2 && printf "\n" && break
+        _transcr_http_check "${transcr_base%/}" 2 && printf "\n" && break
       done
-      if _proxy_http_check "${transcr_base%/}/v1/models" 2; then
+      if _transcr_http_check "${transcr_base%/}" 2; then
         info "${transcr_bin} started at ${transcr_base}"
       elif kill -0 "$transcr_pid" 2>/dev/null; then
-        warn "${transcr_bin} still loading — check later: curl ${transcr_base}/v1/models"
+        warn "${transcr_bin} still loading — check later: curl ${transcr_base}/v1/audio/transcriptions"
         info "Logs: $transcr_log"
       fi
     fi
-  elif _proxy_http_check "${transcr_base%/}/v1/models" 2; then
+  elif _transcr_http_check "${transcr_base%/}" 2; then
     info "Transcription server running at ${transcr_base}"
   else
     warn "Transcription server unavailable — re-run after setup: litellmctl install --with-local"
@@ -1560,7 +1560,7 @@ _uninstall_transcription() {
   local found=0
   if command -v faster-whisper-server &>/dev/null; then
     found=1
-    if _proxy_http_check "${transcr_base%/}/v1/models" 2; then
+    if _transcr_http_check "${transcr_base%/}" 2; then
       printf "  Running at %s. Stop it:\n\n" "${transcr_base}"
       printf "      pkill -f faster-whisper-server\n\n"
     else
@@ -1662,6 +1662,22 @@ except Exception:
 PY
 }
 
+# _transcr_http_check <base_url> [timeout_secs]
+# Returns 0 if the server accepts HTTP connections (any status), 1 on connection failure.
+# faster-whisper-server returns 404 for /v1/models but the server is ready.
+_transcr_http_check() {
+  python3 - <<PY 2>/dev/null
+import urllib.request, urllib.error
+try:
+    urllib.request.urlopen("${1%/}/v1/audio/transcriptions", timeout=${2:-3})
+    raise SystemExit(0)
+except urllib.error.HTTPError:
+    raise SystemExit(0)  # any HTTP response = server is up
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
 _db_status() {
   local db_url="${DATABASE_URL:-}"
 
@@ -1706,7 +1722,7 @@ _local_status() {
     printf "    \033[2mRun: litellmctl install --with-local\033[0m\n"
   fi
 
-  if _proxy_http_check "${transcr_base%/}/v1/models"; then
+  if _transcr_http_check "${transcr_base%/}"; then
     printf "  Transcription (%s): \033[32mreachable\033[0m\n" "${transcr_base}"
   else
     printf "  Transcription (%s): \033[33mnot running\033[0m\n" "${transcr_base}"
