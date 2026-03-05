@@ -660,7 +660,8 @@ _install_local_servers() {
       local transcr_port="${transcr_base##*:}"; transcr_port="${transcr_port%%/*}"
       local transcr_log="$PROJECT_DIR/logs/faster-whisper.log"
       mkdir -p "$PROJECT_DIR/logs"
-      "$transcr_bin" --port "$transcr_port" >"$transcr_log" 2>&1 &
+      local transcr_model="${LOCAL_TRANSCRIPTION_MODEL:-Systran/faster-whisper-tiny}"
+      "$transcr_bin" --port "$transcr_port" "$transcr_model" >"$transcr_log" 2>&1 &
       local transcr_pid=$!
       local j=0
       printf "  Waiting"
