@@ -74,6 +74,11 @@ model_list:
       model: alibaba/qwen3.5-plus
       timeout: 90
       api_key: os.environ/DASHSCOPE_API_KEY
+  - model_name: alibaba/qwen3-max-2026-01-23
+    litellm_params:
+      model: alibaba/qwen3-max-2026-01-23
+      timeout: 90
+      api_key: os.environ/DASHSCOPE_API_KEY
   - model_name: alibaba/qwen3-coder-plus
     litellm_params:
       model: alibaba/qwen3-coder-plus
