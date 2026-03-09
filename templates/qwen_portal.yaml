@@ -6,10 +6,10 @@ env_vars: []
 role: fallback
 
 tiers:
-  sonnet:
+  plus:
     - model_name: qwen-cli/qwen3-coder-plus
       model: qwen_portal/qwen3-coder-plus
-  haiku:
+  lite:
     - model_name: qwen-cli/qwen3-vl-plus
       model: qwen_portal/vision-model
 

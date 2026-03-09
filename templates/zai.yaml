@@ -6,17 +6,17 @@ env_vars:
 role: fallback
 
 tiers:
-  opus:
+  ultra:
     - model_name: zai/glm-5
       model: anthropic/glm-5
       api_key: os.environ/ZAI_API_KEY
       api_base: https://api.z.ai/api/anthropic
-  sonnet:
+  plus:
     - model_name: zai/glm-4.5-air
       model: anthropic/glm-4.5-air
       api_key: os.environ/ZAI_API_KEY
       api_base: https://api.z.ai/api/anthropic
-  haiku:
+  lite:
     - model_name: zai/glm-4.5-flash
       model: anthropic/glm-4.5-flash
       api_key: os.environ/ZAI_API_KEY

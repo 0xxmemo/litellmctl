@@ -6,7 +6,7 @@ env_vars:
 role: fallback
 
 tiers:
-  opus:
+  ultra:
     - model_name: alibaba/qwen3.5-plus
       model: alibaba/qwen3.5-plus
       api_key: os.environ/DASHSCOPE_API_KEY
@@ -15,12 +15,12 @@ tiers:
       model: alibaba/qwen3-max-2026-01-23
       api_key: os.environ/DASHSCOPE_API_KEY
       timeout: 90
-  sonnet:
+  plus:
     - model_name: alibaba/qwen3-coder-plus
       model: alibaba/qwen3-coder-plus
       api_key: os.environ/DASHSCOPE_API_KEY
       timeout: 90
-  haiku:
+  lite:
     - model_name: alibaba/qwen3-coder-next
       model: alibaba/qwen3-coder-next
       api_key: os.environ/DASHSCOPE_API_KEY

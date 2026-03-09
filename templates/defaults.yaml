@@ -1,7 +1,7 @@
 tiers:
-  - opus
-  - sonnet
-  - haiku
+  - ultra
+  - plus
+  - lite
 
 # Display / load order in the wizard
 load_order:
@@ -19,22 +19,22 @@ load_order:
 #   primary  = the provider whose model_name the alias points to
 #   fallbacks = tried in order when the primary fails
 primary:
-  opus: chatgpt
-  sonnet: anthropic
-  haiku: chatgpt
+  ultra: chatgpt
+  plus: anthropic
+  lite: chatgpt
 
 fallback_order:
-  opus:
+  ultra:
     - alibaba
     - kimi_code
     - anthropic
     - zai
-  sonnet:
+  plus:
     - chatgpt
     - qwen_portal
     - alibaba
     - zai
-  haiku:
+  lite:
     - qwen_portal
     - alibaba
     - anthropic

@@ -192,13 +192,13 @@ authenticating, either:
 
 ## Models & Fallbacks
 
-Three consumer-facing models, each with a tiered fallback chain:
+Three consumer-facing tiers, each with a fallback chain:
 
-| Model               | Fallback 1 (Codex)          | Fallback 2 (Alibaba Cloud)        | Fallback 3 (Kimi Code)           | Fallback 4 (MiniMax)                | Fallback 5 (Z.AI)   |
-| ------------------- | --------------------------- | --------------------------------- | -------------------------------- | ----------------------------------- | ------------------- |
-| `claude-opus-4-6`   | `codex/gpt-5.3-codex`       | `dashscope/qwen3.5-plus`          | `kimi-code/kimi-for-coding`      | `minimax/MiniMax-M2.5-highspeed`    | `zai/glm-5`         |
-| `claude-sonnet-4-5` | `codex/gpt-5.3-codex-spark`  | `dashscope/qwen3-coder-plus`      | `kimi-code/kimi-for-coding`      | `minimax/MiniMax-M2.5-highspeed`    | `zai/glm-4.5-air`   |
-| `claude-haiku-4-5`  | `codex/gpt-5.1-codex-mini`  | `dashscope/qwen3-max`             | `qwen-cli/qwen3-vl-plus`        | `minimax/MiniMax-M2.5-highspeed`    | `zai/glm-4.5-flash` |
+| Tier   | Fallback 1 (Codex)          | Fallback 2 (Alibaba Cloud)        | Fallback 3 (Kimi Code)           | Fallback 4 (MiniMax)                | Fallback 5 (Z.AI)   |
+| ------ | --------------------------- | --------------------------------- | -------------------------------- | ----------------------------------- | ------------------- |
+| `ultra`   | `codex/gpt-5.3-codex`       | `dashscope/qwen3.5-plus`          | `kimi-code/kimi-for-coding`      | `minimax/MiniMax-M2.5-highspeed`    | `zai/glm-5`         |
+| `plus`    | `codex/gpt-5.3-codex-spark`  | `dashscope/qwen3-coder-plus`      | `kimi-code/kimi-for-coding`      | `minimax/MiniMax-M2.5-highspeed`    | `zai/glm-4.5-air`   |
+| `lite`    | `codex/gpt-5.1-codex-mini`  | `dashscope/qwen3-max`             | `qwen-cli/qwen3-vl-plus`        | `minimax/MiniMax-M2.5-highspeed`    | `zai/glm-4.5-flash` |
 
 All backend models are also directly addressable by their full name
 (e.g. `codex/gpt-5.3-codex`, `dashscope/qwen3-coder-plus`, `kimi-code/kimi-for-coding`, `gemini-cli/gemini-2.5-pro`, `zai/glm-5`).
@@ -207,14 +207,14 @@ All backend models are also directly addressable by their full name
 
 | Provider        | Auth                     | Models                                                                                                                       |
 | --------------- | ------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| **Anthropic**   | API key                  | `claude-opus-4-6`, `claude-sonnet-4-5`, `claude-haiku-4-5`                                                                   |
+| **Anthropic**   | API key                  | `claude-opus-4-6` (ultra), `claude-sonnet-4-6` (plus), `claude-haiku-4-5` (lite)                                             |
 | **Kimi Code**   | Kimi OAuth (device-code) | `kimi-code/kimi-for-coding` (K2.5)                                                                                           |
-| **Qwen Portal** | Qwen OAuth (device-code) | `qwen-cli/qwen3-coder-plus`, `qwen-cli/qwen3-vl-plus`                                                                        |
-| **Alibaba Cloud** | API key (Coding Plan)  | `dashscope/qwen3.5-plus`, `dashscope/qwen3-coder-plus`, `dashscope/qwen3-max`                                                |
-| **Codex**       | ChatGPT OAuth            | `codex/gpt-5.3-codex`, `codex/gpt-5.3-codex-spark`, `codex/gpt-5.2-codex`, `codex/gpt-5.1-codex`, `codex/gpt-5.1-codex-mini` |
-| **Gemini CLI**  | Google OAuth             | `gemini-cli/gemini-2.5-pro`, `gemini-cli/gemini-2.5-flash`, `gemini-cli/gemini-2.5-flash-lite`                               |
-| **MiniMax**     | API key                  | `minimax/MiniMax-M2.5-highspeed`                                                                                             |
-| **Z.AI**        | API key                  | `zai/glm-5`, `zai/glm-5v`, `zai/glm-4.7`, `zai/glm-4.6`, `zai/glm-4.5`, etc.                                                 |
+| **Qwen Portal** | Qwen OAuth (device-code) | `qwen-cli/qwen3-coder-plus` (plus), `qwen-cli/qwen3-vl-plus` (lite)                                                          |
+| **Alibaba Cloud** | API key (Coding Plan)  | `dashscope/qwen3.5-plus` (ultra), `dashscope/qwen3-coder-plus` (plus), `dashscope/qwen3-max` (lite)                          |
+| **Codex**       | ChatGPT OAuth            | `codex/gpt-5.3-codex` (ultra), `codex/gpt-5.3-codex-spark` (plus), `codex/gpt-5.1-codex-mini` (lite)                         |
+| **Gemini CLI**  | Google OAuth             | `gemini-cli/gemini-2.5-pro` (ultra), `gemini-cli/gemini-2.5-flash` (plus), `gemini-cli/gemini-2.5-flash-lite` (lite)         |
+| **MiniMax**     | API key                  | `minimax/MiniMax-M2.5-highspeed` (all tiers)                                                                                 |
+| **Z.AI**        | API key                  | `zai/glm-5` (ultra), `zai/glm-4.5-air` (plus), `zai/glm-4.5-flash` (lite), plus others                                      |
 | **Local**       | none                     | Embedding: `local/nomic-embed-text`, `local/mxbai-embed-large`, `local/bge-m3`, `local/all-minilm` · Transcription: `local/whisper`, `local/whisper-large-v3`, `local/whisper-large-v3-turbo`, `local/distil-whisper-large-v3` |
 
 ## Gemini CLI Provider

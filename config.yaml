@@ -231,11 +231,11 @@ router_settings:
   cooldown_time: 15
   routing_strategy: simple-shuffle
   model_group_alias:
-    opus: codex/gpt-5.3-codex
-    sonnet: anthropic/claude-sonnet-4-6
-    haiku: codex/gpt-5.1-codex-mini
+    ultra: codex/gpt-5.3-codex
+    plus: anthropic/claude-sonnet-4-6
+    lite: codex/gpt-5.1-codex-mini
   fallbacks:
-    - opus:
+    - ultra:
         [
           alibaba/qwen3.5-plus,
           kimi-code/kimi-for-coding,
@@ -244,7 +244,7 @@ router_settings:
           gemini-cli/gemini-2.5-pro,
           minimax/MiniMax-M2.5-highspeed,
         ]
-    - sonnet:
+    - plus:
         [
           codex/gpt-5.3-codex-spark,
           qwen-cli/qwen3-coder-plus,
@@ -254,7 +254,7 @@ router_settings:
           gemini-cli/gemini-2.5-flash,
           minimax/MiniMax-M2.5-highspeed,
         ]
-    - haiku:
+    - lite:
         [
           qwen-cli/qwen3-vl-plus,
           alibaba/qwen3-coder-next,

@@ -6,17 +6,17 @@ env_vars: []
 role: fallback
 
 tiers:
-  opus:
+  ultra:
     - model_name: codex/gpt-5.3-codex
       model: chatgpt/gpt-5.3-codex
       model_info:
         mode: responses
-  sonnet:
+  plus:
     - model_name: codex/gpt-5.3-codex-spark
       model: chatgpt/gpt-5.3-codex-spark
       model_info:
         mode: responses
-  haiku:
+  lite:
     - model_name: codex/gpt-5.1-codex-mini
       model: chatgpt/gpt-5.1-codex-mini
       model_info:

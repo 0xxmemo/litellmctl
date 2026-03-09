@@ -501,7 +501,7 @@ def _generate_yaml(models: list[dict], aliases: dict[str, str],
 
 def run_wizard():
     defaults = _load_defaults()
-    tiers = defaults.get("tiers", ["opus", "sonnet", "haiku"])
+    tiers = defaults.get("tiers", ["ultra", "plus", "lite"])
     load_order = defaults.get("load_order", [])
     auth_files_conf = defaults.get("auth_files", {})
     default_primary = defaults.get("primary", {})

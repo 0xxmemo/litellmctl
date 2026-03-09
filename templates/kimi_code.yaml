@@ -6,10 +6,10 @@ env_vars: []
 role: fallback
 
 tiers:
-  opus:
+  ultra:
     - model_name: kimi-code/kimi-for-coding
       model: kimi_code/kimi-for-coding
-  sonnet:
+  plus:
     - model_name: kimi-code/kimi-for-coding
       model: kimi_code/kimi-for-coding
 
