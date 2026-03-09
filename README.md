@@ -331,6 +331,55 @@ litellmctl uninstall db              # remove DB config from .env
 litellmctl uninstall service         # stop and remove launchd/systemd service
 ```
 
+## Config API Endpoints
+
+The proxy exposes REST endpoints for live config management. All require the
+master key (`Authorization: Bearer $LITELLM_MASTER_KEY`).
+
+When a PostgreSQL database is connected (`DATABASE_URL` + `STORE_MODEL_IN_DB=true`),
+config changes made via the update endpoints or the Admin UI are persisted to the
+`LiteLLM_Config` table. On restart the proxy **merges** DB values on top of the
+YAML file — so DB overrides win. Use `POST /config/reset` to clear DB overrides
+and revert to the YAML file.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/config` | Return the current in-memory config (no disk/DB reload) |
+| `PUT` | `/config` | Replace the entire in-memory config. Body: `{"config": {...}, "save_to_file": false, "update_router": true}` |
+| `PATCH` | `/config` | Deep-merge partial updates into the current config. Same body shape as PUT |
+| `POST` | `/config/update` | Admin UI config update — writes to DB + hot-reloads router |
+| `POST` | `/config/reset` | **Reset to YAML defaults** — deletes all `LiteLLM_Config` DB rows, reloads config from the YAML file, and rebuilds the router |
+| `POST` | `/config/field/update` | Update a single `general_settings` field. Body: `{"field_name": "...", "field_value": ...}` |
+| `GET` | `/config/list` | List config field names and descriptions |
+| `GET` | `/get/config/callbacks` | Return current callbacks, alerts, and router_settings |
+
+### Examples
+
+```bash
+PORT=4040
+KEY="$LITELLM_MASTER_KEY"
+
+# View current config
+curl -s http://localhost:$PORT/config \
+  -H "Authorization: Bearer $KEY" | jq .
+
+# Reset to config.yaml defaults (clears DB overrides)
+curl -s -X POST http://localhost:$PORT/config/reset \
+  -H "Authorization: Bearer $KEY" | jq .
+
+# Hot-reload: replace router_settings in memory (not saved to file)
+curl -s -X PATCH http://localhost:$PORT/config \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"config": {"router_settings": {"num_retries": 5}}}'
+
+# Hot-reload: replace entire config and save to file
+curl -s -X PUT http://localhost:$PORT/config \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"config": {...}, "save_to_file": true}'
+```
+
 ## Syncing with Upstream
 
 ```bash
