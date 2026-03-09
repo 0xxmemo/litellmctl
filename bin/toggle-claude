@@ -49,14 +49,14 @@ else
     '.env = {
       "ANTHROPIC_BASE_URL":              $base,
       "ANTHROPIC_AUTH_TOKEN":             $key,
-      "ANTHROPIC_DEFAULT_ULTRA_MODEL":   "ultra",
-      "ANTHROPIC_DEFAULT_PLUS_MODEL":    "plus",
-      "ANTHROPIC_DEFAULT_LITE_MODEL":    "lite"
+      "ANTHROPIC_DEFAULT_OPUS_MODEL":   "ultra",
+      "ANTHROPIC_DEFAULT_SONNET_MODEL":    "plus",
+      "ANTHROPIC_DEFAULT_HAIKU_MODEL":    "lite"
     }' "$SETTINGS_FILE" > "$tmpf" && mv "$tmpf" "$SETTINGS_FILE"
   echo "Claude Code now configured for LiteLLM Proxy at $LITELLM_BASE_URL."
-  echo "  Ultra:  ultra"
-  echo "  Plus:   plus"
-  echo "  Lite:   lite"
+  echo "  Opus:  ultra"
+  echo "  Sonnet:   plus"
+  echo "  Haiku:   lite"
 fi
 
 echo "Remember to restart Claude Code for changes to take full effect."
