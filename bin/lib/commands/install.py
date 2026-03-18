@@ -118,13 +118,13 @@ def cmd_install(
             transcr_mode = "yes"
 
     if not embed_mode and is_interactive():
-        if questionary.confirm("Set up local embedding server (Ollama)?", default=False).ask():
+        if questionary.confirm("Set up local embedding server (Ollama)?", default=True).ask():
             embed_mode = "yes"
         else:
             embed_mode = "no"
 
     if not transcr_mode and is_interactive():
-        if questionary.confirm("Set up local transcription server (faster-whisper-server)?", default=False).ask():
+        if questionary.confirm("Set up local transcription server (faster-whisper-server)?", default=True).ask():
             transcr_mode = "yes"
         else:
             transcr_mode = "no"
@@ -147,7 +147,7 @@ def cmd_install(
             searxng_mode = "yes"
 
     if not searxng_mode and is_interactive():
-        if questionary.confirm("Set up SearXNG search server?", default=False).ask():
+        if questionary.confirm("Set up SearXNG search server?", default=True).ask():
             searxng_mode = "yes"
         else:
             searxng_mode = "no"
@@ -162,7 +162,7 @@ def cmd_install(
         gateway_mode = "yes"
 
     if not gateway_mode and is_interactive():
-        if questionary.confirm("Set up LLM API Gateway UI?", default=False).ask():
+        if questionary.confirm("Set up LLM API Gateway UI?", default=True).ask():
             gateway_mode = "yes"
         else:
             gateway_mode = "no"
