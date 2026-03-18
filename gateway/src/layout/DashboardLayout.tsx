@@ -2,32 +2,41 @@
 import React, { useState, useEffect } from 'react'
 import { Sidebar } from '@/components/Sidebar'
 import { TopBar } from '@/components/TopBar'
-import { useAuth } from '@/hooks/useAuth'
-import { useLocation } from '@tanstack/react-router'
 import { Toaster } from 'sonner'
 
 interface DashboardLayoutProps {
   children: React.ReactNode
+  currentPage?: string
+  onPageChange?: (page: string) => void
+  userRole?: string | null
+  theme?: 'light' | 'dark' | 'system'
+  onThemeChange?: (theme: 'light' | 'dark' | 'system') => void
 }
 
-export function DashboardLayout({ children }: DashboardLayoutProps) {
+export function DashboardLayout({
+  children,
+  currentPage = 'keys',
+  onPageChange,
+  userRole,
+  theme: parentTheme,
+  onThemeChange
+}: DashboardLayoutProps) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
-  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('dark')
-  const { user } = useAuth()
-  const location = useLocation()
+  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(parentTheme || 'dark')
 
-  const isAuthPage = location.pathname === '/auth'
-
-  // Close mobile sidebar on route change
+  // Sync with parent theme if provided
   useEffect(() => {
-    setMobileSidebarOpen(false)
-  }, [location.pathname])
+    if (parentTheme) setTheme(parentTheme)
+  }, [parentTheme])
 
+  // Only load theme from localStorage if no parent theme provided
   useEffect(() => {
-    const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | 'system' | null
-    const initialTheme = savedTheme || 'dark'
-    setTheme(initialTheme)
-  }, [])
+    if (!parentTheme) {
+      const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | 'system' | null
+      const initialTheme = savedTheme || 'dark'
+      setTheme(initialTheme)
+    }
+  }, [parentTheme])
 
   useEffect(() => {
     const root = document.documentElement
@@ -38,7 +47,9 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     } else {
       root.classList.add(theme)
     }
-  }, [theme])
+    // Notify parent of theme change
+    onThemeChange?.(theme)
+  }, [theme, onThemeChange])
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
@@ -61,16 +72,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  if (isAuthPage) {
-    return (
-      <div className="flex h-screen overflow-hidden bg-background">
-        <Toaster position="bottom-right" richColors theme={theme === 'system' ? 'system' : theme} />
-        <main className="flex-1 overflow-y-auto">
-          {children}
-        </main>
-      </div>
-    )
-  }
+  // Auth page check removed - AuthPage is now rendered separately in App.tsx
 
   return (
     <>

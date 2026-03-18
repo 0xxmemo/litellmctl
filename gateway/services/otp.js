@@ -1,5 +1,5 @@
 import nodemailer from 'nodemailer';
-import 'dotenv/config';
+// Bun automatically loads .env files, no need for dotenv import
 
 // ProtonMail SMTP configuration via hydroxide bridge
 let transporter = null;

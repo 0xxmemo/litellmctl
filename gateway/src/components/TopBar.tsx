@@ -1,6 +1,5 @@
 'use client'
 import { useState, useEffect } from 'react'
-import { useNavigate } from '@tanstack/react-router'
 import { LogOut, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -16,7 +15,6 @@ interface UserProfile {
 }
 
 export function TopBar() {
-  const navigate = useNavigate()
   const [profileOpen, setProfileOpen] = useState(false)
   const [user, setUser] = useState<UserProfile | null>(null)
   const [loading, setLoading] = useState(true)
@@ -37,14 +35,14 @@ export function TopBar() {
 
   const handleLogout = async () => {
     try {
-      await fetch('/api/auth/logout', { 
-        method: 'POST',
+      await fetch('/api/auth/logout', {
+        method: 'GET',
         credentials: 'include'
       })
-      navigate({ to: '/auth' })
+      window.location.href = '/auth'
     } catch (err) {
       console.error('Logout error:', err)
-      navigate({ to: '/auth' })
+      window.location.href = '/auth'
     }
   }
 

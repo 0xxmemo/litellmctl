@@ -1,19 +1,21 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Zap, Mail, Key, Clock } from 'lucide-react'
+import { toast } from 'sonner'
 
-export function AuthPage() {
+interface AuthPageProps {
+  onAuthSuccess?: (role: string) => void
+}
+
+export function AuthPage({ onAuthSuccess }: AuthPageProps) {
   const [step, setStep] = useState<'email' | 'otp' | 'pending'>('email')
   const [email, setEmail] = useState('')
   const [otp, setOtp] = useState('')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
-  const [userRole, setUserRole] = useState<string | null>(null);
-  const [otpCooldown, setOtpCooldown] = useState(0) // seconds remaining before user can resend
-  const navigate = useNavigate()
+  const [otpCooldown, setOtpCooldown] = useState(0)
 
   // Check session status on mount
   useEffect(() => {
@@ -34,18 +36,15 @@ export function AuthPage() {
 
   const checkStatus = async () => {
     try {
-      const res = await fetch('/api/auth/me', { credentials: 'include' })
+      const res = await fetch('/api/auth/status', { credentials: 'include' })
       const data = await res.json()
 
       if (!data.authenticated) {
-        setStep('email') // No session
-        setUserRole(null)
-      } else if (data.user.role === 'guest') {
-        setUserRole('guest')
-        setStep('pending') // Pending approval
-      } else if (data.user.role === 'user' || data.user.role === 'admin') {
-        setUserRole(data.user.role)
-        navigate({ to: '/dashboard/keys' }) // Approved
+        setStep('email')
+      } else if (data.role === 'guest') {
+        setStep('pending')
+      } else if (data.role === 'user' || data.role === 'admin') {
+        window.location.href = '/dashboard'
       }
     } catch (error) {
       console.error('Error checking status:', error)
@@ -54,10 +53,10 @@ export function AuthPage() {
 
   const handleRequestOTP = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (otpCooldown > 0) return // Guard: don't allow rapid re-requests
+    if (otpCooldown > 0) return
     setLoading(true)
     setMessage('')
-    
+
     try {
       const res = await fetch('/api/auth/request-otp', {
         method: 'POST',
@@ -65,18 +64,20 @@ export function AuthPage() {
         body: JSON.stringify({ email }),
         credentials: 'include',
       })
-      
+
       const data = await res.json()
-      
+
       if (res.ok) {
         setStep('otp')
-        setMessage('OTP sent to your email!')
-        setOtpCooldown(60) // 60-second cooldown before next send
+        toast.success('OTP sent to your email!')
+        setOtpCooldown(60)
       } else {
         setMessage(data.error || 'Failed to send OTP')
+        toast.error(data.error || 'Failed to send OTP')
       }
     } catch (error) {
       setMessage('An error occurred. Please try again.')
+      toast.error('Failed to send OTP')
     } finally {
       setLoading(false)
     }
@@ -86,7 +87,7 @@ export function AuthPage() {
     e.preventDefault()
     setLoading(true)
     setMessage('')
-    
+
     try {
       const res = await fetch('/api/auth/verify-otp', {
         method: 'POST',
@@ -94,18 +95,19 @@ export function AuthPage() {
         body: JSON.stringify({ email, otp }),
         credentials: 'include',
       })
-      
+
       const data = await res.json()
-      
+
       if (res.ok) {
-        setUserRole(data.role)
-        // Guest - waiting for approval
+        toast.success('Verified! Waiting for admin approval...')
         setStep('pending')
       } else {
         setMessage(data.error || 'Invalid OTP')
+        toast.error(data.error || 'Invalid OTP')
       }
     } catch (error) {
       setMessage('An error occurred. Please try again.')
+      toast.error('Failed to verify OTP')
     } finally {
       setLoading(false)
     }
@@ -129,18 +131,21 @@ export function AuthPage() {
           <CardContent className="space-y-4">
             <div className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
               <p>✅ Email <strong>{email}</strong> verified</p>
-              <p className="mt-2">⏳ An admin will review your request and grant access. You will be notified via email.</p>
+              <p className="mt-2">⏳ An admin will review your request. Refresh to check status.</p>
             </div>
             <div className="flex space-x-2">
               <Button
                 variant="outline"
                 className="flex-1"
-                onClick={() => setStep('email')}
+                onClick={() => {
+                  setStep('email')
+                  setEmail('')
+                }}
               >
                 Use a different email
               </Button>
               <Button
-                variant="ghost"
+                variant="default"
                 className="flex-1"
                 onClick={checkStatus}
               >
@@ -230,7 +235,11 @@ export function AuthPage() {
                 type="button"
                 variant="ghost"
                 className="w-full"
-                onClick={() => setStep('email')}
+                onClick={() => {
+                  setStep('email')
+                  setEmail('')
+                  setOtp('')
+                }}
               >
                 Back to Email
               </Button>
