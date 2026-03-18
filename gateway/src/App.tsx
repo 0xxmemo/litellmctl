@@ -1,10 +1,3 @@
-/**
- * Simplified App.tsx for Bun-stack LLM Gateway
- *
- * Replaces TanStack Router with simple state-based routing.
- * Keeps all existing components (Sidebar, TopBar, etc.) but removes router dependency.
- */
-
 'use client';
 
 import { useState, useEffect } from 'react';
@@ -16,37 +9,79 @@ import { Overview } from './pages/Overview';
 import { Settings } from './pages/Settings';
 import { Admin } from './pages/Admin';
 import { Docs } from './pages/Docs';
-import { UserStats } from './pages/UserStats';
 import { AppProvider } from './context/AppContext';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import {
+  createRouter,
+  createRoute,
+  createRootRoute,
+  RouterProvider,
+  Outlet,
+} from '@tanstack/react-router';
 
-type Page = 'keys' | 'overview' | 'settings' | 'admin' | 'docs' | 'stats';
+const queryClient = new QueryClient();
 
-function DashboardContent({ page }: { page: Page; onPageChange: (p: Page) => void }) {
-  switch (page) {
-    case 'keys':
-      return <ApiKeysPage />;
-    case 'overview':
-      return <Overview />;
-    case 'settings':
-      return <Settings />;
-    case 'admin':
-      return <Admin />;
-    case 'docs':
-      return <Docs />;
-    case 'stats':
-      return <UserStats />;
-    default:
-      return <ApiKeysPage />;
+// ─── Route tree ───────────────────────────────────────────────────────────────
+
+const rootRoute = createRootRoute({
+  component: () => <Outlet />,
+});
+
+const layoutRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  id: 'layout',
+  component: DashboardLayout,
+});
+
+const indexRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: '/',
+  component: Overview,
+});
+
+const keysRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: '/keys',
+  component: ApiKeysPage,
+});
+
+const settingsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: '/settings',
+  component: Settings,
+});
+
+const adminRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: '/admin',
+  component: Admin,
+});
+
+const docsRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: '/docs',
+  component: Docs,
+});
+
+const routeTree = rootRoute.addChildren([
+  layoutRoute.addChildren([indexRoute, keysRoute, settingsRoute, adminRoute, docsRoute]),
+]);
+
+const router = createRouter({ routeTree });
+
+declare module '@tanstack/react-router' {
+  interface Register {
+    router: typeof router;
   }
 }
+
+// ─── App ──────────────────────────────────────────────────────────────────────
 
 export function App() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
-  const [currentPage, setCurrentPage] = useState<Page>('keys');
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('dark');
 
-  // Check auth status on mount
   useEffect(() => {
     fetch('/api/auth/status', { credentials: 'include' })
       .then(res => res.json())
@@ -54,12 +89,9 @@ export function App() {
         setIsAuthenticated(data.authenticated);
         setUserRole(data.role || null);
       })
-      .catch(() => {
-        setIsAuthenticated(false);
-      });
+      .catch(() => setIsAuthenticated(false));
   }, []);
 
-  // Theme handling
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | 'system' | null;
     setTheme(savedTheme || 'dark');
@@ -69,14 +101,12 @@ export function App() {
     const root = document.documentElement;
     root.classList.remove('light', 'dark');
     if (theme === 'system') {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      root.classList.add(systemTheme);
+      root.classList.add(window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
     } else {
       root.classList.add(theme);
     }
   }, [theme]);
 
-  // Loading state
   if (isAuthenticated === null) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
@@ -85,7 +115,6 @@ export function App() {
     );
   }
 
-  // Not authenticated - show auth page
   if (!isAuthenticated) {
     return (
       <>
@@ -100,19 +129,13 @@ export function App() {
     );
   }
 
-  // Authenticated - show dashboard
+  void userRole; // used for auth check above; role detail comes from AppContext
+
   return (
-    <AppProvider>
-      <Toaster position="bottom-right" richColors theme={theme === 'system' ? 'system' : theme} />
-      <DashboardLayout
-        currentPage={currentPage}
-        onPageChange={(p: string) => setCurrentPage(p as Page)}
-        userRole={userRole}
-        theme={theme}
-        onThemeChange={setTheme}
-      >
-        <DashboardContent page={currentPage} onPageChange={setCurrentPage} />
-      </DashboardLayout>
-    </AppProvider>
+    <QueryClientProvider client={queryClient}>
+      <AppProvider>
+        <RouterProvider router={router} />
+      </AppProvider>
+    </QueryClientProvider>
   );
 }

@@ -1,64 +1,30 @@
 'use client'
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
+import { Outlet } from '@tanstack/react-router'
 import { Sidebar } from '@/components/Sidebar'
 import { TopBar } from '@/components/TopBar'
 import { Toaster } from 'sonner'
 
-interface DashboardLayoutProps {
-  children: React.ReactNode
-  currentPage?: string
-  onPageChange?: (page: string) => void
-  userRole?: string | null
-  theme?: 'light' | 'dark' | 'system'
-  onThemeChange?: (theme: 'light' | 'dark' | 'system') => void
-}
-
-export function DashboardLayout({
-  children,
-  currentPage: _currentPage = 'keys',
-  onPageChange: _onPageChange,
-  userRole: _userRole,
-  theme: parentTheme,
-  onThemeChange
-}: DashboardLayoutProps) {
+export function DashboardLayout() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
-  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>(parentTheme || 'dark')
-
-  // Sync with parent theme if provided
-  useEffect(() => {
-    if (parentTheme) setTheme(parentTheme)
-  }, [parentTheme])
-
-  // Only load theme from localStorage if no parent theme provided
-  useEffect(() => {
-    if (!parentTheme) {
-      const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | 'system' | null
-      const initialTheme = savedTheme || 'dark'
-      setTheme(initialTheme)
-    }
-  }, [parentTheme])
+  const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('dark')
 
   useEffect(() => {
-    const root = document.documentElement
-    root.classList.remove('light', 'dark')
-    if (theme === 'system') {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
-      root.classList.add(systemTheme)
-    } else {
-      root.classList.add(theme)
-    }
-    // Notify parent of theme change
-    onThemeChange?.(theme)
-  }, [theme, onThemeChange])
+    const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | 'system' | null
+    const initial = savedTheme || 'dark'
+    setTheme(initial)
+    applyTheme(initial)
+  }, [])
+
+  useEffect(() => {
+    applyTheme(theme)
+    localStorage.setItem('theme', theme)
+  }, [theme])
 
   useEffect(() => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
     const handleChange = () => {
-      if (theme === 'system') {
-        const root = document.documentElement
-        root.classList.remove('light', 'dark')
-        root.classList.add(mediaQuery.matches ? 'dark' : 'light')
-      }
+      if (theme === 'system') applyTheme('system')
     }
     mediaQuery.addEventListener('change', handleChange)
     return () => mediaQuery.removeEventListener('change', handleChange)
@@ -72,8 +38,6 @@ export function DashboardLayout({
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  // Auth page check removed - AuthPage is now rendered separately in App.tsx
-
   return (
     <>
     <div className="flex h-screen overflow-hidden bg-background">
@@ -83,7 +47,7 @@ export function DashboardLayout({
         <div className="w-56 lg:w-64 border-r bg-card">
           <div className="flex h-14 items-center border-b px-4">
             <a
-              href="/dashboard"
+              href="/"
               className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
               aria-label="LLM API Gateway home"
             >
@@ -113,7 +77,7 @@ export function DashboardLayout({
           <div className="relative z-50 w-64 max-w-[80vw] bg-card border-r flex flex-col">
             <div className="flex h-14 items-center border-b px-4">
               <a
-                href="/dashboard"
+                href="/"
                 className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
                 aria-label="LLM API Gateway home"
               >
@@ -149,9 +113,8 @@ export function DashboardLayout({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
               </svg>
             </button>
-            {/* Logo — visible on mobile only (desktop sidebar has it) */}
             <a
-              href="/dashboard"
+              href="/"
               className="md:hidden flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
               aria-label="LLM API Gateway home"
             >
@@ -171,7 +134,7 @@ export function DashboardLayout({
         {/* Page content */}
         <main className="flex-1 overflow-y-auto">
           <div className="p-3 sm:p-5 lg:p-6 max-w-7xl mx-auto w-full">
-            {children}
+            <Outlet />
           </div>
         </main>
 
@@ -180,4 +143,14 @@ export function DashboardLayout({
     <Toaster position="bottom-right" richColors theme={theme === 'system' ? 'system' : theme} />
     </>
   )
+}
+
+function applyTheme(theme: 'light' | 'dark' | 'system') {
+  const root = document.documentElement
+  root.classList.remove('light', 'dark')
+  if (theme === 'system') {
+    root.classList.add(window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+  } else {
+    root.classList.add(theme)
+  }
 }

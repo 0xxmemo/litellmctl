@@ -420,6 +420,19 @@ async function sessionStatusHandler(req: Request) {
   });
 }
 
+async function sessionMeHandler(req: Request) {
+  const sessionToken = getSessionCookie(req);
+  if (!sessionToken) return Response.json({ authenticated: false });
+  const session = await verifySession(sessionToken);
+  if (!session) return Response.json({ authenticated: false });
+  const user = await loadUser(session.email);
+  if (!user) return Response.json({ authenticated: false });
+  return Response.json({
+    authenticated: true,
+    user: { email: session.email, role: user.role },
+  });
+}
+
 // Logout
 async function logoutHandler() {
   const response = Response.json({ success: true });
@@ -702,6 +715,7 @@ Bun.serve({
     "/api/auth/request-otp": { POST: requestOtpHandler },
     "/api/auth/verify-otp": { POST: verifyOtpHandler },
     "/api/auth/status": { GET: sessionStatusHandler },
+    "/api/auth/me": { GET: sessionMeHandler },
     "/api/auth/logout": { GET: logoutHandler },
 
     // API Keys
@@ -723,13 +737,24 @@ Bun.serve({
     "/v1/models": { GET: proxyHandler },
     "/v1/model/info": { GET: proxyHandler },
 
+    // Icons (served from /public/)
+    "/favicon.ico": async () => (await serveStaticFile("/public/favicon.ico")) || new Response("Not found", { status: 404 }),
+    "/icon-16.png": async () => (await serveStaticFile("/public/icon-16.png")) || new Response("Not found", { status: 404 }),
+    "/icon-32.png": async () => (await serveStaticFile("/public/icon-32.png")) || new Response("Not found", { status: 404 }),
+    "/icon-128.png": async () => (await serveStaticFile("/public/icon-128.png")) || new Response("Not found", { status: 404 }),
+    "/icon-192.png": async () => (await serveStaticFile("/public/icon-192.png")) || new Response("Not found", { status: 404 }),
+    "/icon-512.png": async () => (await serveStaticFile("/public/icon-512.png")) || new Response("Not found", { status: 404 }),
+    "/apple-touch-icon.png": async () => (await serveStaticFile("/public/apple-touch-icon.png")) || new Response("Not found", { status: 404 }),
+
     // Frontend - serve index.html for all UI routes
     "/auth": { GET: serveFrontend },
-    "/dashboard": { GET: serveFrontend },
-    "/dashboard/*": { GET: serveFrontend },
+    "/keys": { GET: serveFrontend },
+    "/settings": { GET: serveFrontend },
+    "/admin": { GET: serveFrontend },
+    "/docs": { GET: serveFrontend },
 
-    // Root
-    "/": { GET: () => Response.redirect("/dashboard", 302) },
+    // Root → Overview
+    "/": { GET: serveFrontend },
   },
 
   development: {
