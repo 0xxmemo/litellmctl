@@ -11,6 +11,7 @@
 #   litellmctl restart | r          Restart the proxy service
 #   litellmctl logs                 Tail proxy logs
 #   litellmctl proxy                Start proxy in foreground (debug)
+#   litellmctl gateway              Manage LLM API Gateway UI
 #   litellmctl help                 Show this help
 #
 # Tab completion:
@@ -47,9 +48,10 @@ _litellmctl_completions() {
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-  commands="auth wizard install init-env start stop restart r logs proxy status local uninstall toggle-claude setup-completions help"
+  commands="auth wizard install init-env start stop restart r logs proxy status local gateway uninstall toggle-claude setup-completions help"
   auth_cmds="chatgpt gemini qwen kimi codex status refresh export import"
-  uninstall_cmds="service db embedding transcription"
+  uninstall_cmds="service db embedding transcription gateway"
+  gateway_cmds="start stop restart status logs"
 
   case "$prev" in
     litellmctl)
@@ -68,7 +70,10 @@ _litellmctl_completions() {
       COMPREPLY=( $(compgen -W "--port --config" -- "$cur") )
       return ;;
     install)
-      COMPREPLY=( $(compgen -W "--with-db --without-db --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription" -- "$cur") )
+      COMPREPLY=( $(compgen -W "--with-db --without-db --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription --with-gateway --without-gateway" -- "$cur") )
+      return ;;
+    gateway)
+      COMPREPLY=( $(compgen -W "$gateway_cmds" -- "$cur") )
       return ;;
   esac
 }
@@ -93,6 +98,7 @@ _litellmctl_completions() {
     'proxy:Start proxy in foreground (debug)'
     'status:Show auth + proxy + local server status'
     'local:Check local inference server reachability'
+    'gateway:Manage LLM API Gateway UI (start/stop/status)'
     'uninstall:Uninstall service, database config, or local servers'
     'toggle-claude:Toggle Claude Code between direct API and proxy'
     'setup-completions:Add litellmctl to your shell'
@@ -114,6 +120,7 @@ _litellmctl_completions() {
     'db:Remove database config from .env'
     'embedding:Show Ollama stop and uninstall commands'
     'transcription:Show faster-whisper-server stop and uninstall commands'
+    'gateway:Show gateway UI stop and uninstall commands'
   )
 
   if (( CURRENT == 2 )); then
@@ -124,7 +131,8 @@ _litellmctl_completions() {
       uninstall) _describe 'uninstall target' uninstall_cmds ;;
       refresh|export) compadd chatgpt gemini qwen kimi ;;
       start|proxy) compadd -- --port --config ;;
-      install) compadd -- --with-db --without-db --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription ;;
+      install) compadd -- --with-db --without-db --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription --with-gateway --without-gateway ;;
+      gateway) compadd start stop restart status logs ;;
     esac
   elif (( CURRENT == 4 )); then
     case "${words[3]}" in
@@ -797,6 +805,237 @@ _searxng_status() {
   printf "\n"
 }
 
+# ── Gateway (LLM API Gateway UI) ────────────────────────────────────────────
+
+_gateway_http_check() {
+  local url="$1" timeout="${2:-3}"
+  python3 - <<PY 2>/dev/null
+import urllib.request
+try:
+    with urllib.request.urlopen("$url", timeout=${timeout}) as r:
+        raise SystemExit(0 if 200 <= r.status < 300 else 1)
+except Exception:
+    raise SystemExit(1)
+PY
+}
+
+_install_gateway() {
+  local gateway_dir="$PROJECT_DIR/gateway"
+
+  if [ ! -d "$gateway_dir" ]; then
+    warn "Gateway directory not found at $gateway_dir"
+    return 1
+  fi
+
+  # Check if bun is installed
+  if ! command -v bun &>/dev/null; then
+    info "Bun not found — installing Bun ..."
+    curl -fsSL https://bun.sh/install | bash || {
+      warn "Bun installation failed — install manually: curl -fsSL https://bun.sh/install | bash"
+      return 1
+    }
+    export PATH="$HOME/.bun/bin:$PATH"
+  fi
+
+  # Install dependencies
+  info "Installing gateway dependencies ..."
+  cd "$gateway_dir"
+  if bun install; then
+    info "Gateway dependencies installed"
+  else
+    warn "Gateway dependency installation failed"
+    return 1
+  fi
+
+  # Create .env if not exists
+  if [ ! -f "$gateway_dir/.env" ]; then
+    info "Creating gateway .env from .env.example ..."
+    cp "$gateway_dir/.env.example" "$gateway_dir/.env"
+
+    # Set default LITELLM_MASTER_KEY if not set
+    if ! grep -q "^LITELLM_MASTER_KEY=" "$gateway_dir/.env" 2>/dev/null; then
+      if [ -n "${LITELLM_MASTER_KEY:-}" ]; then
+        sed -i.bak "s|^LITELLM_MASTER_KEY=.*|LITELLM_MASTER_KEY=${LITELLM_MASTER_KEY}|" "$gateway_dir/.env"
+        rm -f "$gateway_dir/.env.bak"
+      fi
+    fi
+  fi
+
+  info "Gateway installed at $gateway_dir"
+  info "Start with: litellmctl gateway start"
+}
+
+_gateway_ensure_bun_path() {
+  if [ -d "$HOME/.bun/bin" ]; then
+    export PATH="$HOME/.bun/bin:$PATH"
+  fi
+}
+
+_gateway_is_running() {
+  _gateway_ensure_bun_path
+  local gateway_port="${GATEWAY_PORT:-3000}"
+  _gateway_http_check "http://localhost:${gateway_port}/health" 2
+}
+
+_gateway_start() {
+  local gateway_dir="$PROJECT_DIR/gateway"
+  local gateway_port="${GATEWAY_PORT:-3000}"
+
+  if [ ! -d "$gateway_dir" ]; then
+    error "Gateway directory not found at $gateway_dir"
+    error "Run 'litellmctl install --with-gateway' to install"
+    return 1
+  fi
+
+  if _gateway_is_running; then
+    info "Gateway already running on port $gateway_port"
+    return 0
+  fi
+
+  _gateway_ensure_bun_path
+
+  if ! command -v bun &>/dev/null; then
+    error "Bun not found. Install with: curl -fsSL https://bun.sh/install | bash"
+    return 1
+  fi
+
+  cd "$gateway_dir"
+
+  # Load env vars from .env if present
+  if [ -f "$gateway_dir/.env" ]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "$gateway_dir/.env"
+    set +a
+  fi
+
+  info "Starting gateway on port $gateway_port ..."
+
+  # Start in background
+  nohup bun run index.js > "$LOG_DIR/gateway.log" 2>&1 &
+  local pid=$!
+  echo "$pid" > "$gateway_dir/.gateway.pid"
+
+  sleep 2
+
+  if _gateway_is_running; then
+    info "Gateway started (PID $pid)"
+    info "Web UI: http://localhost:$gateway_port"
+  else
+    warn "Gateway started but not responding yet"
+    warn "Check logs: tail -f $LOG_DIR/gateway.log"
+  fi
+}
+
+_gateway_stop() {
+  local gateway_dir="$PROJECT_DIR/gateway"
+  local pid_file="$gateway_dir/.Gateway.pid"
+
+  if [ -f "$pid_file" ]; then
+    local pid
+    pid=$(cat "$pid_file")
+    if kill -0 "$pid" 2>/dev/null; then
+      kill "$pid" 2>/dev/null || true
+      sleep 1
+      kill -9 "$pid" 2>/dev/null || true
+      info "Gateway stopped (PID $pid)"
+    else
+      info "Gateway process not running"
+    fi
+    rm -f "$pid_file"
+  else
+    # Try to find by port
+    local gateway_port="${GATEWAY_PORT:-3000}"
+    local port_pid
+    port_pid=$(_pids_on_port "$gateway_port")
+    if [ -n "$port_pid" ]; then
+      for pid in $port_pid; do
+        if ps -p "$pid" -o command= 2>/dev/null | grep -q "bun\|node\|index.js"; then
+          kill -9 "$pid" 2>/dev/null || true
+          info "Gateway stopped (PID $pid on port $gateway_port)"
+        fi
+      done
+    else
+      info "No gateway process found"
+    fi
+  fi
+}
+
+_gateway_status() {
+  local gateway_port="${GATEWAY_PORT:-3000}"
+
+  printf "\033[1mGateway UI\033[0m\n"
+
+  if [ ! -d "$PROJECT_DIR/gateway" ]; then
+    printf "  Status:   \033[33mnot installed\033[0m\n"
+    printf "  \033[2mInstall: litellmctl install --with-gateway\033[0m\n"
+  elif _gateway_is_running; then
+    printf "  Status:   \033[32mrunning\033[0m\n"
+    printf "  Port:     %s\n" "$gateway_port"
+    printf "  Web UI:   http://localhost:%s\n" "$gateway_port"
+  else
+    printf "  Status:   \033[33mstopped\033[0m\n"
+    printf "  Port:     %s\n" "$gateway_port"
+    printf "  \033[2mStart: litellmctl gateway start\033[0m\n"
+  fi
+  printf "\n"
+}
+
+_uninstall_gateway() {
+  local gateway_dir="$PROJECT_DIR/gateway"
+
+  printf "\n  \033[1mGateway UI\033[0m\n"
+
+  if [ ! -d "$gateway_dir" ]; then
+    printf "  Not installed.\n\n"
+    return
+  fi
+
+  if _gateway_is_running; then
+    printf "  Running. Stop it first:\n\n"
+    printf "      litellmctl gateway stop\n\n"
+  fi
+
+  printf "  To remove the gateway directory:\n\n"
+  printf "      rm -rf %s\n\n" "$gateway_dir"
+}
+
+cmd_gateway() {
+  load_env
+  local subcmd="${1:-status}"
+
+  case "$subcmd" in
+    start)
+      _gateway_start
+      ;;
+    stop)
+      _gateway_stop
+      ;;
+    restart)
+      _gateway_stop
+      sleep 1
+      _gateway_start
+      ;;
+    status)
+      _gateway_status
+      ;;
+    logs)
+      local logfile="$LOG_DIR/gateway.log"
+      if [ ! -f "$logfile" ]; then
+        warn "No gateway log file found"
+        exit 0
+      fi
+      info "Tailing gateway logs (Ctrl+C to stop)"
+      tail -f "$logfile"
+      ;;
+    *)
+      error "Unknown gateway subcommand: $subcmd"
+      printf "  Usage: litellmctl gateway [start|stop|restart|status|logs]\n"
+      exit 1
+      ;;
+  esac
+}
+
 # ── Interrupt helpers ────────────────────────────────────────────────────────
 
 _trap_cancelled() {
@@ -883,6 +1122,7 @@ cmd_install() {
   local embed_mode="${LITELLM_INSTALL_EMBED_SETUP:-}"  # yes|no|empty(auto)
   local transcr_mode="${LITELLM_INSTALL_TRANSCR_SETUP:-}" # yes|no|empty(auto)
   local searxng_mode="${LITELLM_INSTALL_SEARXNG_SETUP:-}" # yes|no|empty(auto)
+  local gateway_mode="${LITELLM_INSTALL_GATEWAY_SETUP:-}" # yes|no|empty(auto)
   local db_mode_flag=""
   local post_sync_only=false
   local env_file="$PROJECT_DIR/.env"
@@ -901,6 +1141,8 @@ cmd_install() {
       --without-transcription)   transcr_mode="no"; shift ;;
       --with-searxng)            searxng_mode="yes"; shift ;;
       --without-searxng)         searxng_mode="no"; shift ;;
+      --with-gateway)            gateway_mode="yes"; shift ;;
+      --without-gateway)         gateway_mode="no"; shift ;;
       --with-local)              embed_mode="yes"; transcr_mode="yes"; shift ;;
       --without-local)           embed_mode="no"; transcr_mode="no"; shift ;;
       --_post-sync)              post_sync_only=true; shift ;;
@@ -926,6 +1168,8 @@ cmd_install() {
       [ "$transcr_mode" = "no"  ]  && reexec+=("--without-transcription")
       [ "$searxng_mode" = "yes" ]  && reexec+=("--with-searxng")
       [ "$searxng_mode" = "no"  ]  && reexec+=("--without-searxng")
+      [ "$gateway_mode" = "yes" ]  && reexec+=("--with-gateway")
+      [ "$gateway_mode" = "no"  ]  && reexec+=("--without-gateway")
       exec "${reexec[@]}"
     fi
   fi
@@ -1017,6 +1261,28 @@ cmd_install() {
     printf "\n"
     info "Setting up SearXNG search server"
     _install_searxng || warn "SearXNG setup incomplete"
+  fi
+
+  # ── Gateway UI ────────────────────────────────────────────────────────────
+  # Auto-detect: if gateway directory exists and bun is installed, default to yes.
+  if [ -z "$gateway_mode" ] && [ -d "$PROJECT_DIR/gateway" ]; then
+    if command -v bun &>/dev/null; then
+      gateway_mode="yes"
+    fi
+  fi
+
+  # Prompt for gateway setup if not decided and interactive.
+  if [ -z "$gateway_mode" ] && is_interactive; then
+    printf "\n  Set up LLM API Gateway UI (web dashboard for LiteLLM)? [y/N] "
+    local ans_gateway
+    read -r ans_gateway </dev/tty || ans_gateway="n"
+    case "$ans_gateway" in [yY]*) gateway_mode="yes" ;; *) gateway_mode="no" ;; esac
+  fi
+
+  if [ "$gateway_mode" = "yes" ]; then
+    printf "\n"
+    info "Setting up LLM API Gateway UI"
+    _install_gateway || warn "Gateway setup incomplete"
   fi
 
   # Ask to restart if service is running
@@ -1791,6 +2057,7 @@ cmd_uninstall() {
     printf "  3) embedding      Ollama stop/uninstall guide\n"
     printf "  4) transcription  faster-whisper-server stop/uninstall guide\n"
     printf "  5) searxng        SearXNG search server stop/remove\n"
+    printf "  6) gateway        Gateway UI stop/remove guide\n"
     printf "\033[2m  ──\033[0m\n"
     printf "  a) all            All of the above\n"
     printf "  q) cancel\n\n"
@@ -1803,6 +2070,7 @@ cmd_uninstall() {
       3) target="embedding" ;;
       4) target="transcription" ;;
       5) target="searxng" ;;
+      6) target="gateway" ;;
       a|A) target="all" ;;
       q|Q|"") trap - INT TERM; return 0 ;;
     esac
@@ -1822,6 +2090,9 @@ cmd_uninstall() {
     searxng)
       printf "\033[1mUninstall — SearXNG\033[0m\n"
       _uninstall_searxng ;;
+    gateway)
+      printf "\033[1mUninstall — Gateway UI\033[0m\n"
+      _uninstall_gateway ;;
     all)
       info "Stopping and removing proxy service ..."
       _uninstall_service
@@ -1832,10 +2103,12 @@ cmd_uninstall() {
       _uninstall_embedding
       _uninstall_transcription
       printf "\n\033[1mSearXNG search server\033[0m\n"
-      _uninstall_searxng ;;
+      _uninstall_searxng
+      printf "\n\033[1mGateway UI\033[0m\n"
+      _uninstall_gateway ;;
     *)
       error "Unknown target: $target"
-      printf "  Usage: litellmctl uninstall [service|db|embedding|transcription|searxng]\n"
+      printf "  Usage: litellmctl uninstall [service|db|embedding|transcription|searxng|gateway]\n"
       trap - INT TERM
       exit 1 ;;
   esac
@@ -2041,6 +2314,7 @@ cmd_status() {
   _local_status
   _db_status
   _searxng_status
+  _gateway_status
 }
 
 cmd_wizard() {
@@ -2070,6 +2344,7 @@ cmd_interactive() {
     printf "  \033[1m7\033[0m) auth         Manage authentication\n"
     printf "  \033[1m8\033[0m) wizard       Config wizard\n"
     printf "  \033[1m9\033[0m) uninstall    Remove components\n"
+    printf "  \033[1m0\033[0m) gateway      Manage Gateway UI\n"
     printf "\033[2m  ──\033[0m\n"
     printf "  \033[1mh\033[0m) help         Show help\n"
     printf "  \033[1mq\033[0m) quit\n\n"
@@ -2087,6 +2362,7 @@ cmd_interactive() {
       2) cmd_stop ;;
       3) cmd_restart ;;
       4) cmd_status ;;
+      0) cmd_gateway ;;
       5)
         # Allow Ctrl+C to stop tailing without exiting the menu.
         trap '_trap_logs_stopped' INT TERM
@@ -2116,7 +2392,7 @@ $(printf "\033[1mCommands:\033[0m")
   wizard               Interactive config.yaml generator (providers, tiers, fallbacks)
   install [--with-db|--without-db] [--with-local|--without-local]
           [--with-embedding|--without-embedding] [--with-transcription|--without-transcription]
-          [--with-searxng|--without-searxng]
+          [--with-searxng|--without-searxng] [--with-gateway|--without-gateway]
                      Install / rebuild LiteLLM (prompts for DB + local server setup)
   init-env             Detect auth files and update .env with correct paths
   auth chatgpt         Login to ChatGPT / Codex (browser PKCE)
@@ -2134,7 +2410,9 @@ $(printf "\033[1mCommands:\033[0m")
   proxy [--port N]     Start proxy in foreground (for debugging)
   status               Show auth + proxy + local server status
   local [status]       Check local inference server reachability
-  uninstall [service|db|embedding|transcription|searxng]
+  gateway [start|stop|restart|status|logs]
+                     Manage LLM API Gateway UI (web dashboard)
+  uninstall [service|db|embedding|transcription|searxng|gateway]
                      Stop and remove the proxy service, database config, or local servers
   toggle-claude        Toggle Claude Code between direct API and proxy
   setup-completions    Add litellmctl to your shell
@@ -2175,6 +2453,7 @@ case "$1" in
   setup-completions) shift; cmd_setup_completions ;;
   status)            shift; cmd_status "$@" ;;
   local)             shift; cmd_local "$@" ;;
+  gateway)           shift; cmd_gateway "$@" ;;
   toggle-claude)     exec "$BIN_DIR/toggle-claude" ;;
   help|-h|--help)    show_help ;;
   *)                 error "Unknown command: $1"; show_help; exit 1 ;;

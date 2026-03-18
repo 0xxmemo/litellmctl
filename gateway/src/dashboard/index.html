@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <!-- Primary Meta -->
+  <title>LLM API Gateway | Fast, Secure AI Proxy</title>
+  <meta name="description" content="Unified AI proxy for LLM APIs. OpenAI-compatible gateway with real-time analytics, access control, and multi-model support. Fast, secure, and developer-friendly.">
+  <meta name="author" content="LLM API Gateway">
+
+  <!-- Favicons -->
+  <link rel="icon" type="image/x-icon" href="/favicon.ico">
+  <link rel="icon" type="image/png" sizes="32x32" href="/icon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="/icon-16.png">
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">
+
+  <!-- PWA Manifest -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#1e40af">
+
+  <!-- OpenGraph -->
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://llm.0xmemo.com/">
+  <meta property="og:title" content="LLM API Gateway | Fast, Secure AI Proxy">
+  <meta property="og:description" content="Unified AI proxy for LLM APIs. OpenAI-compatible gateway with real-time analytics, access control, and multi-model support.">
+  <meta property="og:image" content="https://llm.0xmemo.com/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:site_name" content="LLM API Gateway">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="LLM API Gateway | Fast, Secure AI Proxy">
+  <meta name="twitter:description" content="Unified AI proxy for LLM APIs. OpenAI-compatible gateway with real-time analytics, access control, and multi-model support.">
+  <meta name="twitter:image" content="https://llm.0xmemo.com/twitter-card.png">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            border: "hsl(214.3 31.8% 91.4%)",
+            input: "hsl(214.3 31.8% 91.4%)",
+            ring: "hsl(222.2 47.4% 11.2%)",
+            background: "hsl(0 0% 100%)",
+            foreground: "hsl(222.2 47.4% 11.2%)",
+            primary: {
+              DEFAULT: "hsl(222.2 47.4% 11.2%)",
+              foreground: "hsl(210 40% 98%)",
+            },
+            secondary: {
+              DEFAULT: "hsl(210 40% 96.1%)",
+              foreground: "hsl(222.2 47.4% 11.2%)",
+            },
+            destructive: {
+              DEFAULT: "hsl(0 100% 50%)",
+              foreground: "hsl(210 40% 98%)",
+            },
+            muted: {
+              DEFAULT: "hsl(210 40% 96.1%)",
+              foreground: "hsl(215.4 16.3% 46.9%)",
+            },
+            accent: {
+              DEFAULT: "hsl(210 40% 96.1%)",
+              foreground: "hsl(222.2 47.4% 11.2%)",
+            },
+          },
+          borderRadius: {
+            lg: "0.5rem",
+            md: "calc(0.5rem - 2px)",
+            sm: "calc(0.5rem - 4px)",
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    .dark {
+      --background: 222.2 84% 4.9%;
+      --foreground: 210 40% 98%;
+      --card: 222.2 84% 4.9%;
+      --card-foreground: 210 40% 98%;
+      --popover: 222.2 84% 4.9%;
+      --popover-foreground: 210 40% 98%;
+      --primary: 210 40% 98%;
+      --primary-foreground: 222.2 47.4% 11.2%;
+      --secondary: 217.2 32.6% 17.5%;
+      --secondary-foreground: 210 40% 98%;
+      --muted: 217.2 32.6% 17.5%;
+      --muted-foreground: 215 20.2% 65.1%;
+      --accent: 217.2 32.6% 17.5%;
+      --accent-foreground: 210 40% 98%;
+      --destructive: 0 62.8% 30.6%;
+      --destructive-foreground: 210 40% 98%;
+      --border: 217.2 32.6% 17.5%;
+      --input: 217.2 32.6% 17.5%;
+      --ring: 212.7 26.8% 83.9%;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    }
+    
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    
+    .animate-fade-in {
+      animation: fadeIn 0.3s ease-out;
+    }
+    
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    .animate-pulse {
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+  </style>
+</head>
+<body class="dark bg-background text-foreground min-h-screen flex flex-col">
+  <!-- Header -->
+  <header class="border-b border-border">
+    <div class="container mx-auto px-4 py-4">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center space-x-2">
+          <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+          <h1 class="text-xl font-bold">LLM API Gateway</h1>
+        </div>
+        <nav class="flex items-center space-x-4">
+          <a href="/" class="text-sm text-muted-foreground hover:text-foreground">Home</a>
+          <a href="/dashboard" class="text-sm text-muted-foreground hover:text-foreground">Dashboard</a>
+        </nav>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="flex-1 container mx-auto px-4 py-16">
+    <div class="max-w-2xl mx-auto">
+      <div class="text-center mb-12">
+        <h2 class="text-4xl font-bold mb-4">Request Dashboard Access</h2>
+        <p class="text-muted-foreground text-lg">
+          Verify your email to get started. All requests require manual admin approval.
+        </p>
+      </div>
+
+      <!-- Step 1: Email Input -->
+      <div id="step1" class="bg-card border border-border rounded-lg p-6 shadow-sm animate-fade-in">
+        <h3 class="text-lg font-semibold mb-4">Step 1: Enter Your Email</h3>
+        <form id="emailForm" class="space-y-4">
+          <div>
+            <label for="email" class="block text-sm font-medium mb-2">
+              Email Address
+            </label>
+            <input
+              type="email"
+              id="email"
+              name="email"
+              required
+              placeholder="you@example.com"
+              class="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
+            />
+          </div>
+          
+          <button
+            type="submit"
+            id="sendOtpBtn"
+            class="w-full bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Send Verification Code
+          </button>
+        </form>
+
+        <div id="step1Message" class="mt-4 hidden"></div>
+      </div>
+
+      <!-- Step 2: OTP Verification -->
+      <div id="step2" class="hidden bg-card border border-border rounded-lg p-6 shadow-sm animate-fade-in">
+        <h3 class="text-lg font-semibold mb-4">Step 2: Verify Your Email</h3>
+        <p class="text-sm text-muted-foreground mb-4">
+          We sent a 6-digit code to <strong id="otpEmail"></strong>
+        </p>
+        
+        <form id="otpForm" class="space-y-4">
+          <div>
+            <label for="otp" class="block text-sm font-medium mb-2">
+              Verification Code
+            </label>
+            <input
+              type="text"
+              id="otp"
+              name="otp"
+              required
+              maxlength="6"
+              pattern="[0-9]{6}"
+              placeholder="000000"
+              class="w-full px-3 py-2 bg-background border border-input rounded-md text-sm font-mono text-center tracking-widest text-lg focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent"
+            />
+          </div>
+          
+          <button
+            type="submit"
+            id="verifyOtpBtn"
+            class="w-full bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Verify & Continue
+          </button>
+        </form>
+
+        <div class="mt-4 text-center">
+          <button
+            type="button"
+            id="resendBtn"
+            class="text-sm text-muted-foreground hover:text-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled
+          >
+            Resend code (<span id="resendTimer">30</span>s)
+          </button>
+        </div>
+
+        <div id="step2Message" class="mt-4 hidden"></div>
+      </div>
+
+      <!-- Success State - Pending Approval -->
+      <div id="pendingState" class="hidden bg-card border border-border rounded-lg p-6 shadow-sm text-center animate-fade-in">
+        <div class="w-16 h-16 bg-yellow-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+          <svg class="w-8 h-8 text-yellow-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+        </div>
+        <h3 class="text-xl font-semibold mb-2">Email Verified!</h3>
+        <p class="text-muted-foreground mb-4">
+          Your email has been verified. You now have guest access.
+        </p>
+        <div class="bg-muted/50 border border-border rounded-lg p-4 text-left mb-4">
+          <p class="text-sm mb-2"><strong>What happens next?</strong></p>
+          <ol class="text-sm text-muted-foreground space-y-1 list-decimal list-inside">
+            <li>Admin receives notification email</li>
+            <li>Admin manually reviews your request</li>
+            <li>You'll get full access once approved</li>
+          </ol>
+        </div>
+        <a href="/status" class="inline-block bg-primary text-primary-foreground px-6 py-2 rounded-md text-sm font-medium hover:bg-primary/90 transition-colors">
+          Check Approval Status →
+        </a>
+        <p class="text-xs text-muted-foreground mt-4">
+          ⏱️ Typical approval time: 24-48 hours
+        </p>
+      </div>
+
+      <!-- How It Works -->
+      <div class="mt-12 grid gap-6 md:grid-cols-3">
+        <div class="p-4 border border-border rounded-lg">
+          <div class="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center mb-3">
+            <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+            </svg>
+          </div>
+          <h3 class="font-semibold mb-2">1. Enter Email</h3>
+          <p class="text-sm text-muted-foreground">Provide your email address</p>
+        </div>
+
+        <div class="p-4 border border-border rounded-lg">
+          <div class="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center mb-3">
+            <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+            </svg>
+          </div>
+          <h3 class="font-semibold mb-2">2. Verify Email</h3>
+          <p class="text-sm text-muted-foreground">Enter the 6-digit code from your email</p>
+        </div>
+
+        <div class="p-4 border border-border rounded-lg">
+          <div class="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center mb-3">
+            <svg class="w-5 h-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+            </svg>
+          </div>
+          <h3 class="font-semibold mb-2">3. Admin Review</h3>
+          <p class="text-sm text-muted-foreground">Manual verification for security</p>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Footer -->
+  <footer class="border-t border-border py-6">
+    <div class="container mx-auto px-4 text-center text-sm text-muted-foreground">
+      <p>&copy; 2026 LLM API Gateway. All rights reserved.</p>
+    </div>
+  </footer>
+
+  <script>
+    const step1 = document.getElementById('step1');
+    const step2 = document.getElementById('step2');
+    const pendingState = document.getElementById('pendingState');
+    const emailForm = document.getElementById('emailForm');
+    const otpForm = document.getElementById('otpForm');
+    const sendOtpBtn = document.getElementById('sendOtpBtn');
+    const verifyOtpBtn = document.getElementById('verifyOtpBtn');
+    const resendBtn = document.getElementById('resendBtn');
+    const resendTimer = document.getElementById('resendTimer');
+    const step1Message = document.getElementById('step1Message');
+    const step2Message = document.getElementById('step2Message');
+    const otpEmail = document.getElementById('otpEmail');
+    
+    let currentEmail = '';
+    let resendCooldown = 30;
+
+    // Step 1: Send OTP
+    emailForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const email = document.getElementById('email').value;
+      currentEmail = email;
+      
+      sendOtpBtn.disabled = true;
+      sendOtpBtn.textContent = 'Sending...';
+      step1Message.classList.add('hidden');
+      
+      try {
+        const response = await fetch('/api/auth/request-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ email })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+          // Move to step 2
+          otpEmail.textContent = email;
+          step1.classList.add('hidden');
+          step2.classList.remove('hidden');
+          startResendTimer();
+        } else {
+          showMessage(step1Message, data.error || 'Failed to send code', 'error');
+        }
+      } catch (error) {
+        showMessage(step1Message, 'Failed to send code. Please try again.', 'error');
+      } finally {
+        if (!step1.classList.contains('hidden')) {
+          sendOtpBtn.disabled = false;
+          sendOtpBtn.textContent = 'Send Verification Code';
+        }
+      }
+    });
+
+    // Step 2: Verify OTP
+    otpForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const code = document.getElementById('otp').value;
+      
+      verifyOtpBtn.disabled = true;
+      verifyOtpBtn.textContent = 'Verifying...';
+      step2Message.classList.add('hidden');
+      
+      try {
+        const response = await fetch('/api/auth/verify-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ email: currentEmail, code })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+          // Success - show pending state
+          step2.classList.add('hidden');
+          pendingState.classList.remove('hidden');
+        } else {
+          showMessage(step2Message, data.error || 'Invalid code', 'error');
+        }
+      } catch (error) {
+        showMessage(step2Message, 'Failed to verify code. Please try again.', 'error');
+      } finally {
+        if (!step2.classList.contains('hidden')) {
+          verifyOtpBtn.disabled = false;
+          verifyOtpBtn.textContent = 'Verify & Continue';
+        }
+      }
+    });
+
+    // Resend OTP
+    resendBtn.addEventListener('click', async () => {
+      resendBtn.disabled = true;
+      resendBtn.textContent = 'Sending...';
+      step2Message.classList.add('hidden');
+      
+      try {
+        const response = await fetch('/api/auth/request-otp', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
+          body: JSON.stringify({ email: currentEmail })
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok && data.success) {
+          showMessage(step2Message, 'New code sent! Check your email.', 'success');
+          startResendTimer();
+        } else {
+          showMessage(step2Message, data.error || 'Failed to resend code', 'error');
+        }
+      } catch (error) {
+        showMessage(step2Message, 'Failed to resend code. Please try again.', 'error');
+      } finally {
+        resendBtn.disabled = false;
+      }
+    });
+
+    function startResendTimer() {
+      resendCooldown = 30;
+      resendBtn.disabled = true;
+      resendTimer.textContent = resendCooldown;
+      
+      const timer = setInterval(() => {
+        resendCooldown--;
+        resendTimer.textContent = resendCooldown;
+        
+        if (resendCooldown <= 0) {
+          clearInterval(timer);
+          resendBtn.disabled = false;
+          resendBtn.textContent = 'Resend code';
+        }
+      }, 1000);
+    }
+
+    function showMessage(container, message, type) {
+      container.classList.remove('hidden');
+      container.className = `mt-4 p-4 rounded-md ${
+        type === 'success'
+          ? 'bg-green-500/10 border border-green-500/20 text-green-400'
+          : 'bg-red-500/10 border border-red-500/20 text-red-500'
+      }`;
+      container.textContent = message;
+    }
+  </script>
+</body>
+</html>

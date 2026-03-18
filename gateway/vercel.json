@@ -1,0 +1,37 @@
+{
+  "buildCommand": "bun install --legacy-peer-deps && bun run build",
+  "devCommand": "bun run dev",
+  "installCommand": "bun install --legacy-peer-deps",
+  "framework": "vite",
+  "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/dashboard/(.*)",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/dashboard",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/auth",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/docs",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/settings",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/admin",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/((?!api|assets|_vercel).*)",
+      "destination": "/index.html"
+    }
+  ]
+}

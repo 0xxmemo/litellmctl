@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dashboard - LLM API Gateway</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            border: "hsl(217.2 32.6% 17.5%)",
+            input: "hsl(217.2 32.6% 17.5%)",
+            ring: "hsl(212.7 26.8% 83.9%)",
+            background: "hsl(222.2 84% 4.9%)",
+            foreground: "hsl(210 40% 98%)",
+            primary: {
+              DEFAULT: "hsl(210 40% 98%)",
+              foreground: "hsl(222.2 47.4% 11.2%)",
+            },
+            secondary: {
+              DEFAULT: "hsl(217.2 32.6% 17.5%)",
+              foreground: "hsl(210 40% 98%)",
+            },
+            destructive: {
+              DEFAULT: "hsl(0 62.8% 30.6%)",
+              foreground: "hsl(210 40% 98%)",
+            },
+            muted: {
+              DEFAULT: "hsl(217.2 32.6% 17.5%)",
+              foreground: "hsl(215 20.2% 65.1%)",
+            },
+            accent: {
+              DEFAULT: "hsl(217.2 32.6% 17.5%)",
+              foreground: "hsl(210 40% 98%)",
+            },
+            card: {
+              DEFAULT: "hsl(222.2 84% 4.9%)",
+              foreground: "hsl(210 40% 98%)",
+            },
+          },
+          borderRadius: {
+            lg: "0.5rem",
+            md: "calc(0.5rem - 2px)",
+            sm: "calc(0.5rem - 4px)",
+          },
+        },
+      },
+    }
+  </script>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+    }
+    
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    
+    .animate-spin {
+      animation: spin 1s linear infinite;
+    }
+  </style>
+</head>
+<body class="bg-background text-foreground min-h-screen">
+  <!-- Loading State -->
+  <div id="loadingScreen" class="min-h-screen flex items-center justify-center">
+    <div class="text-center">
+      <div class="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+      <p class="text-muted-foreground">Loading dashboard...</p>
+    </div>
+  </div>
+
+  <!-- Login Screen -->
+  <div id="loginScreen" class="hidden min-h-screen flex items-center justify-center p-4">
+    <div class="w-full max-w-md">
+      <div class="text-center mb-8">
+        <svg class="w-12 h-12 mx-auto mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+        </svg>
+        <h1 class="text-2xl font-bold">Dashboard Login</h1>
+        <p class="text-muted-foreground mt-2">Enter your validated email to login</p>
+      </div>
+
+      <div class="bg-card border border-border rounded-lg p-6 shadow-sm">
+        <form id="loginForm" class="space-y-4">
+          <div>
+            <label for="loginEmail" class="block text-sm font-medium mb-2">
+              Email Address
+            </label>
+            <input
+              type="email"
+              id="loginEmail"
+              name="email"
+              required
+              placeholder="you@example.com"
+              class="w-full px-3 py-2 bg-background border border-input rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          
+          <button
+            type="submit"
+            id="loginBtn"
+            class="w-full bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90 transition-colors disabled:opacity-50"
+          >
+            Login
+          </button>
+        </form>
+
+        <div id="loginMessage" class="mt-4 hidden"></div>
+        
+        <div class="mt-6 text-center space-y-2">
+          <p class="text-sm text-muted-foreground">
+            Don't have access yet?
+          </p>
+          <a href="/" class="text-sm text-primary hover:underline">
+            Request access
+          </a>
+        </div>
+      </div>
+    </div>
+  </div>
+
+
+
+  <!-- Dashboard (hidden by default) -->
+  <div id="dashboard" class="hidden">
+    <!-- Header -->
+    <header class="border-b border-border">
+      <div class="container mx-auto px-4 py-4">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center space-x-2">
+            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+            </svg>
+            <h1 class="text-xl font-bold">Dashboard</h1>
+          </div>
+          <div class="flex items-center space-x-4">
+            <span id="userEmail" class="text-sm text-muted-foreground hidden md:inline"></span>
+            <button 
+              onclick="logout()" 
+              class="text-sm text-destructive hover:underline"
+            >
+              Logout
+            </button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="container mx-auto px-4 py-8">
+      <!-- Verification Success Banner -->
+      <div id="verificationBanner" class="hidden mb-6 bg-green-500/10 border border-green-500/20 rounded-lg p-4">
+        <div class="flex items-center space-x-3">
+          <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+          </svg>
+          <p class="text-sm text-green-400">Email verified successfully! You now have access to the dashboard.</p>
+        </div>
+      </div>
+
+      <!-- API Keys Section -->
+      <div class="mb-8">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-2xl font-bold">API Keys</h2>
+          <button
+            onclick="createApiKey()"
+            class="bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90 transition-colors"
+          >
+            Create New Key
+          </button>
+        </div>
+
+        <div class="bg-card border border-border rounded-lg overflow-hidden">
+          <div class="overflow-x-auto">
+            <table class="w-full">
+              <thead class="bg-muted">
+                <tr>
+                  <th class="px-4 py-3 text-left text-sm font-medium">Created</th>
+                  <th class="px-4 py-3 text-left text-sm font-medium hidden sm:table-cell">Email</th>
+                  <th class="px-4 py-3 text-left text-sm font-medium">Status</th>
+                  <th class="px-4 py-3 text-left text-sm font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="keysTableBody" class="divide-y divide-border">
+                <!-- Keys will be loaded here -->
+              </tbody>
+            </table>
+          </div>
+          <div id="noKeysMessage" class="p-8 text-center text-muted-foreground hidden">
+            <div class="w-12 h-12 bg-muted rounded-full flex items-center justify-center mx-auto mb-3">
+              <svg class="w-6 h-6 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+              </svg>
+            </div>
+            <p>No API keys yet. Create your first key above.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Usage Stats -->
+      <div>
+        <h2 class="text-2xl font-bold mb-4">Account Overview</h2>
+        <div class="grid gap-4 md:grid-cols-3">
+          <div class="bg-card border border-border rounded-lg p-6">
+            <div class="text-sm text-muted-foreground mb-2">Active Keys</div>
+            <div class="text-3xl font-bold" id="activeKeys">-</div>
+          </div>
+          <div class="bg-card border border-border rounded-lg p-6">
+            <div class="text-sm text-muted-foreground mb-2">Account Status</div>
+            <div class="text-3xl font-bold text-green-500" id="accountStatus">Active</div>
+          </div>
+          <div class="bg-card border border-border rounded-lg p-6">
+            <div class="text-sm text-muted-foreground mb-2">Session Expires</div>
+            <div class="text-lg font-bold" id="sessionExpiry">-</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- New Key Modal -->
+      <div id="newKeyModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+        <div class="bg-card border border-border rounded-lg p-6 max-w-md w-full">
+          <div class="flex items-center space-x-3 mb-4">
+            <div class="w-10 h-10 bg-green-500/10 rounded-full flex items-center justify-center">
+              <svg class="w-6 h-6 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z"/>
+              </svg>
+            </div>
+            <h3 class="text-xl font-bold">New API Key Created</h3>
+          </div>
+          <div class="bg-muted p-4 rounded-md mb-4">
+            <code id="newApiKey" class="text-sm break-all font-mono"></code>
+          </div>
+          <div class="bg-destructive/10 border border-destructive/20 p-3 rounded-md mb-4">
+            <p class="text-sm text-destructive">
+              ⚠️ Store this key securely. It will not be shown again!
+            </p>
+          </div>
+          <button
+            onclick="closeNewKeyModal()"
+            class="w-full bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-medium hover:bg-primary/90 transition-colors"
+          >
+            I've Saved It
+          </button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    let currentEmail = '';
+    let currentToken = '';
+    let currentRole = 'guest';
+
+    // Check URL for verification success
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('verified') === 'true') {
+      document.getElementById('verificationBanner').classList.remove('hidden');
+      // Clean URL
+      window.history.replaceState({}, document.title, '/dashboard');
+    }
+
+    // Initialize - check session
+    async function init() {
+      document.getElementById('loadingScreen').classList.remove('hidden');
+      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('dashboard').classList.add('hidden');
+      
+      try {
+        const response = await fetch('/api/auth/status', {
+          credentials: 'include'
+        });
+        
+        const data = await response.json();
+        
+        if (data.authenticated && (data.role === 'user' || data.role === 'admin')) {
+          currentEmail = data.email;
+          currentRole = data.role;
+          showDashboard(data.expiresAt);
+        } else {
+          showLogin();
+        }
+      } catch (error) {
+        console.error('Session check failed:', error);
+        showLogin();
+      }
+    }
+
+    function showLogin() {
+      document.getElementById('loadingScreen').classList.add('hidden');
+      document.getElementById('loginScreen').classList.remove('hidden');
+    }
+
+    function showDashboard(expiresAt) {
+      document.getElementById('loadingScreen').classList.add('hidden');
+      document.getElementById('loginScreen').classList.add('hidden');
+      document.getElementById('dashboard').classList.remove('hidden');
+      document.getElementById('userEmail').textContent = currentEmail;
+      
+      if (expiresAt) {
+        const expiryDate = new Date(expiresAt);
+        document.getElementById('sessionExpiry').textContent = expiryDate.toLocaleDateString();
+      }
+      
+      loadApiKeys();
+    }
+
+    // Login/Register form - redirects to /status for guests
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const email = document.getElementById('loginEmail').value;
+      const messageDiv = document.getElementById('loginMessage');
+      const loginBtn = document.getElementById('loginBtn');
+      
+      loginBtn.disabled = true;
+      loginBtn.textContent = 'Logging in...';
+      
+      // Redirect to unified auth flow
+      window.location.href = '/auth';
+      return;
+    });
+
+    function logout() {
+      fetch('/api/logout', {
+        method: 'POST',
+        credentials: 'include'
+      }).then(() => {
+        currentEmail = '';
+        document.getElementById('dashboard').classList.add('hidden');
+        document.getElementById('loginScreen').classList.remove('hidden');
+        document.getElementById('loginForm').reset();
+        document.getElementById('loginMessage').classList.add('hidden');
+      });
+    }
+
+    async function loadApiKeys() {
+      try {
+        const response = await fetch('/api/keys', {
+          credentials: 'include'
+        });
+        
+        if (!response.ok) throw new Error('Failed to load keys');
+        
+        const data = await response.json();
+        const tbody = document.getElementById('keysTableBody');
+        const noKeysMsg = document.getElementById('noKeysMessage');
+        
+        if (data.keys.length === 0) {
+          tbody.innerHTML = '';
+          noKeysMsg.classList.remove('hidden');
+          document.getElementById('activeKeys').textContent = '0';
+          return;
+        }
+        
+        noKeysMsg.classList.add('hidden');
+        document.getElementById('activeKeys').textContent = data.keys.filter(k => !k.revoked).length;
+        
+        tbody.innerHTML = data.keys.map(key => `
+          <tr class="hover:bg-muted/50">
+            <td class="px-4 py-3 text-sm">${new Date(key.createdAt).toLocaleDateString()}</td>
+            <td class="px-4 py-3 text-sm hidden sm:table-cell">${key.email}</td>
+            <td class="px-4 py-3 text-sm">
+              <span class="px-2 py-1 rounded-full text-xs ${
+                key.revoked 
+                  ? 'bg-red-500/10 text-red-500' 
+                  : 'bg-green-500/10 text-green-500'
+              }">
+                ${key.revoked ? 'Revoked' : 'Active'}
+              </span>
+            </td>
+            <td class="px-4 py-3 text-sm">
+              ${!key.revoked ? `
+                <button 
+                  onclick="revokeKey('${key.id}')"
+                  class="text-destructive hover:underline text-xs"
+                >
+                  Revoke
+                </button>
+              ` : '-'}
+            </td>
+          </tr>
+        `).join('');
+      } catch (error) {
+        console.error('Error loading keys:', error);
+      }
+    }
+
+    async function createApiKey() {
+      try {
+        const response = await fetch('/api/keys', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json'
+          },
+          credentials: 'include'
+        });
+        
+        if (!response.ok) {
+          const data = await response.json();
+          throw new Error(data.error || 'Failed to create key');
+        }
+        
+        const data = await response.json();
+        document.getElementById('newApiKey').textContent = data.apiKey;
+        document.getElementById('newKeyModal').classList.remove('hidden');
+        loadApiKeys();
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+
+    function closeNewKeyModal() {
+      document.getElementById('newKeyModal').classList.add('hidden');
+    }
+
+    async function revokeKey(keyId) {
+      if (!confirm('Are you sure you want to revoke this API key?')) return;
+      
+      try {
+        const response = await fetch(`/api/keys/${keyId}`, {
+          method: 'DELETE',
+          credentials: 'include'
+        });
+        
+        if (!response.ok) throw new Error('Failed to revoke key');
+        
+        loadApiKeys();
+      } catch (error) {
+        alert(error.message);
+      }
+    }
+
+    // Initialize on load
+    init();
+  </script>
+</body>
+</html>
