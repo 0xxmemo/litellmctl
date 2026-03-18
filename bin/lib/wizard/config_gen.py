@@ -1,0 +1,98 @@
+"""YAML config generation."""
+
+from __future__ import annotations
+
+
+def write_model_entries(lines: list[str], models: list[dict]) -> None:
+    current_prefix = None
+    for entry in models:
+        prefix = entry["model_name"].split("/")[0] if "/" in entry["model_name"] else ""
+        if prefix != current_prefix:
+            if current_prefix is not None:
+                lines.append("")
+            current_prefix = prefix
+        lines.append(f"  - model_name: {entry['model_name']}")
+        if "model_info" in entry:
+            lines.append("    model_info:")
+            for k, v in entry["model_info"].items():
+                lines.append(f"      {k}: {v}")
+        lines.append("    litellm_params:")
+        params = entry["litellm_params"]
+        for k, v in params.items():
+            if isinstance(v, dict):
+                lines.append(f"      {k}:")
+                for sk, sv in v.items():
+                    lines.append(f"        {sk}: {sv}")
+            else:
+                lines.append(f"      {k}: {v}")
+
+
+def generate_yaml(models: list[dict], aliases: dict[str, str],
+                  fallbacks: list[dict], defaults: dict,
+                  embedding_models: list[dict] | None = None,
+                  transcription_models: list[dict] | None = None) -> str:
+    lines: list[str] = ["model_list:"]
+    write_model_entries(lines, models)
+
+    if embedding_models:
+        lines.append("")
+        lines.append("  # ── Local embedding models ──────────────────────────────────────────────")
+        lines.append("  # Base URL: LOCAL_EMBEDDING_API_BASE env var  (default: http://localhost:11434)")
+        write_model_entries(lines, embedding_models)
+
+    if transcription_models:
+        lines.append("")
+        lines.append("  # ── Local transcription models ──────────────────────────────────────────")
+        lines.append("  # Base URL: LOCAL_TRANSCRIPTION_API_BASE env var  (default: http://localhost:10300/v1)")
+        write_model_entries(lines, transcription_models)
+
+    rs = defaults.get("router_settings", {})
+    lines.append("")
+    lines.append("router_settings:")
+    for k, v in rs.items():
+        lines.append(f"  {k}: {v}")
+
+    if aliases:
+        lines.append("  model_group_alias:")
+        for alias, target in aliases.items():
+            lines.append(f"    {alias}: {target}")
+
+    if fallbacks:
+        lines.append("  fallbacks:")
+        for fb in fallbacks:
+            for tier_name, chain in fb.items():
+                lines.append(f"    - {tier_name}:")
+                lines.append("        [")
+                for m in chain:
+                    lines.append(f"          {m},")
+                lines.append("        ]")
+
+    ls = defaults.get("litellm_settings", {})
+    lines.append("")
+    lines.append("litellm_settings:")
+    for k, v in ls.items():
+        if isinstance(v, dict):
+            lines.append(f"  {k}:")
+            for sk, sv in v.items():
+                lines.append(f"    {sk}: {sv}")
+        elif isinstance(v, bool):
+            lines.append(f"  {k}: {'true' if v else 'false'}")
+        elif isinstance(v, list):
+            lines.append(f"  {k}:")
+            for item in v:
+                lines.append(f"    - {item}")
+        else:
+            lines.append(f"  {k}: {v}")
+
+    gs = defaults.get("general_settings", {})
+    lines.append("")
+    lines.append("general_settings:")
+    for k, v in gs.items():
+        lines.append(f"  {k}: {v}")
+
+    lines.append("")
+    lines.append("environment_variables:")
+    lines.append("  # Token dirs & auth files are set in .env (machine-specific paths)")
+    lines.append("")
+
+    return "\n".join(lines)
