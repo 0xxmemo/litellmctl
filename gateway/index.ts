@@ -320,7 +320,14 @@ async function requestOtpHandler(req: Request) {
     createdAt: new Date(),
   });
 
-  await sendOTPCode(email, code);
+  const emailResult = await sendOTPCode(email, code);
+
+  if (emailResult.warning) {
+    return Response.json(
+      { error: "Email service not configured. Ask the admin to set up ProtonMail SMTP." },
+      { status: 503 },
+    );
+  }
 
   await validatedUsers.updateOne(
     { email: email.toLowerCase() },

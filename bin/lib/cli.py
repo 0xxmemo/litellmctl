@@ -17,6 +17,9 @@ app = typer.Typer(
 gateway_app = typer.Typer(help="Manage LLM API Gateway UI.")
 app.add_typer(gateway_app, name="gateway")
 
+protonmail_app = typer.Typer(help="Manage ProtonMail SMTP bridge (hydroxide).")
+app.add_typer(protonmail_app, name="protonmail")
+
 
 @app.command()
 def start(
@@ -240,6 +243,42 @@ def gateway_logs() -> None:
     cmd_gateway("logs")
 
 
+# ProtonMail subcommands
+@protonmail_app.command("start")
+def protonmail_start() -> None:
+    """Start hydroxide SMTP bridge."""
+    from .commands.protonmail import cmd_protonmail
+    cmd_protonmail("start")
+
+
+@protonmail_app.command("stop")
+def protonmail_stop() -> None:
+    """Stop hydroxide SMTP bridge."""
+    from .commands.protonmail import cmd_protonmail
+    cmd_protonmail("stop")
+
+
+@protonmail_app.command("restart")
+def protonmail_restart() -> None:
+    """Restart hydroxide SMTP bridge."""
+    from .commands.protonmail import cmd_protonmail
+    cmd_protonmail("restart")
+
+
+@protonmail_app.command("status")
+def protonmail_status_cmd() -> None:
+    """Show ProtonMail bridge status."""
+    from .commands.protonmail import cmd_protonmail
+    cmd_protonmail("status")
+
+
+@protonmail_app.command("auth")
+def protonmail_auth() -> None:
+    """Show how to authenticate hydroxide."""
+    from .commands.protonmail import cmd_protonmail
+    cmd_protonmail("auth")
+
+
 def _show_help() -> None:
     from .common.formatting import console
     console.print("""
@@ -268,6 +307,8 @@ def _show_help() -> None:
   local [status]       Check local inference server reachability
   gateway [start|stop|restart|status|logs]
                        Manage LLM API Gateway UI (web dashboard)
+  protonmail [start|stop|restart|status|auth]
+                       Manage hydroxide SMTP bridge for OTP emails
   uninstall [target]   Stop and remove components
   toggle-claude        Toggle Claude Code between direct API and proxy
   setup-completions    Add litellmctl to your shell

@@ -6,20 +6,22 @@ let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
 let smtpAvailable = false;
 
 function initTransporter(): boolean {
-  if (!process.env.PROTON_EMAIL || !process.env.PROTON_PASSWORD) {
-    console.warn('⚠️ ProtonMail credentials not configured');
+  const email = process.env.GATEWAY_PROTON_EMAIL || process.env.PROTON_EMAIL;
+  const pass  = process.env.GATEWAY_PROTON_BRIDGE_PASS
+    || process.env.GATEWAY_PROTON_PASSWORD
+    || process.env.PROTON_PASSWORD;
+
+  if (!email || !pass) {
+    console.warn('⚠️ ProtonMail credentials not configured (set GATEWAY_PROTON_EMAIL + GATEWAY_PROTON_BRIDGE_PASS in .env)');
     return false;
   }
 
   try {
     transporter = nodemailer.createTransport({
-      host: process.env.PROTON_SMTP_HOST || '127.0.0.1',
-      port: parseInt(process.env.PROTON_SMTP_PORT || '1025'),
+      host: process.env.GATEWAY_PROTON_SMTP_HOST || process.env.PROTON_SMTP_HOST || '127.0.0.1',
+      port: parseInt(process.env.GATEWAY_PROTON_SMTP_PORT || process.env.PROTON_SMTP_PORT || '1025'),
       secure: false, // hydroxide uses plain SMTP locally
-      auth: {
-        user: process.env.PROTON_EMAIL,
-        pass: process.env.PROTON_PASSWORD
-      }
+      auth: { user: email, pass }
     });
     return true;
   } catch (error) {
@@ -105,7 +107,7 @@ If you didn't request this code, please ignore this email.
 
   try {
     const result = await transporter.sendMail({
-      from: `"LLM API Gateway" <${process.env.PROTON_EMAIL}>`,
+      from: `"LLM API Gateway" <${process.env.GATEWAY_PROTON_EMAIL || process.env.PROTON_EMAIL}>`,
       to: email,
       subject: '🔐 Your OTP Verification Code',
       text,
@@ -296,7 +298,7 @@ To approve this request:
 
   try {
     const result = await transporter.sendMail({
-      from: `"LLM API Gateway" <${process.env.PROTON_EMAIL}>`,
+      from: `"LLM API Gateway" <${process.env.GATEWAY_PROTON_EMAIL || process.env.PROTON_EMAIL}>`,
       to: adminEmail,
       subject: '🔐 New Dashboard Access Request',
       text,

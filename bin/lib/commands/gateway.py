@@ -70,6 +70,12 @@ def gateway_start() -> None:
         if gateway_is_running():
             info(f"Gateway started (PID {proc.pid})")
             info(f"Web UI: http://localhost:{port}")
+            # Auto-start hydroxide SMTP bridge if installed and authenticated
+            try:
+                from .protonmail import hydroxide_start
+                hydroxide_start()
+            except Exception:
+                pass
             return
     warn("Gateway started but not responding yet")
     warn(f"Check logs: tail -f {LOG_DIR}/gateway.log")

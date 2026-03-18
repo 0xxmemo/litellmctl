@@ -77,6 +77,95 @@ def install_protonmail() -> bool:
     return True
 
 
+def _hydroxide_bin() -> str | None:
+    path = shutil.which("hydroxide")
+    if not path:
+        go_path = os.path.expanduser("~/go/bin/hydroxide")
+        if os.path.isfile(go_path) and os.access(go_path, os.X_OK):
+            path = go_path
+    return path
+
+
+def _hydroxide_authenticated() -> bool:
+    auth_dir = os.path.expanduser("~/.config/hydroxide")
+    return os.path.isdir(auth_dir) and bool(os.listdir(auth_dir))
+
+
+def hydroxide_start() -> bool:
+    """Start hydroxide SMTP bridge if installed and authenticated."""
+    if port_in_use(1025):
+        return True  # already running
+
+    hbin = _hydroxide_bin()
+    if not hbin:
+        return False
+
+    if not _hydroxide_authenticated():
+        username = os.environ.get("GATEWAY_PROTON_USERNAME", "")
+        warn("hydroxide is not authenticated.")
+        if username:
+            info(f"Run: hydroxide auth {username}")
+        else:
+            info("Run: hydroxide auth <your-protonmail-username>")
+        return False
+
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_f = open(LOG_DIR / "hydroxide.log", "a")
+    subprocess.Popen(
+        [hbin, "smtp"],
+        stdout=log_f, stderr=log_f,
+        start_new_session=True,
+    )
+    import time; time.sleep(1)
+    if port_in_use(1025):
+        info("hydroxide SMTP bridge started (port 1025)")
+        return True
+    warn("hydroxide started but not listening on port 1025")
+    return False
+
+
+def hydroxide_stop() -> None:
+    """Stop hydroxide SMTP bridge."""
+    import signal
+    try:
+        result = subprocess.run(["pgrep", "-x", "hydroxide"], capture_output=True, text=True)
+        for pid_str in result.stdout.strip().splitlines():
+            os.kill(int(pid_str), signal.SIGTERM)
+        info("hydroxide stopped")
+    except Exception:
+        info("hydroxide not running")
+
+
+def protonmail_status() -> None:
+    console.print("[bold]ProtonMail Bridge (hydroxide)[/]")
+
+    bin_path = _hydroxide_bin()
+    if not bin_path:
+        console.print("  Status:   [yellow]not installed[/]")
+        console.print("  [dim]Install: litellmctl install --with-protonmail[/]")
+        console.print()
+        return
+
+    authed = _hydroxide_authenticated()
+    if port_in_use(1025):
+        console.print("  Status:   [green]running[/]")
+        console.print("  Port:     1025 (SMTP)")
+        email = os.environ.get("GATEWAY_PROTON_EMAIL", os.environ.get("PROTON_EMAIL", ""))
+        if email:
+            console.print(f"  Account:  {email}")
+    elif not authed:
+        console.print("  Status:   [red]not authenticated[/]")
+        username = os.environ.get("GATEWAY_PROTON_USERNAME", "<your-username>")
+        console.print(f"  [dim]Auth: hydroxide auth {username}[/]")
+        console.print(f"  [dim]Then: hydroxide smtp[/]")
+    else:
+        console.print("  Status:   [yellow]stopped[/]")
+        console.print(f"  Binary:   {bin_path}")
+        console.print("  [dim]Start: litellmctl protonmail start[/]")
+
+    console.print()
+
+
 def uninstall_protonmail() -> None:
     console.print("\n  [bold]ProtonMail bridge (hydroxide)[/]")
 
@@ -96,3 +185,33 @@ def uninstall_protonmail() -> None:
     console.print("  Uninstall:\n")
     console.print("      rm -f $(which hydroxide)")
     console.print("      rm -rf ~/.config/hydroxide\n")
+
+
+def cmd_protonmail(subcmd: str = "status") -> None:
+    from ..common.env import load_env
+    load_env()
+    if subcmd == "start":
+        hydroxide_start()
+    elif subcmd == "stop":
+        hydroxide_stop()
+    elif subcmd == "restart":
+        hydroxide_stop()
+        import time; time.sleep(1)
+        hydroxide_start()
+    elif subcmd == "status":
+        protonmail_status()
+    elif subcmd == "auth":
+        username = os.environ.get("GATEWAY_PROTON_USERNAME", "")
+        hbin = _hydroxide_bin()
+        if not hbin:
+            warn("hydroxide not installed. Run: litellmctl install --with-protonmail")
+            return
+        if username:
+            info(f"Run: {hbin} auth {username}")
+        else:
+            info(f"Run: {hbin} auth <your-protonmail-username>")
+        info("After authenticating, run: litellmctl protonmail start")
+    else:
+        from ..common.formatting import error
+        error(f"Unknown subcommand: {subcmd}")
+        console.print("  Usage: litellmctl protonmail [start|stop|restart|status|auth]")

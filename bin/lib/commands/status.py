@@ -20,6 +20,7 @@ from .local import local_status
 from .db import db_status
 from .gateway import gateway_status
 from .searxng import searxng_status
+from .protonmail import protonmail_status
 
 
 def proxy_http_health(port: int) -> str:
@@ -113,3 +114,4 @@ def cmd_status() -> None:
     db_status()
     searxng_status()
     gateway_status()
+    protonmail_status()
