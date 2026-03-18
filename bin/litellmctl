@@ -5,13 +5,20 @@
 # Usage:
 #   litellmctl <command> [args...]
 #   litellmctl install              Install, update, or rebuild LiteLLM
+#   litellmctl wizard               Interactive config.yaml generator
+#   litellmctl init-env             Detect auth files and update .env
+#   litellmctl auth <provider>      Manage OAuth tokens (chatgpt/gemini/qwen/kimi)
 #   litellmctl auth status          Show auth token status
 #   litellmctl start                Start proxy as background service
 #   litellmctl stop                 Stop the proxy service
 #   litellmctl restart | r          Restart the proxy service
 #   litellmctl logs                 Tail proxy logs
 #   litellmctl proxy                Start proxy in foreground (debug)
+#   litellmctl status               Show auth + proxy + local server status
+#   litellmctl local                Check local inference server reachability
 #   litellmctl gateway              Manage LLM API Gateway UI
+#   litellmctl uninstall            Remove components (service/db/servers/gateway)
+#   litellmctl toggle-claude        Toggle Claude Code between direct API and proxy
 #   litellmctl help                 Show this help
 #
 # Tab completion:
@@ -50,7 +57,7 @@ _litellmctl_completions() {
 
   commands="auth wizard install init-env start stop restart r logs proxy status local gateway uninstall toggle-claude setup-completions help"
   auth_cmds="chatgpt gemini qwen kimi codex status refresh export import"
-  uninstall_cmds="service db embedding transcription gateway"
+  uninstall_cmds="service db embedding transcription searxng gateway protonmail"
   gateway_cmds="start stop restart status logs"
 
   case "$prev" in
@@ -70,7 +77,7 @@ _litellmctl_completions() {
       COMPREPLY=( $(compgen -W "--port --config" -- "$cur") )
       return ;;
     install)
-      COMPREPLY=( $(compgen -W "--with-db --without-db --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription --with-gateway --without-gateway" -- "$cur") )
+      COMPREPLY=( $(compgen -W "--with-db --without-db --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription --with-searxng --without-searxng --with-gateway --without-gateway --with-protonmail --without-protonmail" -- "$cur") )
       return ;;
     gateway)
       COMPREPLY=( $(compgen -W "$gateway_cmds" -- "$cur") )
@@ -120,7 +127,9 @@ _litellmctl_completions() {
     'db:Remove database config from .env'
     'embedding:Show Ollama stop and uninstall commands'
     'transcription:Show faster-whisper-server stop and uninstall commands'
+    'searxng:Show SearXNG search server stop and remove commands'
     'gateway:Show gateway UI stop and uninstall commands'
+    'protonmail:Show ProtonMail bridge (hydroxide) stop and uninstall commands'
   )
 
   if (( CURRENT == 2 )); then
@@ -131,7 +140,7 @@ _litellmctl_completions() {
       uninstall) _describe 'uninstall target' uninstall_cmds ;;
       refresh|export) compadd chatgpt gemini qwen kimi ;;
       start|proxy) compadd -- --port --config ;;
-      install) compadd -- --with-db --without-db --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription --with-gateway --without-gateway ;;
+      install) compadd -- --with-db --without-db --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription --with-searxng --without-searxng --with-gateway --without-gateway --with-protonmail --without-protonmail ;;
       gateway) compadd start stop restart status logs ;;
     esac
   elif (( CURRENT == 4 )); then
@@ -819,6 +828,78 @@ except Exception:
 PY
 }
 
+_install_protonmail() {
+  # Hydroxide is a ProtonMail bridge that provides local SMTP access.
+  # Required by the gateway OTP email service.
+
+  if command -v hydroxide &>/dev/null; then
+    info "hydroxide already installed"
+  else
+    info "Installing hydroxide (ProtonMail SMTP bridge) ..."
+    if ! command -v go &>/dev/null; then
+      info "Go not found — installing ..."
+      if is_macos && command -v brew &>/dev/null; then
+        brew install go || { warn "brew install go failed"; return 1; }
+      elif is_linux; then
+        if command -v apt-get &>/dev/null; then
+          sudo apt-get update -qq && sudo apt-get install -y -qq golang-go || { warn "apt install golang-go failed"; return 1; }
+        elif command -v dnf &>/dev/null; then
+          sudo dnf install -y golang || { warn "dnf install golang failed"; return 1; }
+        elif command -v pacman &>/dev/null; then
+          sudo pacman -S --noconfirm go || { warn "pacman install go failed"; return 1; }
+        else
+          warn "Install Go manually: https://go.dev/dl/"
+          return 1
+        fi
+      else
+        warn "Install Go manually: https://go.dev/dl/"
+        return 1
+      fi
+    fi
+    go install github.com/emersion/hydroxide/cmd/hydroxide@latest || {
+      warn "hydroxide install failed"
+      return 1
+    }
+    export PATH="$HOME/go/bin:$PATH"
+  fi
+
+  if ! command -v hydroxide &>/dev/null; then
+    export PATH="$HOME/go/bin:$PATH"
+  fi
+
+  if ! command -v hydroxide &>/dev/null; then
+    warn "hydroxide not found in PATH after install"
+    return 1
+  fi
+
+  info "hydroxide installed at $(command -v hydroxide)"
+
+  # Check if hydroxide is already authenticated
+  local hydroxide_auth_dir="$HOME/.config/hydroxide"
+  if [ -d "$hydroxide_auth_dir" ] && [ -n "$(ls -A "$hydroxide_auth_dir" 2>/dev/null)" ]; then
+    info "hydroxide already authenticated"
+  else
+    printf "\n"
+    info "hydroxide needs ProtonMail authentication."
+    info "Run the following command and enter your ProtonMail credentials:"
+    printf "\n      hydroxide auth <your-protonmail-username>\n\n"
+    info "After authenticating, set these in your gateway .env:"
+    printf "\n      PROTON_EMAIL=<your-protonmail-email>"
+    printf "\n      PROTON_PASSWORD=<your-bridge-password>\n\n"
+  fi
+
+  # Check if hydroxide SMTP is already running
+  if _proxy_http_check "http://127.0.0.1:1025" 1 2>/dev/null || \
+     _port_in_use 1025; then
+    info "hydroxide SMTP bridge already running on port 1025"
+  else
+    info "Start the SMTP bridge with:"
+    printf "\n      hydroxide smtp\n\n"
+    info "Or run in background:"
+    printf "\n      nohup hydroxide smtp > $LOG_DIR/hydroxide.log 2>&1 &\n\n"
+  fi
+}
+
 _install_gateway() {
   local gateway_dir="$PROJECT_DIR/gateway"
 
@@ -1123,6 +1204,7 @@ cmd_install() {
   local transcr_mode="${LITELLM_INSTALL_TRANSCR_SETUP:-}" # yes|no|empty(auto)
   local searxng_mode="${LITELLM_INSTALL_SEARXNG_SETUP:-}" # yes|no|empty(auto)
   local gateway_mode="${LITELLM_INSTALL_GATEWAY_SETUP:-}" # yes|no|empty(auto)
+  local proton_mode="${LITELLM_INSTALL_PROTON_SETUP:-}"   # yes|no|empty(auto)
   local db_mode_flag=""
   local post_sync_only=false
   local env_file="$PROJECT_DIR/.env"
@@ -1143,6 +1225,8 @@ cmd_install() {
       --without-searxng)         searxng_mode="no"; shift ;;
       --with-gateway)            gateway_mode="yes"; shift ;;
       --without-gateway)         gateway_mode="no"; shift ;;
+      --with-protonmail)         proton_mode="yes"; shift ;;
+      --without-protonmail)      proton_mode="no"; shift ;;
       --with-local)              embed_mode="yes"; transcr_mode="yes"; shift ;;
       --without-local)           embed_mode="no"; transcr_mode="no"; shift ;;
       --_post-sync)              post_sync_only=true; shift ;;
@@ -1170,6 +1254,8 @@ cmd_install() {
       [ "$searxng_mode" = "no"  ]  && reexec+=("--without-searxng")
       [ "$gateway_mode" = "yes" ]  && reexec+=("--with-gateway")
       [ "$gateway_mode" = "no"  ]  && reexec+=("--without-gateway")
+      [ "$proton_mode"  = "yes" ]  && reexec+=("--with-protonmail")
+      [ "$proton_mode"  = "no"  ]  && reexec+=("--without-protonmail")
       exec "${reexec[@]}"
     fi
   fi
@@ -1283,6 +1369,30 @@ cmd_install() {
     printf "\n"
     info "Setting up LLM API Gateway UI"
     _install_gateway || warn "Gateway setup incomplete"
+  fi
+
+  # ── ProtonMail SMTP bridge (hydroxide) ───────────────────────────────────
+  # Only relevant when gateway is installed (gateway uses it for OTP emails).
+  # Auto-detect: if hydroxide is already installed, default to yes.
+  if [ -z "$proton_mode" ] && command -v hydroxide &>/dev/null; then
+    proton_mode="yes"
+  fi
+  if [ -z "$proton_mode" ] && [ -d "$HOME/go/bin" ] && [ -x "$HOME/go/bin/hydroxide" ]; then
+    proton_mode="yes"
+  fi
+
+  # Prompt if gateway is enabled and proton not yet decided.
+  if [ -z "$proton_mode" ] && [ "$gateway_mode" = "yes" ] && is_interactive; then
+    printf "\n  Set up ProtonMail SMTP bridge (hydroxide) for OTP emails? [y/N] "
+    local ans_proton
+    read -r ans_proton </dev/tty || ans_proton="n"
+    case "$ans_proton" in [yY]*) proton_mode="yes" ;; *) proton_mode="no" ;; esac
+  fi
+
+  if [ "$proton_mode" = "yes" ]; then
+    printf "\n"
+    info "Setting up ProtonMail SMTP bridge"
+    _install_protonmail || warn "ProtonMail bridge setup incomplete"
   fi
 
   # Ask to restart if service is running
@@ -2044,6 +2154,31 @@ _uninstall_transcription() {
   [ "$found" -eq 0 ] && printf "  Not installed.\n\n"
 }
 
+_uninstall_protonmail() {
+  printf "\n  \033[1mProtonMail bridge (hydroxide)\033[0m\n"
+
+  if ! command -v hydroxide &>/dev/null; then
+    export PATH="$HOME/go/bin:$PATH"
+  fi
+
+  if ! command -v hydroxide &>/dev/null; then
+    printf "  Not installed.\n\n"
+    return
+  fi
+
+  # Check if running
+  if _port_in_use 1025; then
+    printf "  SMTP bridge running on port 1025. Stop it:\n\n"
+    printf "      pkill hydroxide\n\n"
+  else
+    printf "  Not running.\n\n"
+  fi
+
+  printf "  Uninstall:\n\n"
+  printf "      rm -f \$(which hydroxide)\n"
+  printf "      rm -rf ~/.config/hydroxide\n\n"
+}
+
 cmd_uninstall() {
   load_env
   trap '_trap_cancelled "Uninstall cancelled."' INT TERM
@@ -2058,6 +2193,7 @@ cmd_uninstall() {
     printf "  4) transcription  faster-whisper-server stop/uninstall guide\n"
     printf "  5) searxng        SearXNG search server stop/remove\n"
     printf "  6) gateway        Gateway UI stop/remove guide\n"
+    printf "  7) protonmail     ProtonMail bridge (hydroxide) stop/uninstall guide\n"
     printf "\033[2m  ──\033[0m\n"
     printf "  a) all            All of the above\n"
     printf "  q) cancel\n\n"
@@ -2071,6 +2207,7 @@ cmd_uninstall() {
       4) target="transcription" ;;
       5) target="searxng" ;;
       6) target="gateway" ;;
+      7) target="protonmail" ;;
       a|A) target="all" ;;
       q|Q|"") trap - INT TERM; return 0 ;;
     esac
@@ -2093,6 +2230,9 @@ cmd_uninstall() {
     gateway)
       printf "\033[1mUninstall — Gateway UI\033[0m\n"
       _uninstall_gateway ;;
+    protonmail)
+      printf "\033[1mUninstall — ProtonMail bridge\033[0m\n"
+      _uninstall_protonmail ;;
     all)
       info "Stopping and removing proxy service ..."
       _uninstall_service
@@ -2105,15 +2245,32 @@ cmd_uninstall() {
       printf "\n\033[1mSearXNG search server\033[0m\n"
       _uninstall_searxng
       printf "\n\033[1mGateway UI\033[0m\n"
-      _uninstall_gateway ;;
+      _uninstall_gateway
+      printf "\n\033[1mProtonMail bridge\033[0m\n"
+      _uninstall_protonmail ;;
     *)
       error "Unknown target: $target"
-      printf "  Usage: litellmctl uninstall [service|db|embedding|transcription|searxng|gateway]\n"
+      printf "  Usage: litellmctl uninstall [service|db|embedding|transcription|searxng|gateway|protonmail]\n"
       trap - INT TERM
       exit 1 ;;
   esac
 
   trap - INT TERM
+}
+
+# _port_in_use <port>
+# Returns 0 if something is listening on the given port.  Works on macOS and Linux.
+_port_in_use() {
+  local port="$1"
+  if command -v lsof &>/dev/null; then
+    lsof -i :"$port" &>/dev/null 2>&1
+  elif command -v ss &>/dev/null; then
+    ss -tlnH "sport = :$port" 2>/dev/null | grep -q .
+  elif command -v netstat &>/dev/null; then
+    netstat -tlnp 2>/dev/null | grep -q ":${port} "
+  else
+    return 1
+  fi
 }
 
 # _proxy_http_check <url> [timeout_secs]
@@ -2393,6 +2550,7 @@ $(printf "\033[1mCommands:\033[0m")
   install [--with-db|--without-db] [--with-local|--without-local]
           [--with-embedding|--without-embedding] [--with-transcription|--without-transcription]
           [--with-searxng|--without-searxng] [--with-gateway|--without-gateway]
+          [--with-protonmail|--without-protonmail]
                      Install / rebuild LiteLLM (prompts for DB + local server setup)
   init-env             Detect auth files and update .env with correct paths
   auth chatgpt         Login to ChatGPT / Codex (browser PKCE)
@@ -2412,7 +2570,7 @@ $(printf "\033[1mCommands:\033[0m")
   local [status]       Check local inference server reachability
   gateway [start|stop|restart|status|logs]
                      Manage LLM API Gateway UI (web dashboard)
-  uninstall [service|db|embedding|transcription|searxng|gateway]
+  uninstall [service|db|embedding|transcription|searxng|gateway|protonmail]
                      Stop and remove the proxy service, database config, or local servers
   toggle-claude        Toggle Claude Code between direct API and proxy
   setup-completions    Add litellmctl to your shell
