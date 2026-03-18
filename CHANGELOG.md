@@ -2,6 +2,41 @@
 
 All notable changes to litellmctl are documented here.
 
+## [1.1.0] - 2026-03-18
+
+### Breaking / Architecture
+
+- `bin/litellmctl` replaced with thin bash shim (~30 lines) + `bin/lib/` Python package
+- `bin/auth` (1,487-line Python monolith) removed - logic moved to `bin/lib/auth/`
+- `bin/wizard` (822-line Python monolith) removed - logic moved to `bin/lib/wizard/`
+- `bin/toggle-claude` (jq-dependent bash) removed - logic moved to `bin/lib/commands/toggle_claude.py`
+
+### Interactive Menu
+
+- questionary-based menu with custom style (cyan pointer, green selection, dark separators)
+- Dynamic state-aware choices (start disabled when proxy running; stop/restart/logs disabled when stopped)
+- Proxy state shown inline in header (e.g., `litellmctl  proxy running :4040`)
+- `>` prompt with arrow-key instruction hint
+- Auth submenu with login/manage sections and `back` option
+
+### New Commands / Flags
+
+- `litellmctl gateway start/stop/restart/status/logs` - manage LLM API Gateway UI
+- `litellmctl install --with-protonmail / --without-protonmail` flag
+- ProtonMail (hydroxide) install/uninstall support
+
+### Improvements
+
+- `toggle-claude` no longer requires `jq` (pure Python reads/writes `~/.claude/settings.json`)
+- PYTHONPATH fix: `litellmctl` shim sets `PYTHONPATH=$BIN_DIR` so `python3 -m lib` works from any directory
+- pip install now includes `pytest` + `pytest-timeout` for testing
+
+### Tests
+
+- 87 pytest tests in `bin/tests/`
+- pytest.ini: `testpaths = tests`, `pythonpath = .`, `timeout = 10`
+- Coverage: env, completions, DB URL parsing, PKCE/JWT (auth/core), wizard models, Typer CLI routing, interactive menu with mocked questionary
+
 ## [1.0.0] - 2026-03-05
 
 First stable release. Full-featured personal LiteLLM proxy with OAuth providers,

@@ -45,6 +45,25 @@ each invocation regenerates the config from scratch (after backup). Provider
 templates live in `templates/*.yaml` and update automatically with
 `litellmctl update`. Edit or add YAML files there to customise providers.
 
+## Running tests
+
+litellmctl uses pytest for comprehensive test coverage:
+
+```bash
+cd ~/.litellm/bin
+python3 -m pytest           # all 87 tests
+python3 -m pytest tests/test_auth_core.py  # specific module
+```
+
+**Test coverage includes:**
+- Environment variable handling and path resolution
+- Bash/zsh tab completion functions
+- Database URL parsing and connection checks
+- OAuth core logic (PKCE, JWT, token refresh)
+- Wizard model selection and template loading
+- Typer CLI routing and command parsing
+- Interactive menu with mocked questionary
+
 ### Manual install (alternative)
 
 ```bash
@@ -79,6 +98,13 @@ litellmctl auth refresh <p>             Refresh token for chatgpt, gemini, qwen,
 litellmctl auth export [p...]           Copy credentials as a paste-able transfer script
 litellmctl auth import                  Read credentials from stdin
 litellmctl auth status                  Show token expiry info
+litellmctl gateway start/stop/restart/status/logs
+                                        Manage LLM API Gateway UI
+litellmctl install [--with-db|--without-db] [--with-local|--without-local]
+                   [--with- embedding|--without-embedding]
+                   [--with-transcription|--without-transcription]
+                   [--with-protonmail|--without-protonmail]
+                                        Install / rebuild LiteLLM (prompts for DB + local server setup)
 litellmctl start [--port N]             Start proxy as background service (auto-start on boot)
 litellmctl stop                         Stop the proxy service
 litellmctl restart                      Restart the proxy service
@@ -86,9 +112,9 @@ litellmctl logs                         Tail proxy logs
 litellmctl proxy [--port N]             Start proxy in foreground (for debugging)
 litellmctl status                       Auth + proxy + local servers + database status at a glance
 litellmctl local [status]               Check local inference server reachability
-litellmctl uninstall [service|db|embedding|transcription]
-                                        Stop and remove the proxy service, DB config, or local servers
-litellmctl toggle-claude                Toggle Claude Code between direct API and proxy
+litellmctl uninstall [service|db|embedding|transcription|gateway|protonmail]
+                                        Stop and remove the proxy service, DB config, local servers, gateway, or ProtonMail
+litellmctl toggle-claude                Toggle Claude Code between direct API and proxy (pure Python, no jq required)
 litellmctl setup-completions            Add litellmctl to your shell (alias + tab completion)
 ```
 
@@ -162,11 +188,18 @@ authenticating, either:
 .litellm/
 ├── install.sh          One-line curl installer (bash)
 ├── bin/
-│   ├── litellmctl      CLI runner (bash, with tab-completion)
-│   ├── auth            OAuth login & refresh (python)
-│   ├── wizard          Config wizard, loads templates/ (python)
-│   ├── install         Venv + editable pip install (bash)
-│   └── toggle-claude   Toggle Claude Code between direct API and proxy
+│   ├── litellmctl          CLI shim (~30 lines bash): activates venv, runs python3 -m lib
+│   ├── install             Venv + editable pip install (bash, pre-Python bootstrap)
+│   ├── lib/                Python package (all CLI logic)
+│   │   ├── __main__.py     Entry: no-args+TTY → interactive menu, else → Typer CLI
+│   │   ├── cli.py          Typer app (all commands + gateway subcommand group)
+│   │   ├── interactive.py  questionary-based menu with dynamic state-aware choices
+│   │   ├── common/         Shared: paths, env, formatting (Rich), platform, network, process
+│   │   ├── commands/       service, status, install, local, db, gateway, searxng,
+│   │   │                   protonmail, uninstall, init_env, completions, toggle_claude
+│   │   ├── auth/           chatgpt, gemini, qwen, kimi, transfer, status, cli
+│   │   └── wizard/         core, providers, models, config_gen, prompts
+│   ├── tests/              87 pytest tests (pytest.ini: testpaths=tests, pythonpath=.)
 ├── templates/          Provider & defaults YAML for the wizard
 │   ├── defaults.yaml   Tiers, fallback order, router/litellm/general settings
 │   ├── anthropic.yaml  Anthropic (Claude) — primary
@@ -186,13 +219,14 @@ authenticating, either:
 ├── auth.gemini_cli.json Gemini CLI OAuth tokens (git-ignored, auto-refreshed)
 ├── auth.qwen_portal.json Qwen Portal OAuth tokens (git-ignored, auto-refreshed)
 ├── auth.kimi_code.json Kimi Code OAuth tokens (git-ignored, auto-refreshed)
-├── logs/               Service logs (git-ignored)
-└── venv/               Python virtualenv (git-ignored)
+├── logs/                 Service logs (git-ignored)
+├── venv/                 Python virtualenv (git-ignored)
+└── lib/                  Python package (binary) - copied during install
 ```
 
 ## Models & Fallbacks
 
-Three consumer-facing tiers, each with a fallback chain:
+Two consumer-facing tiers, each with a fallback chain:
 
 | Tier   | Fallback 1 (Codex)          | Fallback 2 (Alibaba Cloud)        | Fallback 3 (Kimi Code)           | Fallback 4 (MiniMax)                | Fallback 5 (Z.AI)   |
 | ------ | --------------------------- | --------------------------------- | -------------------------------- | ----------------------------------- | ------------------- |
