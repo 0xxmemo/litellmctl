@@ -327,9 +327,84 @@ litellmctl status          # combined: auth + proxy + local + DB
 litellmctl uninstall                 # service + DB config + local servers
 litellmctl uninstall embedding       # Ollama stop/uninstall guide
 litellmctl uninstall transcription   # faster-whisper-server stop/uninstall guide
+litellmctl uninstall searxng         # SearXNG search server stop/remove
 litellmctl uninstall db              # remove DB config from .env
 litellmctl uninstall service         # stop and remove launchd/systemd service
 ```
+
+## SearXNG Search Server
+
+The fork adds optional integration with a self-hosted SearXNG instance — a privacy-respecting
+metasearch engine that aggregates results from multiple search engines without tracking.
+
+### Setup
+
+SearXNG setup is part of `litellmctl install`:
+
+```bash
+litellmctl install --with-searxng   # starts SearXNG Docker container
+```
+
+Or interactively — `install` will prompt after the local inference server phase:
+
+```
+Set up SearXNG search server (privacy-respecting metasearch)? [y/N]
+```
+
+**SearXNG (Docker)** — default URL: `http://localhost:8888`.
+Override port with `SEARXNG_PORT` in `.env` (default: 8888).
+
+### Usage
+
+Once running, SearXNG provides:
+
+- **Web UI**: http://localhost:8888
+- **Search API**: http://localhost:8888/search
+
+```bash
+# Direct API search
+curl "http://localhost:8888/search?q=your+query&format=json"
+
+# Using jq to format results
+curl "http://localhost:8888/search?q=AI+news&format=json" | jq '.results[:5] | .[] | {title, url}'
+```
+
+### Status
+
+```bash
+litellmctl status          # shows SearXNG status alongside other services
+```
+
+### Uninstall
+
+```bash
+litellmctl uninstall searxng   # stop and remove SearXNG container
+```
+
+### Configuration
+
+SearXNG runs as a Docker container with the following defaults:
+
+| Variable | Value | Description |
+|---|---|---|
+| Container name | `searxng` | Docker container name |
+| Port | `8888` | Web UI and API port |
+| Image | `searxng/searxng:latest` | Official SearXNG Docker image |
+| Restart policy | `unless-stopped` | Auto-restart on reboot |
+
+To customize the port, add to `.env`:
+
+```
+SEARXNG_PORT=9999
+```
+
+### Privacy Benefits
+
+- No search query logging or tracking
+- Aggregates results from 70+ search engines
+- Removes tracking parameters from URLs
+- No ads or personalization bubbles
+- Self-hosted — no external API dependencies
 
 ## Config API Endpoints
 

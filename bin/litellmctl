@@ -687,6 +687,116 @@ _install_transcription_server() {
   fi
 }
 
+# ── SearXNG search server ───────────────────────────────────────────────────
+
+_install_searxng() {
+  local searxng_port="${SEARXNG_PORT:-8888}"
+  local searxng_container="searxng"
+
+  if ! command -v docker &>/dev/null; then
+    warn "Docker not found — SearXNG requires Docker to run."
+    warn "Install Docker: https://docs.docker.com/get-docker/"
+    return 1
+  fi
+
+  info "Setting up SearXNG search server"
+
+  # Check if container is already running
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${searxng_container}$"; then
+    info "SearXNG container already running on port ${searxng_port}"
+    return 0
+  fi
+
+  # Check if container exists but is stopped
+  if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${searxng_container}$"; then
+    info "Starting existing SearXNG container ..."
+    docker start "${searxng_container}" || {
+      warn "Failed to start SearXNG container"
+      return 1
+    }
+    sleep 3
+  else
+    info "Creating SearXNG container ..."
+    docker run -d \
+      --name "${searxng_container}" \
+      --restart unless-stopped \
+      -p "${searxng_port}:8080" \
+      -e SEARXNG_BASE_URL="http://localhost:${searxng_port}/" \
+      searxng/searxng:latest || {
+      warn "Failed to create SearXNG container"
+      return 1
+    }
+    sleep 5
+  fi
+
+  # Verify container is responding
+  if _proxy_http_check "http://localhost:${searxng_port}/" 5; then
+    info "SearXNG started successfully at http://localhost:${searxng_port}"
+    info "Web UI: http://localhost:${searxng_port}"
+    info "API endpoint: http://localhost:${searxng_port}/search"
+  else
+    warn "SearXNG container started but not responding yet"
+    warn "Check logs: docker logs ${searxng_container}"
+  fi
+}
+
+_uninstall_searxng() {
+  local searxng_port="${SEARXNG_PORT:-8888}"
+  local searxng_container="searxng"
+
+  printf "\n  \033[1mSearXNG (search server)\033[0m\n"
+
+  if ! command -v docker &>/dev/null; then
+    printf "  Docker not installed.\n\n"
+    return
+  fi
+
+  if docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${searxng_container}$"; then
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${searxng_container}$"; then
+      printf "  Running at http://localhost:%s. Stop it:\n\n" "${searxng_port}"
+      printf "      docker stop %s\n\n" "${searxng_container}"
+    else
+      printf "  Container exists but is stopped.\n\n"
+    fi
+    printf "  Remove container:\n\n"
+    printf "      docker stop %s && docker rm %s\n\n" "${searxng_container}" "${searxng_container}"
+  else
+    printf "  Not installed.\n\n"
+  fi
+}
+
+_searxng_status() {
+  local searxng_port="${SEARXNG_PORT:-8888}"
+  local searxng_container="searxng"
+
+  printf "\033[1mSearXNG Search\033[0m\n"
+
+  if ! command -v docker &>/dev/null; then
+    printf "  Docker not installed\n\n"
+    return
+  fi
+
+  if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^${searxng_container}$"; then
+    if _proxy_http_check "http://localhost:${searxng_port}/" 3; then
+      printf "  Status:   \033[32mrunning\033[0m\n"
+      printf "  Port:     %s\n" "${searxng_port}"
+      printf "  Web UI:   http://localhost:%s\n" "${searxng_port}"
+      printf "  API:      http://localhost:%s/search\n" "${searxng_port}"
+    else
+      printf "  Status:   \033[33mrunning but not responding\033[0m\n"
+      printf "  Port:     %s\n" "${searxng_port}"
+      printf "  \033[2mCheck: docker logs %s\033[0m\n" "${searxng_container}"
+    fi
+  elif docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${searxng_container}$"; then
+    printf "  Status:   \033[33mstopped\033[0m\n"
+    printf "  \033[2mStart: docker start %s\033[0m\n" "${searxng_container}"
+  else
+    printf "  Status:   \033[33mnot installed\033[0m\n"
+    printf "  \033[2mInstall: litellmctl install --with-searxng\033[0m\n"
+  fi
+  printf "\n"
+}
+
 # ── Interrupt helpers ────────────────────────────────────────────────────────
 
 _trap_cancelled() {
@@ -772,6 +882,7 @@ cmd_install() {
   local db_mode="${LITELLM_INSTALL_DB_SETUP:-}"       # yes|no|empty(auto)
   local embed_mode="${LITELLM_INSTALL_EMBED_SETUP:-}"  # yes|no|empty(auto)
   local transcr_mode="${LITELLM_INSTALL_TRANSCR_SETUP:-}" # yes|no|empty(auto)
+  local searxng_mode="${LITELLM_INSTALL_SEARXNG_SETUP:-}" # yes|no|empty(auto)
   local db_mode_flag=""
   local post_sync_only=false
   local env_file="$PROJECT_DIR/.env"
@@ -788,6 +899,8 @@ cmd_install() {
       --without-embedding)       embed_mode="no"; shift ;;
       --with-transcription)      transcr_mode="yes"; shift ;;
       --without-transcription)   transcr_mode="no"; shift ;;
+      --with-searxng)            searxng_mode="yes"; shift ;;
+      --without-searxng)         searxng_mode="no"; shift ;;
       --with-local)              embed_mode="yes"; transcr_mode="yes"; shift ;;
       --without-local)           embed_mode="no"; transcr_mode="no"; shift ;;
       --_post-sync)              post_sync_only=true; shift ;;
@@ -811,6 +924,8 @@ cmd_install() {
       [ "$embed_mode"  = "no"  ]   && reexec+=("--without-embedding")
       [ "$transcr_mode" = "yes" ]  && reexec+=("--with-transcription")
       [ "$transcr_mode" = "no"  ]  && reexec+=("--without-transcription")
+      [ "$searxng_mode" = "yes" ]  && reexec+=("--with-searxng")
+      [ "$searxng_mode" = "no"  ]  && reexec+=("--without-searxng")
       exec "${reexec[@]}"
     fi
   fi
@@ -879,6 +994,29 @@ cmd_install() {
     info "Setting up local inference servers"
     [ "$embed_mode"   = "yes" ] && _install_embedding
     [ "$transcr_mode" = "yes" ] && _install_transcription_server
+  fi
+
+  # ── SearXNG search server ─────────────────────────────────────────────────
+  # Auto-detect: if Docker is installed and searxng container exists, default to yes.
+  export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+  if [ -z "$searxng_mode" ] && command -v docker &>/dev/null; then
+    if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^searxng$"; then
+      searxng_mode="yes"
+    fi
+  fi
+
+  # Prompt for SearXNG setup if not decided and interactive.
+  if [ -z "$searxng_mode" ] && is_interactive; then
+    printf "\n  Set up SearXNG search server (privacy-respecting metasearch)? [y/N] "
+    local ans_searxng
+    read -r ans_searxng </dev/tty || ans_searxng="n"
+    case "$ans_searxng" in [yY]*) searxng_mode="yes" ;; *) searxng_mode="no" ;; esac
+  fi
+
+  if [ "$searxng_mode" = "yes" ]; then
+    printf "\n"
+    info "Setting up SearXNG search server"
+    _install_searxng || warn "SearXNG setup incomplete"
   fi
 
   # Ask to restart if service is running
@@ -1652,6 +1790,7 @@ cmd_uninstall() {
     printf "  2) db             Remove database config from .env\n"
     printf "  3) embedding      Ollama stop/uninstall guide\n"
     printf "  4) transcription  faster-whisper-server stop/uninstall guide\n"
+    printf "  5) searxng        SearXNG search server stop/remove\n"
     printf "\033[2m  ──\033[0m\n"
     printf "  a) all            All of the above\n"
     printf "  q) cancel\n\n"
@@ -1663,6 +1802,7 @@ cmd_uninstall() {
       2) target="db" ;;
       3) target="embedding" ;;
       4) target="transcription" ;;
+      5) target="searxng" ;;
       a|A) target="all" ;;
       q|Q|"") trap - INT TERM; return 0 ;;
     esac
@@ -1679,6 +1819,9 @@ cmd_uninstall() {
     transcription)
       printf "\033[1mUninstall — transcription\033[0m\n"
       _uninstall_transcription ;;
+    searxng)
+      printf "\033[1mUninstall — SearXNG\033[0m\n"
+      _uninstall_searxng ;;
     all)
       info "Stopping and removing proxy service ..."
       _uninstall_service
@@ -1687,10 +1830,12 @@ cmd_uninstall() {
       _uninstall_db
       printf "\n\033[1mLocal inference servers\033[0m"
       _uninstall_embedding
-      _uninstall_transcription ;;
+      _uninstall_transcription
+      printf "\n\033[1mSearXNG search server\033[0m\n"
+      _uninstall_searxng ;;
     *)
       error "Unknown target: $target"
-      printf "  Usage: litellmctl uninstall [service|db|embedding|transcription]\n"
+      printf "  Usage: litellmctl uninstall [service|db|embedding|transcription|searxng]\n"
       trap - INT TERM
       exit 1 ;;
   esac
@@ -1895,6 +2040,7 @@ cmd_status() {
 
   _local_status
   _db_status
+  _searxng_status
 }
 
 cmd_wizard() {
@@ -1970,6 +2116,7 @@ $(printf "\033[1mCommands:\033[0m")
   wizard               Interactive config.yaml generator (providers, tiers, fallbacks)
   install [--with-db|--without-db] [--with-local|--without-local]
           [--with-embedding|--without-embedding] [--with-transcription|--without-transcription]
+          [--with-searxng|--without-searxng]
                      Install / rebuild LiteLLM (prompts for DB + local server setup)
   init-env             Detect auth files and update .env with correct paths
   auth chatgpt         Login to ChatGPT / Codex (browser PKCE)
@@ -1987,7 +2134,7 @@ $(printf "\033[1mCommands:\033[0m")
   proxy [--port N]     Start proxy in foreground (for debugging)
   status               Show auth + proxy + local server status
   local [status]       Check local inference server reachability
-  uninstall [service|db|embedding|transcription]
+  uninstall [service|db|embedding|transcription|searxng]
                      Stop and remove the proxy service, database config, or local servers
   toggle-claude        Toggle Claude Code between direct API and proxy
   setup-completions    Add litellmctl to your shell
