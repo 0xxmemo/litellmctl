@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "bun run --hot index.ts",
     "start": "bun run index.ts",
-    "build": "bun build frontend.tsx --outdir ./dist --minify",
+    "build": "bun build frontend.tsx --outdir ./dist --minify && bunx @tailwindcss/cli -i ./src/index.css -o ./dist/frontend.css --minify",
     "test": "bun test",
     "type-check": "bunx tsgo --noEmit --pretty",
     "watch": "bun run script/tsgo-watch.ts"
