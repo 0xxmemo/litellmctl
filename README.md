@@ -45,6 +45,25 @@ each invocation regenerates the config from scratch (after backup). Provider
 templates live in `templates/*.yaml` and update automatically with
 `litellmctl update`. Edit or add YAML files there to customise providers.
 
+## Running tests
+
+litellmctl uses pytest for comprehensive test coverage:
+
+```bash
+cd ~/.litellm/bin
+python3 -m pytest           # all 87 tests
+python3 -m pytest tests/test_auth_core.py  # specific module
+```
+
+**Test coverage includes:**
+- Environment variable handling and path resolution
+- Bash/zsh tab completion functions
+- Database URL parsing and connection checks
+- OAuth core logic (PKCE, JWT, token refresh)
+- Wizard model selection and template loading
+- Typer CLI routing and command parsing
+- Interactive menu with mocked questionary
+
 ### Manual install (alternative)
 
 ```bash
@@ -79,6 +98,13 @@ litellmctl auth refresh <p>             Refresh token for chatgpt, gemini, qwen,
 litellmctl auth export [p...]           Copy credentials as a paste-able transfer script
 litellmctl auth import                  Read credentials from stdin
 litellmctl auth status                  Show token expiry info
+litellmctl gateway start/stop/restart/status/logs
+                                        Manage LLM API Gateway UI
+litellmctl install [--with-db|--without-db] [--with-local|--without-local]
+                   [--with- embedding|--without-embedding]
+                   [--with-transcription|--without-transcription]
+                   [--with-protonmail|--without-protonmail]
+                                        Install / rebuild LiteLLM (prompts for DB + local server setup)
 litellmctl start [--port N]             Start proxy as background service (auto-start on boot)
 litellmctl stop                         Stop the proxy service
 litellmctl restart                      Restart the proxy service
@@ -86,9 +112,9 @@ litellmctl logs                         Tail proxy logs
 litellmctl proxy [--port N]             Start proxy in foreground (for debugging)
 litellmctl status                       Auth + proxy + local servers + database status at a glance
 litellmctl local [status]               Check local inference server reachability
-litellmctl uninstall [service|db|embedding|transcription]
-                                        Stop and remove the proxy service, DB config, or local servers
-litellmctl toggle-claude                Toggle Claude Code between direct API and proxy
+litellmctl uninstall [service|db|embedding|transcription|gateway|protonmail]
+                                        Stop and remove the proxy service, DB config, local servers, gateway, or ProtonMail
+litellmctl toggle-claude                Toggle Claude Code between direct API and proxy (pure Python, no jq required)
 litellmctl setup-completions            Add litellmctl to your shell (alias + tab completion)
 ```
 
@@ -162,11 +188,18 @@ authenticating, either:
 .litellm/
 ├── install.sh          One-line curl installer (bash)
 ├── bin/
-│   ├── litellmctl      CLI runner (bash, with tab-completion)
-│   ├── auth            OAuth login & refresh (python)
-│   ├── wizard          Config wizard, loads templates/ (python)
-│   ├── install         Venv + editable pip install (bash)
-│   └── toggle-claude   Toggle Claude Code between direct API and proxy
+│   ├── litellmctl          CLI shim (~30 lines bash): activates venv, runs python3 -m lib
+│   ├── install             Venv + editable pip install (bash, pre-Python bootstrap)
+│   ├── lib/                Python package (all CLI logic)
+│   │   ├── __main__.py     Entry: no-args+TTY → interactive menu, else → Typer CLI
+│   │   ├── cli.py          Typer app (all commands + gateway subcommand group)
+│   │   ├── interactive.py  questionary-based menu with dynamic state-aware choices
+│   │   ├── common/         Shared: paths, env, formatting (Rich), platform, network, process
+│   │   ├── commands/       service, status, install, local, db, gateway, searxng,
+│   │   │                   protonmail, uninstall, init_env, completions, toggle_claude
+│   │   ├── auth/           chatgpt, gemini, qwen, kimi, transfer, status, cli
+│   │   └── wizard/         core, providers, models, config_gen, prompts
+│   ├── tests/              87 pytest tests (pytest.ini: testpaths=tests, pythonpath=.)
 ├── templates/          Provider & defaults YAML for the wizard
 │   ├── defaults.yaml   Tiers, fallback order, router/litellm/general settings
 │   ├── anthropic.yaml  Anthropic (Claude) — primary
@@ -186,13 +219,14 @@ authenticating, either:
 ├── auth.gemini_cli.json Gemini CLI OAuth tokens (git-ignored, auto-refreshed)
 ├── auth.qwen_portal.json Qwen Portal OAuth tokens (git-ignored, auto-refreshed)
 ├── auth.kimi_code.json Kimi Code OAuth tokens (git-ignored, auto-refreshed)
-├── logs/               Service logs (git-ignored)
-└── venv/               Python virtualenv (git-ignored)
+├── logs/                 Service logs (git-ignored)
+├── venv/                 Python virtualenv (git-ignored)
+└── lib/                  Python package (binary) - copied during install
 ```
 
 ## Models & Fallbacks
 
-Three consumer-facing tiers, each with a fallback chain:
+Two consumer-facing tiers, each with a fallback chain:
 
 | Tier   | Fallback 1 (Codex)          | Fallback 2 (Alibaba Cloud)        | Fallback 3 (Kimi Code)           | Fallback 4 (MiniMax)                | Fallback 5 (Z.AI)   |
 | ------ | --------------------------- | --------------------------------- | -------------------------------- | ----------------------------------- | ------------------- |
@@ -327,9 +361,84 @@ litellmctl status          # combined: auth + proxy + local + DB
 litellmctl uninstall                 # service + DB config + local servers
 litellmctl uninstall embedding       # Ollama stop/uninstall guide
 litellmctl uninstall transcription   # faster-whisper-server stop/uninstall guide
+litellmctl uninstall searxng         # SearXNG search server stop/remove
 litellmctl uninstall db              # remove DB config from .env
 litellmctl uninstall service         # stop and remove launchd/systemd service
 ```
+
+## SearXNG Search Server
+
+The fork adds optional integration with a self-hosted SearXNG instance — a privacy-respecting
+metasearch engine that aggregates results from multiple search engines without tracking.
+
+### Setup
+
+SearXNG setup is part of `litellmctl install`:
+
+```bash
+litellmctl install --with-searxng   # starts SearXNG Docker container
+```
+
+Or interactively — `install` will prompt after the local inference server phase:
+
+```
+Set up SearXNG search server (privacy-respecting metasearch)? [y/N]
+```
+
+**SearXNG (Docker)** — default URL: `http://localhost:8888`.
+Override port with `SEARXNG_PORT` in `.env` (default: 8888).
+
+### Usage
+
+Once running, SearXNG provides:
+
+- **Web UI**: http://localhost:8888
+- **Search API**: http://localhost:8888/search
+
+```bash
+# Direct API search
+curl "http://localhost:8888/search?q=your+query&format=json"
+
+# Using jq to format results
+curl "http://localhost:8888/search?q=AI+news&format=json" | jq '.results[:5] | .[] | {title, url}'
+```
+
+### Status
+
+```bash
+litellmctl status          # shows SearXNG status alongside other services
+```
+
+### Uninstall
+
+```bash
+litellmctl uninstall searxng   # stop and remove SearXNG container
+```
+
+### Configuration
+
+SearXNG runs as a Docker container with the following defaults:
+
+| Variable | Value | Description |
+|---|---|---|
+| Container name | `searxng` | Docker container name |
+| Port | `8888` | Web UI and API port |
+| Image | `searxng/searxng:latest` | Official SearXNG Docker image |
+| Restart policy | `unless-stopped` | Auto-restart on reboot |
+
+To customize the port, add to `.env`:
+
+```
+SEARXNG_PORT=9999
+```
+
+### Privacy Benefits
+
+- No search query logging or tracking
+- Aggregates results from 70+ search engines
+- Removes tracking parameters from URLs
+- No ads or personalization bubbles
+- Self-hosted — no external API dependencies
 
 ## Config API Endpoints
 

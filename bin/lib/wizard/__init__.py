@@ -1,0 +1,1 @@
+"""Interactive config.yaml generator."""

@@ -1,0 +1,6 @@
+# Bun configuration for LLM API Gateway
+# Loads environment variables from root .env file
+
+[env]
+# Load all env vars from parent directory .env
+root = ".."

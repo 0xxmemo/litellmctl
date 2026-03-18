@@ -1,0 +1,169 @@
+import { useState, useEffect } from 'react'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { Users } from 'lucide-react'
+
+interface AdminSectionProps {
+  user?: {
+    email: string
+    role: 'admin' | 'user' | 'guest'
+  }
+}
+
+interface UserRecord {
+  email: string
+  role: 'admin' | 'user' | 'guest'
+  createdAt: string
+  approvedAt?: string
+}
+
+export function AdminSection({ user }: AdminSectionProps) {
+  const [users, setUsers] = useState<UserRecord[]>([])
+  const [_loading, setLoading] = useState(true)
+  const [actionInProgress, setActionInProgress] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (user?.role !== 'admin') return
+
+    const loadData = async () => {
+      try {
+        // Fetch all users for approval
+        const usersRes = await fetch('/api/admin/users', { 
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' }
+        })
+        if (usersRes.ok) {
+          const usersData = await usersRes.json()
+          setUsers(usersData.users || [])
+        }
+      } catch (error) {
+        console.error('Failed to load admin data:', error)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadData()
+  }, [user])
+
+  const handleApprove = async (email: string) => {
+    setActionInProgress(email)
+    try {
+      const res = await fetch('/api/admin/approve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email })
+      })
+      
+      if (res.ok) {
+        // Update local state
+        setUsers(users.map(u => 
+          u.email === email 
+            ? { ...u, role: 'user' as const, approvedAt: new Date().toISOString() }
+            : u
+        ))
+      }
+    } catch (error) {
+      console.error('Failed to approve user:', error)
+    } finally {
+      setActionInProgress(null)
+    }
+  }
+
+  const handleReject = async (email: string) => {
+    setActionInProgress(email)
+    try {
+      const res = await fetch('/api/admin/reject', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email })
+      })
+      
+      if (res.ok) {
+        // Remove from list
+        setUsers(users.filter(u => u.email !== email))
+      }
+    } catch (error) {
+      console.error('Failed to reject user:', error)
+    } finally {
+      setActionInProgress(null)
+    }
+  }
+
+  if (user?.role !== 'admin') return null
+
+  const pendingUsers = users.filter(u => u.role === 'guest')
+
+  return (
+    <div className="space-y-6">
+      {/* Admin Dashboard Header */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Users className="h-5 w-5 text-primary" />
+            User Management
+          </CardTitle>
+          <CardDescription>
+            Approve or reject user access requests
+          </CardDescription>
+        </CardHeader>
+      </Card>
+
+      {/* Pending Approvals */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Pending Approvals</CardTitle>
+          <CardDescription>
+            {pendingUsers.length} {pendingUsers.length === 1 ? 'user' : 'users'} waiting for approval
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {pendingUsers.length > 0 ? (
+            <div className="space-y-4">
+              {pendingUsers.map((userRecord) => (
+                <div 
+                  key={userRecord.email} 
+                  className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 border rounded-lg"
+                >
+                  <div className="flex-1">
+                    <p className="font-medium">{userRecord.email}</p>
+                    <p className="text-sm text-muted-foreground">
+                      Requested: {new Date(userRecord.createdAt).toLocaleDateString()}
+                    </p>
+                  </div>
+                  <div className="flex gap-2 w-full sm:w-auto">
+                    <Button 
+                      size="sm" 
+                      onClick={() => handleApprove(userRecord.email)}
+                      disabled={actionInProgress === userRecord.email}
+                      className="flex-1 sm:flex-none"
+                    >
+                      {actionInProgress === userRecord.email ? '...' : 'Approve'}
+                    </Button>
+                    <Button 
+                      size="sm" 
+                      variant="destructive"
+                      onClick={() => handleReject(userRecord.email)}
+                      disabled={actionInProgress === userRecord.email}
+                      className="flex-1 sm:flex-none"
+                    >
+                      {actionInProgress === userRecord.email ? '...' : 'Reject'}
+                    </Button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center text-muted-foreground py-8">
+              <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
+              <p>No pending approvals</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+    </div>
+  )
+}

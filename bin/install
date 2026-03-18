@@ -258,6 +258,12 @@ info "Installing litellm[proxy] (editable) ..."
 pip install -e "$SUBMODULE_DIR[proxy]" --quiet
 info "litellm installed."
 
+info "Installing CLI dependencies (questionary, typer, rich) ..."
+pip install --quiet questionary typer rich || warn "Some CLI deps failed to install"
+
+info "Installing test dependencies (pytest) ..."
+pip install --quiet pytest pytest-timeout || warn "Could not install pytest; tests will be unavailable"
+
 # Prisma is required for DB migrations triggered by litellmctl start/restart/install.
 # Keep this best-effort so non-DB setups still complete installation.
 info "Ensuring prisma dependency for DB migrations ..."

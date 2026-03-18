@@ -1,0 +1,51 @@
+{
+  "name": "llm-api-gateway",
+  "version": "2.0.0-bun",
+  "type": "module",
+  "packageManager": "bun@1.3.9",
+  "module": "index.ts",
+  "private": true,
+  "scripts": {
+    "dev": "bun run --hot index.ts",
+    "start": "bun run index.ts",
+    "build": "bun build frontend.tsx --outdir ./dist --minify",
+    "test": "bun test",
+    "type-check": "bunx tsgo --noEmit --pretty",
+    "watch": "bun run script/tsgo-watch.ts"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@radix-ui/react-popover": "^1.1.15",
+    "@radix-ui/react-tabs": "^1.1.13",
+    "@tailwindcss/forms": "^0.5.11",
+    "@tailwindcss/typography": "^0.5.19",
+    "@tanstack/react-query": "^5.91.0",
+    "@tanstack/react-router": "^1.167.5",
+    "bcryptjs": "^3.0.3",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "framer-motion": "^12.34.3",
+    "jose": "^6.1.3",
+    "js-yaml": "^4.1.1",
+    "lucide-react": "^0.575.0",
+    "mongodb": "^7.1.0",
+    "nodemailer": "^8.0.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "react-is": "^19.2.4",
+    "recharts": "^3.7.0",
+    "sonner": "^2.0.7",
+    "tailwind-merge": "^3.5.0",
+    "tailwindcss": "^4.2.1"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.11",
+    "@types/node": "^25.5.0",
+    "@types/nodemailer": "^7.0.11",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "typescript": "^5.9.3"
+  }
+}
