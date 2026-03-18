@@ -7,8 +7,8 @@
 
 import { MongoClient } from 'mongodb';
 import { signSession, verifySession, getSessionCookie, extractApiKey } from './lib/auth';
-import { sendOTPCode } from './email-service.js';
-import { generateOTP } from './services/otp.js';
+import { sendOTPCode } from './lib/email-service.js';
+import { generateOTP } from './lib/otp.js';
 import { createHash } from 'crypto';
 
 // ============================================================================
@@ -217,12 +217,43 @@ async function healthHandler() {
 }
 
 // Serve frontend
-async function serveFrontend(path: string) {
-  const filePath = path === '/auth' ? './src/dashboard.html' : './src/dashboard.html';
-  const file = Bun.file(filePath);
+async function serveFrontend() {
+  const file = Bun.file('./index.html');
   return new Response(await file.text(), {
     headers: { 'Content-Type': 'text/html' }
   });
+}
+
+// Serve static files
+async function serveStaticFile(path: string): Promise<Response | null> {
+  const file = Bun.file(`.${path}`);
+  if (await file.exists()) {
+    const contentType = getContentType(path);
+    return new Response(await file.arrayBuffer(), {
+      headers: { 'Content-Type': contentType }
+    });
+  }
+  return null;
+}
+
+function getContentType(path: string): string {
+  const ext = path.split('.').pop()?.toLowerCase();
+  const types: Record<string, string> = {
+    'css': 'text/css',
+    'js': 'application/javascript',
+    'mjs': 'application/javascript',
+    'ts': 'application/typescript',
+    'tsx': 'application/typescript',
+    'html': 'text/html',
+    'json': 'application/json',
+    'png': 'image/png',
+    'jpg': 'image/jpeg',
+    'jpeg': 'image/jpeg',
+    'gif': 'image/gif',
+    'svg': 'image/svg+xml',
+    'ico': 'image/x-icon',
+  };
+  return types[ext || 'text/plain'] || 'text/plain';
 }
 
 // OTP request
@@ -555,6 +586,18 @@ const server = Bun.serve({
   port: PORT,
 
   routes: {
+    // Static files
+    '/public/*': async (req) => {
+      const url = new URL(req.url);
+      const path = url.pathname;
+      const response = await serveStaticFile(path);
+      return response || new Response('Not found', { status: 404 });
+    },
+    '/src/index.css': async (req) => {
+      const response = await serveStaticFile('/src/index.css');
+      return response || new Response('Not found', { status: 404 });
+    },
+
     // Health
     '/api/health': { GET: healthHandler },
 
@@ -583,10 +626,10 @@ const server = Bun.serve({
     '/v1/models': { GET: proxyHandler },
     '/v1/model/info': { GET: proxyHandler },
 
-    // Frontend
-    '/auth': { GET: () => serveFrontend('/auth') },
-    '/dashboard': { GET: () => serveFrontend('/dashboard') },
-    '/dashboard/*': { GET: () => serveFrontend('/dashboard') },
+    // Frontend - serve index.html for all UI routes
+    '/auth': { GET: serveFrontend },
+    '/dashboard': { GET: serveFrontend },
+    '/dashboard/*': { GET: serveFrontend },
 
     // Root
     '/': { GET: () => Response.redirect('/dashboard', 302) },
