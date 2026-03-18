@@ -2672,10 +2672,10 @@ app.get('/*', (c) => {
 // Start server
 console.log('🚀 LLM Gateway - Thin Proxy');
 console.log(`📍 LiteLLM: ${LITELLM_URL}`);
-console.log(`📍 Server: http://localhost:${process.env.PORT || 3000}`);
+console.log(`📍 Server: http://localhost:${process.env.PORT || 14040}`);
 
 serve({
   fetch: app.fetch,
-  port: parseInt(process.env.PORT || '3000'),
+  port: parseInt(process.env.PORT || '14040'),
   hostname: process.env.HOST || '0.0.0.0'
 });

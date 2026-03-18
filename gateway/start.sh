@@ -14,7 +14,7 @@ PID_FILE="${SCRIPT_DIR}/gateway.pid"
 MAX_LOG_SIZE=$((50 * 1024 * 1024))   # 50MB
 MAX_LOG_FILES=5
 RESTART_DELAY=3
-HEALTH_URL="http://localhost:3002/health"
+HEALTH_URL="http://localhost:${PORT:-14040}/health"
 HEALTH_TIMEOUT=10
 
 # ---------------------------------------------------------------------------
@@ -64,9 +64,9 @@ stop_existing() {
 
   # Also free the port if anything else is holding it
   local port_pid
-  port_pid=$(lsof -ti :3002 2>/dev/null || true)
+  port_pid=$(lsof -ti :${PORT:-14040} 2>/dev/null || true)
   if [[ -n "$port_pid" ]]; then
-    warn "Port 3002 held by PID(s): $port_pid — killing…"
+    warn "Port ${PORT:-14040} held by PID(s): $port_pid — killing…"
     echo "$port_pid" | xargs kill -9 2>/dev/null || true
     sleep 1
   fi
