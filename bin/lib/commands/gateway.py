@@ -21,18 +21,28 @@ def _ensure_bun_path() -> None:
 
 def gateway_is_running() -> bool:
     _ensure_bun_path()
-    port = int(os.environ.get("GATEWAY_PORT", "14040"))
-    return http_check(f"http://localhost:{port}/health", timeout=2)
+    port = int(os.environ.get("GATEWAY_PORT", "14041"))
+    return http_check(f"http://localhost:{port}/api/health", timeout=2)
 
 
 def gateway_start() -> None:
     gateway_dir = PROJECT_DIR / "gateway"
-    port = int(os.environ.get("GATEWAY_PORT", "14040"))
 
     if not gateway_dir.exists():
         error(f"Gateway directory not found at {gateway_dir}")
         error("Run 'litellmctl install --with-gateway' to install")
         return
+
+    # Load gateway-local .env first so GATEWAY_PORT is available
+    env_path = gateway_dir / ".env"
+    if env_path.exists():
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#") and "=" in line:
+                k, _, v = line.partition("=")
+                os.environ.setdefault(k.strip(), v.strip())
+
+    port = int(os.environ.get("GATEWAY_PORT", "14041"))
 
     if gateway_is_running():
         info(f"Gateway already running on port {port}")
@@ -44,32 +54,25 @@ def gateway_start() -> None:
         error("Bun not found. Install with: curl -fsSL https://bun.sh/install | bash")
         return
 
-    env_path = gateway_dir / ".env"
-    if env_path.exists():
-        for line in env_path.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, _, v = line.partition("=")
-                os.environ.setdefault(k.strip(), v.strip())
-
     info(f"Starting gateway on port {port} ...")
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_f = open(LOG_DIR / "gateway.log", "a")
     proc = subprocess.Popen(
-        ["bun", "run", "index.js"],
+        ["bun", "run", "index.ts"],
         cwd=str(gateway_dir),
         stdout=log_f, stderr=log_f,
         start_new_session=True,
     )
     (gateway_dir / ".gateway.pid").write_text(str(proc.pid))
-    time.sleep(2)
 
-    if gateway_is_running():
-        info(f"Gateway started (PID {proc.pid})")
-        info(f"Web UI: http://localhost:{port}")
-    else:
-        warn("Gateway started but not responding yet")
-        warn(f"Check logs: tail -f {LOG_DIR}/gateway.log")
+    for _ in range(8):
+        time.sleep(1)
+        if gateway_is_running():
+            info(f"Gateway started (PID {proc.pid})")
+            info(f"Web UI: http://localhost:{port}")
+            return
+    warn("Gateway started but not responding yet")
+    warn(f"Check logs: tail -f {LOG_DIR}/gateway.log")
 
 
 def gateway_stop() -> None:
@@ -91,7 +94,7 @@ def gateway_stop() -> None:
             info("Gateway process not running")
         pid_file.unlink(missing_ok=True)
     else:
-        port = int(os.environ.get("GATEWAY_PORT", "14040"))
+        port = int(os.environ.get("GATEWAY_PORT", "14041"))
         found = False
         for pid in pids_on_port(port):
             try:
@@ -99,7 +102,7 @@ def gateway_stop() -> None:
                     ["ps", "-p", str(pid), "-o", "command="],
                     capture_output=True, text=True,
                 )
-                if any(x in result.stdout for x in ("bun", "node", "index.js")):
+                if any(x in result.stdout for x in ("bun", "node", "index.ts")):
                     os.kill(pid, 9)
                     info(f"Gateway stopped (PID {pid} on port {port})")
                     found = True
@@ -110,7 +113,7 @@ def gateway_stop() -> None:
 
 
 def gateway_status() -> None:
-    port = int(os.environ.get("GATEWAY_PORT", "14040"))
+    port = int(os.environ.get("GATEWAY_PORT", "14041"))
     console.print("[bold]Gateway UI[/]")
     if not (PROJECT_DIR / "gateway").exists():
         console.print("  Status:   [yellow]not installed[/]")
