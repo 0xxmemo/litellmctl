@@ -68,14 +68,13 @@ class TestInteractiveMenu:
 
     def test_menu_exits_on_quit_selection(self):
         with mock.patch("lib.interactive.questionary") as mock_q, \
-             mock.patch("lib.interactive.quick_status_line", return_value=None):
+             mock.patch("lib.common.process.get_proxy_port", return_value=4000), \
+             mock.patch("lib.common.process.find_proxy_pid", return_value=None):
             mock_select = mock.MagicMock()
-            # Simulate user choosing 'quit' immediately
-            mock_select.ask.return_value = "quit         Exit"
+            mock_select.ask.return_value = "quit"
             mock_q.select.return_value = mock_select
 
             from lib.interactive import interactive_menu
-            # Should return cleanly
             try:
                 interactive_menu()
             except SystemExit as e:
@@ -83,19 +82,19 @@ class TestInteractiveMenu:
 
     def test_menu_keyboard_interrupt_is_clean(self):
         with mock.patch("lib.interactive.questionary") as mock_q, \
-             mock.patch("lib.interactive.quick_status_line", return_value=None):
+             mock.patch("lib.common.process.get_proxy_port", return_value=4000), \
+             mock.patch("lib.common.process.find_proxy_pid", return_value=None):
             mock_select = mock.MagicMock()
             mock_select.ask.side_effect = KeyboardInterrupt
             mock_q.select.return_value = mock_select
 
             from lib.interactive import interactive_menu
-            # Should not raise a traceback — catches KeyboardInterrupt cleanly
             try:
                 interactive_menu()
             except SystemExit as e:
                 assert e.code in (0, None)
             except KeyboardInterrupt:
-                pass  # acceptable if not suppressed
+                pass
 
 
 class TestAuthInteractive:
