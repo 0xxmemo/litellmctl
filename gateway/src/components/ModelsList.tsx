@@ -1,4 +1,4 @@
-import React from 'react'
+import {} from 'react'
 import { Loader2, Cpu, Eye, Zap, Brain, Key } from 'lucide-react'
 import { useExtendedModels, formatProviderName, getProviderColor } from '@/lib/models'
 
@@ -65,25 +65,25 @@ export function ModelsList() {
                 {model.supportsVision && (
                   <Eye
                     className="h-3 w-3 text-blue-400"
-                    title="Supports vision/image input"
+                    aria-label="Supports vision/image input"
                   />
                 )}
                 {model.supportsReasoning && (
                   <Brain
                     className="h-3 w-3 text-violet-400"
-                    title="Supports reasoning/thinking"
+                    aria-label="Supports reasoning/thinking"
                   />
                 )}
                 {model.supportsFunctionCalling && (
                   <Zap
                     className="h-3 w-3 text-yellow-400"
-                    title="Supports function/tool calling"
+                    aria-label="Supports function/tool calling"
                   />
                 )}
                 {model.requiresApiKey && (
                   <Key
                     className="h-3 w-3 text-muted-foreground"
-                    title={model.apiKeyEnvVar ? `Requires ${model.apiKeyEnvVar}` : 'Requires API key'}
+                    aria-label={model.apiKeyEnvVar ? `Requires ${model.apiKeyEnvVar}` : 'Requires API key'}
                   />
                 )}
               </div>

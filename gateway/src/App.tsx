@@ -7,11 +7,11 @@
 
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { Toaster } from 'sonner';
 import { AuthPage } from './pages/AuthPage';
 import { DashboardLayout } from './layout/DashboardLayout';
-import { ApiKeysPage } from './pages/ApiKeys';
+import { ApiKeys as ApiKeysPage } from './pages/ApiKeys';
 import { Overview } from './pages/Overview';
 import { Settings } from './pages/Settings';
 import { Admin } from './pages/Admin';
@@ -21,7 +21,7 @@ import { AppProvider } from './context/AppContext';
 
 type Page = 'keys' | 'overview' | 'settings' | 'admin' | 'docs' | 'stats';
 
-function DashboardContent({ page, onPageChange }: { page: Page; onPageChange: (p: Page) => void }) {
+function DashboardContent({ page }: { page: Page; onPageChange: (p: Page) => void }) {
   switch (page) {
     case 'keys':
       return <ApiKeysPage />;
@@ -106,7 +106,7 @@ export function App() {
       <Toaster position="bottom-right" richColors theme={theme === 'system' ? 'system' : theme} />
       <DashboardLayout
         currentPage={currentPage}
-        onPageChange={setCurrentPage}
+        onPageChange={(p: string) => setCurrentPage(p as Page)}
         userRole={userRole}
         theme={theme}
         onThemeChange={setTheme}

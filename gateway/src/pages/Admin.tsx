@@ -46,7 +46,7 @@ export function Admin() {
   // Revoke All Keys state
   const [revokeAllLoading, setRevokeAllLoading] = useState(false)
   const [showRevokeAllConfirm, setShowRevokeAllConfirm] = useState(false)
-  const [activeKeyCount, setActiveKeyCount] = useState<number | null>(null)
+  const [_activeKeyCount, setActiveKeyCount] = useState<number | null>(null)
 
   // Top Users state
   const [topUsers, setTopUsers] = useState<Array<{ email: string; role: string; requests: number; tokens: number; spend: number }>>([])
@@ -267,12 +267,12 @@ export function Admin() {
   const handleRevokeAll = async () => {
     // Fetch active key count before showing confirm dialog
     try {
-      const res = await fetch('/api/admin/users', {
+      await fetch('/api/admin/users', {
         credentials: 'include',
         headers: { 'Accept': 'application/json' }
       })
       // We'll get the count from global-stats or just show the dialog
-    } catch (_) {}
+    } catch {}
     setShowRevokeAllConfirm(true)
   }
 
@@ -299,20 +299,6 @@ export function Admin() {
   const pendingUsers = users.filter(u => u.role === 'guest')
   const approvedUsers = users.filter(u => u.role === 'user' || u.role === 'admin')
   const disapprovableUsers = users.filter(u => u.role === 'guest')
-
-  // Null-safe date formatting helper
-  const formatDate = (dateString?: string) => {
-    if (!dateString) return 'N/A'
-    try {
-      return new Date(dateString).toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric'
-      })
-    } catch {
-      return 'Invalid date'
-    }
-  }
 
   return (
     <AdminErrorBoundary>

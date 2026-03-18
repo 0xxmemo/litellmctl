@@ -15,9 +15,9 @@ interface DashboardLayoutProps {
 
 export function DashboardLayout({
   children,
-  currentPage = 'keys',
-  onPageChange,
-  userRole,
+  currentPage: _currentPage = 'keys',
+  onPageChange: _onPageChange,
+  userRole: _userRole,
   theme: parentTheme,
   onThemeChange
 }: DashboardLayoutProps) {

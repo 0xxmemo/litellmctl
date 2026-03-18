@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
 import { Users } from 'lucide-react'
 
 interface AdminSectionProps {
@@ -20,7 +19,7 @@ interface UserRecord {
 
 export function AdminSection({ user }: AdminSectionProps) {
   const [users, setUsers] = useState<UserRecord[]>([])
-  const [loading, setLoading] = useState(true)
+  const [_loading, setLoading] = useState(true)
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
 
   useEffect(() => {
@@ -165,16 +164,6 @@ export function AdminSection({ user }: AdminSectionProps) {
         </CardContent>
       </Card>
 
-      {/* Model Usage Pie Chart */}
-      {stats?.modelUsage && stats.modelUsage.length > 0 && (
-        <ModelUsagePieChart 
-          data={stats.modelUsage.map(m => ({
-            name: m.model_name,
-            value: m.requests,
-            percentage: m.percentage
-          }))} 
-        />
-      )}
     </div>
   )
 }

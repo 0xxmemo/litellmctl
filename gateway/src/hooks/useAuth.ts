@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 
-interface User {
+export interface User {
   email: string
   role: 'admin' | 'user' | 'guest'
+  name?: string
+  company?: string
 }
 
 interface UseAuthReturn {

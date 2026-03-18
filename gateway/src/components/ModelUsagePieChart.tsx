@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import { useState } from 'react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -121,10 +121,10 @@ export function ModelUsagePieChart({ data }: ModelUsagePieChartProps) {
               ))}
             </Pie>
             <Tooltip 
-              formatter={(value: number, name: string, props: any) => [
+              formatter={((value: number | undefined, name: string | undefined, props: any) => [
                 `${(value ?? 0).toLocaleString()} (${props?.payload?.percentage ?? '0'}%)`,
                 props?.payload?.name ?? name
-              ]}
+              ]) as any}
               contentStyle={{
                 backgroundColor: 'rgba(0, 0, 0, 0.75)',
                 backdropFilter: 'blur(10px)',

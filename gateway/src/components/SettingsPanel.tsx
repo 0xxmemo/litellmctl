@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/hooks/useAuth'
-import { useNavigate } from '@tanstack/react-router'
+// import { useNavigate } from '@tanstack/react-router'
 import { cn } from '@/lib/utils'
 import { TierModelSelector } from '@/components/ModelSelector'
 import { useAppContext } from '@/context/AppContext'
@@ -25,7 +25,7 @@ const ROLE_BADGE_VARIANT: Record<string, 'destructive' | 'default' | 'secondary'
 
 export function SettingsPanel() {
   const { user, loading } = useAuth()
-  const navigate = useNavigate()
+  // const navigate = useNavigate()
   const { config } = useAppContext()
   const [loggingOut, setLoggingOut] = useState(false)
   const [tierAliasMap, setTierAliasMap] = useState<Record<string, string> | null>(null)
@@ -40,7 +40,7 @@ export function SettingsPanel() {
   })
 
   // Sync profile when user data loads
-  React.useEffect(() => {
+  useEffect(() => {
     if (user?.email) {
       setProfile({
         name: user.name || '',
@@ -57,7 +57,7 @@ export function SettingsPanel() {
     } catch {
       // best-effort
     } finally {
-      navigate({ to: '/auth' })
+      window.location.href = '/auth'
     }
   }
 
@@ -87,7 +87,7 @@ export function SettingsPanel() {
   }
 
   // Sync theme on mount and listen for system changes
-  React.useEffect(() => {
+  useEffect(() => {
     // Apply saved theme on mount
     const saved = localStorage.getItem('theme') as 'light' | 'dark' | 'system' | null
     if (saved) {
@@ -109,7 +109,7 @@ export function SettingsPanel() {
     return () => mediaQuery.removeEventListener('change', handleChange)
   }, [])
 
-  const handleSaveProfile = async (e: React.FormEvent) => {
+  const handleSaveProfile = async (e: { preventDefault: () => void }) => {
     e.preventDefault()
     setSavingProfile(true)
     setMessage(null)
@@ -309,10 +309,10 @@ export function SettingsPanel() {
             Map tier aliases (
             {tierAliases.length > 0
               ? tierAliases.map((alias, i) => (
-                  <React.Fragment key={alias}>
+                  <Fragment key={alias}>
                     {i > 0 && ', '}
                     <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">{alias}</code>
-                  </React.Fragment>
+                  </Fragment>
                 ))
               : <span className="text-muted-foreground text-xs">loading…</span>
             }) to specific models. Applies to all your API keys.
@@ -360,7 +360,7 @@ export function SettingsPanel() {
                     onChange={(val) =>
                       setOverrides((prev) => ({
                         ...prev,
-                        [alias]: val || undefined,
+                        [alias]: val || '',
                       }))
                     }
                   />

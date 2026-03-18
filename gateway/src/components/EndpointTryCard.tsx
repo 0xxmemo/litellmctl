@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Eye, EyeOff, Check, Key, Send, RefreshCw, Clock, Copy } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -88,7 +88,7 @@ function statusColor(status: number | null) {
 // ─── Copy button ─────────────────────────────────────────────────────────────
 
 /** Copies `copyText` to clipboard but displays `displayText` in the UI */
-function CopyButton({ displayText, copyText }: { displayText: string; copyText: string }) {
+function CopyButton({ copyText }: { displayText: string; copyText: string }) {
   const [copied, setCopied] = useState(false)
   const handleCopy = async () => {
     await navigator.clipboard.writeText(copyText)

@@ -1,17 +1,16 @@
 import nodemailer from 'nodemailer';
-// Bun automatically loads .env files, no need for dotenv import
 
 // ProtonMail SMTP configuration via hydroxide bridge
 // Hydroxide runs locally and provides SMTP access to ProtonMail
-let transporter = null;
+let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
 let smtpAvailable = false;
 
-function initTransporter() {
+function initTransporter(): boolean {
   if (!process.env.PROTON_EMAIL || !process.env.PROTON_PASSWORD) {
     console.warn('⚠️ ProtonMail credentials not configured');
     return false;
   }
-  
+
   try {
     transporter = nodemailer.createTransport({
       host: process.env.PROTON_SMTP_HOST || '127.0.0.1',
@@ -24,25 +23,25 @@ function initTransporter() {
     });
     return true;
   } catch (error) {
-    console.error('❌ Failed to create transporter:', error.message);
+    console.error('❌ Failed to create transporter:', (error as Error).message);
     return false;
   }
 }
 
 // Verify SMTP connection
-async function verifyConnection() {
+async function verifyConnection(): Promise<boolean> {
   if (!transporter && !initTransporter()) {
     smtpAvailable = false;
     return false;
   }
-  
+
   try {
-    await transporter.verify();
+    await transporter!.verify();
     console.log('✅ ProtonMail SMTP connection verified');
     smtpAvailable = true;
     return true;
   } catch (error) {
-    console.error('❌ ProtonMail SMTP connection failed:', error.message);
+    console.error('❌ ProtonMail SMTP connection failed:', (error as Error).message);
     console.log('💡 Make sure hydroxide is authenticated: hydroxide auth <username>');
     console.log('💡 OTP codes will be logged to console for testing');
     smtpAvailable = false;
@@ -51,9 +50,9 @@ async function verifyConnection() {
 }
 
 // Send OTP code email - NUMERIC CODE ONLY, NO MAGIC LINKS
-async function sendOTPCode(email, otp) {
+async function sendOTPCode(email: string, otp: string) {
   const expiryMinutes = 10;
-  
+
   // Clean, minimal HTML with ONLY the 6-digit code (large, centered)
   const html = `
 <!DOCTYPE html>
@@ -79,7 +78,7 @@ async function sendOTPCode(email, otp) {
   </body>
 </html>
   `;
-  
+
   const text = `
 Your OTP Verification Code
 
@@ -89,21 +88,21 @@ This code will expire in ${expiryMinutes} minutes.
 
 If you didn't request this code, please ignore this email.
   `.trim();
-  
+
   // If SMTP is not available, log the code for testing
   if (!smtpAvailable || !transporter) {
     console.log('\n🔢 OTP CODE (SMTP not available - logged for testing):');
     console.log(`   To: ${email}`);
     console.log(`   Code: ${otp}`);
     console.log(`   Expires: ${expiryMinutes} minutes\n`);
-    
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       messageId: null,
       warning: 'SMTP not configured - code logged to console'
     };
   }
-  
+
   try {
     const result = await transporter.sendMail({
       from: `"LLM API Gateway" <${process.env.PROTON_EMAIL}>`,
@@ -112,19 +111,19 @@ If you didn't request this code, please ignore this email.
       text,
       html
     });
-    
+
     console.log(`✅ OTP sent to ${email} (Message ID: ${result.messageId})`);
     return { success: true, messageId: result.messageId };
   } catch (error) {
-    console.error(`❌ Failed to send OTP to ${email}:`, error.message);
+    console.error(`❌ Failed to send OTP to ${email}:`, (error as Error).message);
     // Don't throw - still allow the flow to continue, just log the code
     console.log('\n🔢 OTP CODE (email failed - logged for testing):');
     console.log(`   To: ${email}`);
     console.log(`   Code: ${otp}`);
     console.log(`   Expires: ${expiryMinutes} minutes\n`);
-    
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       messageId: null,
       warning: 'Email delivery failed - code logged to console'
     };
@@ -132,10 +131,10 @@ If you didn't request this code, please ignore this email.
 }
 
 // Send admin notification email for new access requests
-async function sendAdminNotification(requesterEmail, adminEmail) {
+async function sendAdminNotification(requesterEmail: string, adminEmail: string) {
   const dashboardUrl = process.env.DASHBOARD_URL || 'https://llm.0xmemo.com';
   const adminPanelUrl = `${dashboardUrl}/admin`;
-  
+
   const html = `
 <!DOCTYPE html>
 <html>
@@ -226,33 +225,33 @@ async function sendAdminNotification(requesterEmail, adminEmail) {
       <h1>New Access Request</h1>
       <p class="subtitle">LLM API Gateway Dashboard</p>
     </div>
-    
+
     <p>Hello Admin,</p>
-    
+
     <p>A new user has requested access to the LLM API Gateway dashboard:</p>
-    
+
     <div class="email-highlight">
       ${requesterEmail}
     </div>
-    
+
     <div class="info-box">
       <strong>Request Details:</strong><br>
       • Requested at: ${new Date().toLocaleString()}<br>
       • Status: Pending Approval<br>
       • Action Required: Manual verification
     </div>
-    
+
     <p>To approve or reject this request, you can:</p>
-    
+
     <ol style="margin: 24px 0; padding-left: 24px;">
       <li style="margin-bottom: 12px;"><strong>Use the Admin Panel:</strong><br>
         <a href="${adminPanelUrl}" class="button">Open Admin Panel</a></li>
       <li><strong>Use the CLI:</strong><br>
         <code style="background: #f3f4f6; padding: 4px 8px; border-radius: 4px;">bun admin.js approve ${requesterEmail}</code></li>
     </ol>
-    
+
     <p>If you don't recognize this request, you can safely ignore it.</p>
-    
+
     <div class="footer">
       <p>&copy; 2026 LLM API Gateway. All rights reserved.</p>
       <p>This is an automated notification from your LLM API Gateway.</p>
@@ -261,7 +260,7 @@ async function sendAdminNotification(requesterEmail, adminEmail) {
 </body>
 </html>
   `;
-  
+
   const text = `
 New Access Request - LLM API Gateway
 
@@ -281,20 +280,20 @@ To approve this request:
 ---
 © 2026 LLM API Gateway
   `.trim();
-  
+
   if (!smtpAvailable || !transporter) {
     console.log('\n📧 ADMIN NOTIFICATION (SMTP not available - logged):');
     console.log(`   To: ${adminEmail}`);
     console.log(`   Requester: ${requesterEmail}`);
     console.log(`   Time: ${new Date().toLocaleString()}\n`);
-    
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       messageId: null,
       warning: 'SMTP not configured - notification logged to console'
     };
   }
-  
+
   try {
     const result = await transporter.sendMail({
       from: `"LLM API Gateway" <${process.env.PROTON_EMAIL}>`,
@@ -303,17 +302,17 @@ To approve this request:
       text,
       html
     });
-    
+
     console.log(`✅ Admin notification sent to ${adminEmail} (Message ID: ${result.messageId})`);
     return { success: true, messageId: result.messageId };
   } catch (error) {
-    console.error(`❌ Failed to send admin notification to ${adminEmail}:`, error.message);
+    console.error(`❌ Failed to send admin notification to ${adminEmail}:`, (error as Error).message);
     console.log('\n📧 ADMIN NOTIFICATION (email failed - logged):');
     console.log(`   To: ${adminEmail}`);
     console.log(`   Requester: ${requesterEmail}\n`);
-    
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       messageId: null,
       warning: 'Email delivery failed - notification logged to console'
     };

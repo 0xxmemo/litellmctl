@@ -48,27 +48,6 @@ function cleanEndpoint(endpoint: string | null): string {
   return endpoint.replace(/^\/v1\//, '').replace(/^\//, '')
 }
 
-function ProviderBadge({ model }: { model: string | null }) {
-  if (!model) return <span className="text-muted-foreground text-xs">—</span>
-  const provider = extractProvider(model) || resolveProvider(model, '')
-  const colorClass = getProviderColor(provider)
-  const displayName = getDisplayName(model)
-  const providerLabel = formatProviderName(provider)
-
-  return (
-    <div className="flex flex-col gap-0.5">
-      <span className="text-sm font-medium truncate max-w-[160px]" title={displayName}>
-        {displayName}
-      </span>
-      {provider && (
-        <Badge className={cn('text-[10px] px-1.5 py-0 border w-fit', colorClass)} variant="outline">
-          {providerLabel}
-        </Badge>
-      )}
-    </div>
-  )
-}
-
 function CostCell({ cost }: { cost: number }) {
   if (cost === 0 || !cost) {
     return <span className="text-muted-foreground text-xs">—</span>

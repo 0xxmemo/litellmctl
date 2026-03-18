@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import { useState, useEffect } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -24,7 +24,7 @@ const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8']
 
 export function UsageAnalytics() {
   const [dateRange, setDateRange] = useState('7d')
-  const [analytics, setAnalytics] = useState({ requests: [], models: [], endpoints: [] })
+  const [analytics, setAnalytics] = useState<{ requests: any[]; models: any[]; endpoints: any[] }>({ requests: [], models: [], endpoints: [] })
   const [costData, setCostData] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -41,8 +41,8 @@ export function UsageAnalytics() {
         
         // Calculate cost breakdown from real model data
         if (data.models && data.models.length > 0) {
-          const totalCost = data.models.reduce((sum, m) => sum + (m.spend || 0), 0)
-          const withPercentage = data.models.map(m => ({
+          const totalCost = data.models.reduce((sum: number, m: any) => sum + (m.spend || 0), 0)
+          const withPercentage = data.models.map((m: any) => ({
             category: m.model_name?.split('-')[0] || m.model_name || 'Unknown',
             amount: m.spend || 0,
             percentage: totalCost > 0 ? ((m.spend / totalCost) * 100).toFixed(1) : '0'
@@ -195,7 +195,7 @@ export function UsageAnalytics() {
           <CardContent className="h-full">
             <div className="space-y-4">
               {analytics.endpoints && analytics.endpoints.length > 0 ? (
-                analytics.endpoints.map((item, i) => (
+                analytics.endpoints.map((item) => (
                   <div key={item.endpoint} className="space-y-2">
                     <div className="flex items-center justify-between text-sm">
                       <span className="font-medium">{item.endpoint}</span>
@@ -238,12 +238,12 @@ export function UsageAnalytics() {
                     cx="50%"
                     cy="50%"
                     labelLine={false}
-                    label={({ category, percentage }) => `${category}: ${percentage}%`}
+                    label={({ category, percentage }: any) => `${category}: ${percentage}%`}
                     outerRadius={80}
                     fill="#8884d8"
                     dataKey="amount"
                   >
-                    {costData.map((entry, index) => (
+                    {costData.map((_entry, index) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>

@@ -6,13 +6,13 @@
  */
 
 import { readFileSync } from "fs";
-import { MongoClient } from "mongodb";
+import { MongoClient, type MongoClientOptions } from "mongodb";
 
 // Load environment variables from root .env file
 try {
   const envPath = new URL("../.env", import.meta.url).pathname;
   const envText = readFileSync(envPath, "utf-8");
-  envText.split('\n').forEach((line) => {
+  envText.split('\n').forEach((line: string) => {
     const [key, ...valueParts] = line.split('=');
     if (key && valueParts.length > 0) {
       const value = valueParts.join('=').replace(/^["']|["']$/g, '');
@@ -28,20 +28,20 @@ import {
   getSessionCookie,
   extractApiKey,
 } from "./lib/auth";
-import { sendOTPCode } from "./lib/email-service.js";
-import { generateOTP } from "./lib/otp.js";
-import { createHash } from "crypto";
+import { sendOTPCode } from "./lib/email-service";
+import { generateOTP } from "./lib/otp";
+import { createHash, randomBytes } from "crypto";
 
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
 
 // Read LiteLLM proxy port from .proxy-port file in root directory
-function getLiteLLMUrl(): string {
+async function getLiteLLMUrl(): Promise<string> {
   try {
     const proxyPortFile = Bun.file("../.proxy-port");
-    if (proxyPortFile.exists()) {
-      const port = proxyPortFile.text().trim();
+    if (await proxyPortFile.exists()) {
+      const port = (await proxyPortFile.text()).trim();
       return `http://localhost:${port}`;
     }
   } catch {
@@ -54,7 +54,7 @@ function getLiteLLMUrl(): string {
   );
 }
 
-const LITELLM_URL = getLiteLLMUrl();
+const LITELLM_URL = await getLiteLLMUrl();
 const LITELLM_AUTH = `Bearer ${process.env.LITELLM_MASTER_KEY || ""}`;
 const PORT = parseInt(process.env.GATEWAY_PORT || "14041");
 
@@ -73,12 +73,12 @@ let sessions: any = null;
 async function connectDB() {
   if (db) return;
 
-  const client = new MongoClient(process.env.GATEWAY_MONGODB_URI, {
+  const client = new MongoClient(process.env.GATEWAY_MONGODB_URI!, {
     maxPoolSize: 20,
     minPoolSize: 5,
     maxIdleTimeMS: 30000,
     serverSelectionTimeoutMS: 5000,
-  });
+  } as MongoClientOptions);
 
   await client.connect();
   db = client.db("llm-gateway");
@@ -162,25 +162,6 @@ async function validateApiKey(apiKey: string) {
 const rateLimitMap = new Map<string, { count: number; startTime: number }>();
 const otpRateLimitMap = new Map<string, { count: number; startTime: number }>();
 
-function checkRateLimit(ip: string, windowMs = 60000, limit = 100): boolean {
-  const now = Date.now();
-  const record = rateLimitMap.get(ip);
-
-  if (!record) {
-    rateLimitMap.set(ip, { count: 1, startTime: now });
-    return true;
-  }
-
-  if (now - record.startTime > windowMs) {
-    record.count = 1;
-    record.startTime = now;
-  } else {
-    record.count++;
-    if (record.count > limit) return false;
-  }
-  return true;
-}
-
 function checkOtpRateLimit(email: string): {
   allowed: boolean;
   remaining?: number;
@@ -222,7 +203,7 @@ async function flushUsageQueue() {
   try {
     await usageLogs.insertMany(batch, { ordered: false });
   } catch (err) {
-    console.error("⚠️ Usage batch insert failed:", err.message);
+    console.error("⚠️ Usage batch insert failed:", (err as Error).message);
   }
 }
 
@@ -476,7 +457,7 @@ async function createApiKeyHandler(req: Request) {
   }
 
   const { name } = await req.json();
-  const key = `sk_${crypto.randomBytes(16).toString("hex")}`;
+  const key = `sk_${randomBytes(16).toString("hex")}`;
   const keyHash = createHash("sha256").update(key.trim()).digest("hex");
 
   await apiKeys.insertOne({
@@ -672,18 +653,18 @@ setInterval(() => {
   }
 }, 60000).unref();
 
-const server = Bun.serve({
+Bun.serve({
   port: PORT,
 
   routes: {
     // Static files
-    "/public/*": async (req) => {
+    "/public/*": async (req: Request) => {
       const url = new URL(req.url);
       const path = url.pathname;
       const response = await serveStaticFile(path);
       return response || new Response("Not found", { status: 404 });
     },
-    "/src/index.css": async (req) => {
+    "/src/index.css": async (_req: Request) => {
       const response = await serveStaticFile("/src/index.css");
       return response || new Response("Not found", { status: 404 });
     },

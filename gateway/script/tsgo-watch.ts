@@ -153,7 +153,7 @@ async function startWatching() {
       const watcher = watch(
         resolvedPath,
         { recursive: target.recursive },
-        (eventType, filename) => {
+        (_eventType: string, filename: string | null) => {
           if (!filename) return;
 
           // Check file extension

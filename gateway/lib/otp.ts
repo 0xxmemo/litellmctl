@@ -1,16 +1,15 @@
 import nodemailer from 'nodemailer';
-// Bun automatically loads .env files, no need for dotenv import
 
 // ProtonMail SMTP configuration via hydroxide bridge
-let transporter = null;
+let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
 let smtpAvailable = false;
 
-function initTransporter() {
+function initTransporter(): boolean {
   if (!process.env.PROTON_EMAIL || !process.env.PROTON_PASSWORD) {
     console.warn('⚠️ ProtonMail credentials not configured');
     return false;
   }
-  
+
   try {
     transporter = nodemailer.createTransport({
       host: process.env.PROTON_SMTP_HOST || '127.0.0.1',
@@ -23,25 +22,25 @@ function initTransporter() {
     });
     return true;
   } catch (error) {
-    console.error('❌ Failed to create transporter:', error.message);
+    console.error('❌ Failed to create transporter:', (error as Error).message);
     return false;
   }
 }
 
 // Verify SMTP connection
-async function verifyConnection() {
+async function verifyConnection(): Promise<boolean> {
   if (!transporter && !initTransporter()) {
     smtpAvailable = false;
     return false;
   }
-  
+
   try {
-    await transporter.verify();
+    await transporter!.verify();
     console.log('✅ ProtonMail SMTP connection verified for OTP service');
     smtpAvailable = true;
     return true;
   } catch (error) {
-    console.error('❌ ProtonMail SMTP connection failed:', error.message);
+    console.error('❌ ProtonMail SMTP connection failed:', (error as Error).message);
     console.log('💡 Make sure hydroxide is authenticated: hydroxide auth <username>');
     console.log('💡 OTP codes will be logged to console for testing');
     smtpAvailable = false;
@@ -50,12 +49,12 @@ async function verifyConnection() {
 }
 
 // Generate 6-digit OTP code
-export function generateOTP() {
+export function generateOTP(): string {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
 // Send OTP email
-export async function sendOTP(email, code) {
+export async function sendOTP(email: string, code: string) {
   const html = `
 <!DOCTYPE html>
 <html>
@@ -142,21 +141,21 @@ export async function sendOTP(email, code) {
       <h1>LLM API Gateway</h1>
       <p class="subtitle">Email Verification Code</p>
     </div>
-    
+
     <p>Your verification code is:</p>
-    
+
     <div class="code-box">
       <div class="code">${code}</div>
     </div>
-    
+
     <p class="expiry">⏱️ Valid for 5 minutes</p>
-    
+
     <div class="warning">
       <strong>⚠️ Important:</strong> This code can only be used once. If you didn't request this code, you can safely ignore this email.
     </div>
-    
+
     <p>Enter this code on the verification page to complete your registration.</p>
-    
+
     <div class="footer">
       <p>&copy; 2026 LLM API Gateway. All rights reserved.</p>
       <p>This is an automated message, please do not reply.</p>
@@ -165,7 +164,7 @@ export async function sendOTP(email, code) {
 </body>
 </html>
   `;
-  
+
   const text = `
 LLM API Gateway - Email Verification Code
 
@@ -178,21 +177,21 @@ Your verification code is: ${code}
 ---
 © 2026 LLM API Gateway
   `.trim();
-  
+
   // If SMTP is not available, log the code for testing
   if (!smtpAvailable || !transporter) {
     console.log('\n🔐 OTP CODE (SMTP not available - logged for testing):');
     console.log(`   To: ${email}`);
     console.log(`   Code: ${code}`);
     console.log(`   Expires: 5 minutes\n`);
-    
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       messageId: null,
       warning: 'SMTP not configured - code logged to console'
     };
   }
-  
+
   try {
     const result = await transporter.sendMail({
       from: `"LLM API Gateway" <${process.env.PROTON_EMAIL}>`,
@@ -201,19 +200,19 @@ Your verification code is: ${code}
       text,
       html
     });
-    
+
     console.log(`✅ OTP sent to ${email} (Message ID: ${result.messageId})`);
     return { success: true, messageId: result.messageId };
   } catch (error) {
-    console.error(`❌ Failed to send OTP to ${email}:`, error.message);
+    console.error(`❌ Failed to send OTP to ${email}:`, (error as Error).message);
     // Don't throw - still allow the flow to continue, just log the code
     console.log('\n🔐 OTP CODE (email failed - logged for testing):');
     console.log(`   To: ${email}`);
     console.log(`   Code: ${code}`);
     console.log(`   Expires: 5 minutes\n`);
-    
-    return { 
-      success: true, 
+
+    return {
+      success: true,
       messageId: null,
       warning: 'Email delivery failed - code logged to console'
     };

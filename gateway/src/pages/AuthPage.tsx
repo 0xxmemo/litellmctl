@@ -9,7 +9,7 @@ interface AuthPageProps {
   onAuthSuccess?: (role: string) => void
 }
 
-export function AuthPage({ onAuthSuccess }: AuthPageProps) {
+export function AuthPage({ onAuthSuccess: _onAuthSuccess }: AuthPageProps) {
   const [step, setStep] = useState<'email' | 'otp' | 'pending'>('email')
   const [email, setEmail] = useState('')
   const [otp, setOtp] = useState('')
