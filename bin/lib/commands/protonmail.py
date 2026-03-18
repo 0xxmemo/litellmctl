@@ -91,6 +91,58 @@ def _hydroxide_authenticated() -> bool:
     return os.path.isdir(auth_dir) and bool(os.listdir(auth_dir))
 
 
+def hydroxide_auth_auto() -> bool:
+    """Authenticate hydroxide non-interactively using GATEWAY_PROTON_PASSWORD from env."""
+    import pty, select
+
+    hbin = _hydroxide_bin()
+    if not hbin:
+        warn("hydroxide not installed")
+        return False
+
+    username = os.environ.get("GATEWAY_PROTON_USERNAME", "")
+    password = os.environ.get("GATEWAY_PROTON_PASSWORD", "")
+    if not username or not password:
+        warn("Set GATEWAY_PROTON_USERNAME and GATEWAY_PROTON_PASSWORD in .env first")
+        return False
+
+    info(f"Authenticating hydroxide as {username} ...")
+    master_fd, slave_fd = pty.openpty()
+    proc = subprocess.Popen(
+        [hbin, "auth", username],
+        stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
+    )
+    os.close(slave_fd)
+
+    buf = b""
+    sent = False
+    import time
+    deadline = time.time() + 30
+    try:
+        while proc.poll() is None and time.time() < deadline:
+            r, _, _ = select.select([master_fd], [], [], 0.2)
+            if r:
+                chunk = os.read(master_fd, 1024)
+                buf += chunk
+                if not sent and b"Password" in buf:
+                    os.write(master_fd, (password + "\n").encode())
+                    sent = True
+        proc.wait(timeout=5)
+    except Exception:
+        pass
+    finally:
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
+
+    if _hydroxide_authenticated():
+        info("hydroxide authenticated successfully")
+        return True
+    warn("hydroxide authentication may have failed — check: ls ~/.config/hydroxide/")
+    return False
+
+
 def hydroxide_start() -> bool:
     """Start hydroxide SMTP bridge if installed and authenticated."""
     if port_in_use(1025):
@@ -101,13 +153,14 @@ def hydroxide_start() -> bool:
         return False
 
     if not _hydroxide_authenticated():
-        username = os.environ.get("GATEWAY_PROTON_USERNAME", "")
-        warn("hydroxide is not authenticated.")
-        if username:
-            info(f"Run: hydroxide auth {username}")
+        if os.environ.get("GATEWAY_PROTON_PASSWORD"):
+            if not hydroxide_auth_auto():
+                return False
         else:
-            info("Run: hydroxide auth <your-protonmail-username>")
-        return False
+            username = os.environ.get("GATEWAY_PROTON_USERNAME", "")
+            warn("hydroxide is not authenticated.")
+            info(f"Run: litellmctl protonmail auth")
+            return False
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_f = open(LOG_DIR / "hydroxide.log", "a")
@@ -201,16 +254,21 @@ def cmd_protonmail(subcmd: str = "status") -> None:
     elif subcmd == "status":
         protonmail_status()
     elif subcmd == "auth":
-        username = os.environ.get("GATEWAY_PROTON_USERNAME", "")
-        hbin = _hydroxide_bin()
-        if not hbin:
-            warn("hydroxide not installed. Run: litellmctl install --with-protonmail")
-            return
-        if username:
-            info(f"Run: {hbin} auth {username}")
+        password = os.environ.get("GATEWAY_PROTON_PASSWORD", "")
+        if password:
+            # Auto-authenticate using env password
+            ok = hydroxide_auth_auto()
+            if ok:
+                info("Run: litellmctl protonmail start")
         else:
-            info(f"Run: {hbin} auth <your-protonmail-username>")
-        info("After authenticating, run: litellmctl protonmail start")
+            # No password in env — print manual instructions
+            hbin = _hydroxide_bin()
+            if not hbin:
+                warn("hydroxide not installed. Run: litellmctl install --with-protonmail")
+                return
+            username = os.environ.get("GATEWAY_PROTON_USERNAME", "<your-username>")
+            info(f"Run: {hbin} auth {username}")
+            info("After authenticating, run: litellmctl protonmail start")
     else:
         from ..common.formatting import error
         error(f"Unknown subcommand: {subcmd}")
