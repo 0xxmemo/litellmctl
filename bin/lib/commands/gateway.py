@@ -152,6 +152,13 @@ def install_gateway() -> bool:
         return False
     info("Gateway dependencies installed")
 
+    info("Building gateway frontend ...")
+    ret = subprocess.call(["bun", "run", "build"], cwd=str(gateway_dir))
+    if ret != 0:
+        warn("Gateway frontend build failed — UI may not render correctly")
+    else:
+        info("Gateway frontend built")
+
     env_path = gateway_dir / ".env"
     if not env_path.exists():
         example = gateway_dir / ".env.example"

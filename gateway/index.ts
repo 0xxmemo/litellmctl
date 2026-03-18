@@ -664,8 +664,27 @@ Bun.serve({
       const response = await serveStaticFile(path);
       return response || new Response("Not found", { status: 404 });
     },
+    // Built frontend assets (output of: bun run build)
+    "/frontend.tsx": async (_req: Request) => {
+      const response = await serveStaticFile("/dist/frontend.js");
+      return response
+        ? new Response(await response.arrayBuffer(), {
+            headers: { "Content-Type": "application/javascript" },
+          })
+        : new Response("Not found — run: bun run build", { status: 404 });
+    },
     "/src/index.css": async (_req: Request) => {
-      const response = await serveStaticFile("/src/index.css");
+      const response = await serveStaticFile("/dist/frontend.css");
+      return response
+        ? new Response(await response.arrayBuffer(), {
+            headers: { "Content-Type": "text/css" },
+          })
+        : new Response("Not found — run: bun run build", { status: 404 });
+    },
+
+    // PWA manifest
+    "/manifest.json": async (_req: Request) => {
+      const response = await serveStaticFile("/public/manifest.json");
       return response || new Response("Not found", { status: 404 });
     },
 
