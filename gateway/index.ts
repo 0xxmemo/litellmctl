@@ -5,19 +5,58 @@
  * Built with Bun.serve() for simplicity and performance.
  */
 
-import { MongoClient } from 'mongodb';
-import { signSession, verifySession, getSessionCookie, extractApiKey } from './lib/auth';
-import { sendOTPCode } from './lib/email-service.js';
-import { generateOTP } from './lib/otp.js';
-import { createHash } from 'crypto';
+import { readFileSync } from "fs";
+import { MongoClient } from "mongodb";
+
+// Load environment variables from root .env file
+try {
+  const envPath = new URL("../.env", import.meta.url).pathname;
+  const envText = readFileSync(envPath, "utf-8");
+  envText.split('\n').forEach((line) => {
+    const [key, ...valueParts] = line.split('=');
+    if (key && valueParts.length > 0) {
+      const value = valueParts.join('=').replace(/^["']|["']$/g, '');
+      process.env[key.trim()] = value;
+    }
+  });
+} catch {
+  // .env file not found, use existing env vars
+}
+import {
+  signSession,
+  verifySession,
+  getSessionCookie,
+  extractApiKey,
+} from "./lib/auth";
+import { sendOTPCode } from "./lib/email-service.js";
+import { generateOTP } from "./lib/otp.js";
+import { createHash } from "crypto";
 
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
 
-const LITELLM_URL = process.env.LITELLM_URL || process.env.LITELLM_PROXY_URL || 'http://localhost:4040';
-const LITELLM_AUTH = `Bearer ${process.env.LITELLM_MASTER_KEY || ''}`;
-const PORT = process.env.PORT || 14041;
+// Read LiteLLM proxy port from .proxy-port file in root directory
+function getLiteLLMUrl(): string {
+  try {
+    const proxyPortFile = Bun.file("../.proxy-port");
+    if (proxyPortFile.exists()) {
+      const port = proxyPortFile.text().trim();
+      return `http://localhost:${port}`;
+    }
+  } catch {
+    // Fall through to default
+  }
+  return (
+    process.env.LITELLM_URL ||
+    process.env.LITELLM_PROXY_URL ||
+    "http://localhost:4040"
+  );
+}
+
+const LITELLM_URL = getLiteLLMUrl();
+const LITELLM_AUTH = `Bearer ${process.env.LITELLM_MASTER_KEY || ""}`;
+const PORT = parseInt(process.env.GATEWAY_PORT || "14041");
 
 // ============================================================================
 // DATABASE CONNECTION
@@ -34,7 +73,7 @@ let sessions: any = null;
 async function connectDB() {
   if (db) return;
 
-  const client = new MongoClient(process.env.MONGODB_URI, {
+  const client = new MongoClient(process.env.GATEWAY_MONGODB_URI, {
     maxPoolSize: 20,
     minPoolSize: 5,
     maxIdleTimeMS: 30000,
@@ -42,13 +81,13 @@ async function connectDB() {
   });
 
   await client.connect();
-  db = client.db('llm-gateway');
-  accessRequests = db.collection('access_requests');
-  apiKeys = db.collection('api_keys');
-  validatedUsers = db.collection('validated_users');
-  otps = db.collection('otps');
-  usageLogs = db.collection('usage_logs');
-  sessions = db.collection('sessions');
+  db = client.db("llm-gateway");
+  accessRequests = db.collection("access_requests");
+  apiKeys = db.collection("api_keys");
+  validatedUsers = db.collection("validated_users");
+  otps = db.collection("otps");
+  usageLogs = db.collection("usage_logs");
+  sessions = db.collection("sessions");
 
   // Indexes
   await apiKeys.createIndex({ key: 1 }, { unique: true });
@@ -60,7 +99,7 @@ async function connectDB() {
   await usageLogs.createIndex({ timestamp: -1 });
   await sessions.createIndex({ expires: 1 }, { expireAfterSeconds: 0 });
 
-  console.log('✅ MongoDB connected (LLM Gateway - Bun Stack)');
+  console.log("✅ MongoDB connected (LLM Gateway - Bun Stack)");
 }
 
 // ============================================================================
@@ -84,7 +123,7 @@ async function loadUser(email: string) {
 }
 
 async function validateApiKey(apiKey: string) {
-  const keyHash = createHash('sha256').update(apiKey.trim()).digest('hex');
+  const keyHash = createHash("sha256").update(apiKey.trim()).digest("hex");
 
   const cached = apiKeyCache.get(keyHash);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -98,12 +137,17 @@ async function validateApiKey(apiKey: string) {
   }
 
   // Legacy bcrypt fallback
-  const bcrypt = await import('bcryptjs');
-  const legacyKeys = await apiKeys.find({ revoked: false, keyType: { $ne: 'sha256' } }).toArray();
+  const bcrypt = await import("bcryptjs");
+  const legacyKeys = await apiKeys
+    .find({ revoked: false, keyType: { $ne: "sha256" } })
+    .toArray();
   for (const k of legacyKeys) {
     const match = await bcrypt.default.compare(apiKey.trim(), k.key);
     if (match) {
-      await apiKeys.updateOne({ _id: k._id }, { $set: { keyHash, keyType: 'sha256' } });
+      await apiKeys.updateOne(
+        { _id: k._id },
+        { $set: { keyHash, keyType: "sha256" } },
+      );
       return k;
     }
   }
@@ -137,7 +181,11 @@ function checkRateLimit(ip: string, windowMs = 60000, limit = 100): boolean {
   return true;
 }
 
-function checkOtpRateLimit(email: string): { allowed: boolean; remaining?: number; retryAfterMin?: number } {
+function checkOtpRateLimit(email: string): {
+  allowed: boolean;
+  remaining?: number;
+  retryAfterMin?: number;
+} {
   const now = Date.now();
   const key = email.toLowerCase();
   const record = otpRateLimitMap.get(key);
@@ -174,26 +222,35 @@ async function flushUsageQueue() {
   try {
     await usageLogs.insertMany(batch, { ordered: false });
   } catch (err) {
-    console.error('⚠️ Usage batch insert failed:', err.message);
+    console.error("⚠️ Usage batch insert failed:", err.message);
   }
 }
 
-setInterval(() => { flushUsageQueue().catch(() => {}); }, 2000).unref();
+setInterval(() => {
+  flushUsageQueue().catch(() => {});
+}, 2000).unref();
 
-function trackUsage(email: string, model: string, promptTokens: number, completionTokens: number, apiKeyHash: string | null) {
+function trackUsage(
+  email: string,
+  model: string,
+  promptTokens: number,
+  completionTokens: number,
+  apiKeyHash: string | null,
+) {
   const pricing: Record<string, { input: number; output: number }> = {
-    'claude-opus-4-6': { input: 0.000005, output: 0.000025 },
-    'claude-sonnet-4-6': { input: 0.000003, output: 0.000015 },
-    'claude-haiku-4-5': { input: 0.000001, output: 0.000005 },
-    'gpt-4o': { input: 0.0000025, output: 0.00001 },
-    'gpt-4o-mini': { input: 0.00000015, output: 0.0000006 },
-    'sonnet': { input: 0.000003, output: 0.000015 },
-    'opus': { input: 0.000005, output: 0.000025 },
-    'haiku': { input: 0.000001, output: 0.000005 },
+    "claude-opus-4-6": { input: 0.000005, output: 0.000025 },
+    "claude-sonnet-4-6": { input: 0.000003, output: 0.000015 },
+    "claude-haiku-4-5": { input: 0.000001, output: 0.000005 },
+    "gpt-4o": { input: 0.0000025, output: 0.00001 },
+    "gpt-4o-mini": { input: 0.00000015, output: 0.0000006 },
+    sonnet: { input: 0.000003, output: 0.000015 },
+    opus: { input: 0.000005, output: 0.000025 },
+    haiku: { input: 0.000001, output: 0.000005 },
   };
 
-  const rates = pricing[model] || pricing[model.replace(/-\d{8}$/, '')] || { input: 0, output: 0 };
-  const cost = (promptTokens * rates.input) + (completionTokens * rates.output);
+  const rates = pricing[model] ||
+    pricing[model.replace(/-\d{8}$/, "")] || { input: 0, output: 0 };
+  const cost = promptTokens * rates.input + completionTokens * rates.output;
 
   _usageQueue.push({
     email,
@@ -213,14 +270,14 @@ function trackUsage(email: string, model: string, promptTokens: number, completi
 
 // Health check
 async function healthHandler() {
-  return Response.json({ status: 'ok', uptime: process.uptime() });
+  return Response.json({ status: "ok", uptime: process.uptime() });
 }
 
 // Serve frontend
 async function serveFrontend() {
-  const file = Bun.file('./index.html');
+  const file = Bun.file("./index.html");
   return new Response(await file.text(), {
-    headers: { 'Content-Type': 'text/html' }
+    headers: { "Content-Type": "text/html" },
   });
 }
 
@@ -230,45 +287,48 @@ async function serveStaticFile(path: string): Promise<Response | null> {
   if (await file.exists()) {
     const contentType = getContentType(path);
     return new Response(await file.arrayBuffer(), {
-      headers: { 'Content-Type': contentType }
+      headers: { "Content-Type": contentType },
     });
   }
   return null;
 }
 
 function getContentType(path: string): string {
-  const ext = path.split('.').pop()?.toLowerCase();
+  const ext = path.split(".").pop()?.toLowerCase();
   const types: Record<string, string> = {
-    'css': 'text/css',
-    'js': 'application/javascript',
-    'mjs': 'application/javascript',
-    'ts': 'application/typescript',
-    'tsx': 'application/typescript',
-    'html': 'text/html',
-    'json': 'application/json',
-    'png': 'image/png',
-    'jpg': 'image/jpeg',
-    'jpeg': 'image/jpeg',
-    'gif': 'image/gif',
-    'svg': 'image/svg+xml',
-    'ico': 'image/x-icon',
+    css: "text/css",
+    js: "application/javascript",
+    mjs: "application/javascript",
+    ts: "application/typescript",
+    tsx: "application/typescript",
+    html: "text/html",
+    json: "application/json",
+    png: "image/png",
+    jpg: "image/jpeg",
+    jpeg: "image/jpeg",
+    gif: "image/gif",
+    svg: "image/svg+xml",
+    ico: "image/x-icon",
   };
-  return types[ext || 'text/plain'] || 'text/plain';
+  return types[ext || "text/plain"] || "text/plain";
 }
 
 // OTP request
 async function requestOtpHandler(req: Request) {
   const { email } = await req.json();
 
-  if (!email || !email.includes('@')) {
-    return Response.json({ error: 'Valid email required' }, { status: 400 });
+  if (!email || !email.includes("@")) {
+    return Response.json({ error: "Valid email required" }, { status: 400 });
   }
 
   const limit = checkOtpRateLimit(email);
   if (!limit.allowed) {
-    return Response.json({
-      error: `Too many attempts. Try again in ${limit.retryAfterMin} minutes.`
-    }, { status: 429 });
+    return Response.json(
+      {
+        error: `Too many attempts. Try again in ${limit.retryAfterMin} minutes.`,
+      },
+      { status: 429 },
+    );
   }
 
   const code = generateOTP();
@@ -284,13 +344,13 @@ async function requestOtpHandler(req: Request) {
   await validatedUsers.updateOne(
     { email: email.toLowerCase() },
     {
-      $set: { email: email.toLowerCase(), role: 'guest' },
-      $setOnInsert: { createdAt: new Date() }
+      $set: { email: email.toLowerCase(), role: "guest" },
+      $setOnInsert: { createdAt: new Date() },
     },
-    { upsert: true }
+    { upsert: true },
   );
 
-  return Response.json({ success: true, message: 'Code sent!' });
+  return Response.json({ success: true, message: "Code sent!" });
 }
 
 // OTP verification
@@ -304,7 +364,7 @@ async function verifyOtpHandler(req: Request) {
   });
 
   if (!otpRecord) {
-    return Response.json({ error: 'Invalid or expired code' }, { status: 400 });
+    return Response.json({ error: "Invalid or expired code" }, { status: 400 });
   }
 
   await otps.deleteOne({ _id: otpRecord._id });
@@ -313,7 +373,7 @@ async function verifyOtpHandler(req: Request) {
   if (!user) {
     await validatedUsers.insertOne({
       email: email.toLowerCase(),
-      role: 'guest',
+      role: "guest",
       createdAt: new Date(),
     });
   }
@@ -324,7 +384,7 @@ async function verifyOtpHandler(req: Request) {
     sessionId,
     userId: email.toLowerCase(),
     email: email.toLowerCase(),
-    role: 'guest',
+    role: "guest",
   });
 
   await sessions.insertOne({
@@ -333,14 +393,17 @@ async function verifyOtpHandler(req: Request) {
       sessionId,
       userId: email.toLowerCase(),
       email: email.toLowerCase(),
-      role: 'guest',
-      cookie: { expires: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) }
+      role: "guest",
+      cookie: { expires: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000) },
     }),
     expires: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
   });
 
-  const response = Response.json({ success: true, role: 'guest' });
-  response.headers.set('Set-Cookie', `sessionId=${sessionToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${365 * 24 * 60 * 60}`);
+  const response = Response.json({ success: true, role: "guest" });
+  response.headers.set(
+    "Set-Cookie",
+    `sessionId=${sessionToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${365 * 24 * 60 * 60}`,
+  );
   return response;
 }
 
@@ -372,21 +435,26 @@ async function sessionStatusHandler(req: Request) {
 // Logout
 async function logoutHandler() {
   const response = Response.json({ success: true });
-  response.headers.set('Set-Cookie', 'sessionId=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT');
+  response.headers.set(
+    "Set-Cookie",
+    "sessionId=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+  );
   return response;
 }
 
 // API Keys
 async function getApiKeysHandler(req: Request) {
   const sessionToken = getSessionCookie(req);
-  if (!sessionToken) return Response.json({ error: 'Authentication required' }, { status: 401 });
+  if (!sessionToken)
+    return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const session = await verifySession(sessionToken);
-  if (!session) return Response.json({ error: 'Authentication required' }, { status: 401 });
+  if (!session)
+    return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const user = await loadUser(session.email);
-  if (!user || user.role === 'guest') {
-    return Response.json({ error: 'User access required' }, { status: 403 });
+  if (!user || user.role === "guest") {
+    return Response.json({ error: "User access required" }, { status: 403 });
   }
 
   const keys = await apiKeys.find({ email: user.email }).toArray();
@@ -395,26 +463,28 @@ async function getApiKeysHandler(req: Request) {
 
 async function createApiKeyHandler(req: Request) {
   const sessionToken = getSessionCookie(req);
-  if (!sessionToken) return Response.json({ error: 'Authentication required' }, { status: 401 });
+  if (!sessionToken)
+    return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const session = await verifySession(sessionToken);
-  if (!session) return Response.json({ error: 'Authentication required' }, { status: 401 });
+  if (!session)
+    return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const user = await loadUser(session.email);
-  if (!user || user.role === 'guest') {
-    return Response.json({ error: 'User access required' }, { status: 403 });
+  if (!user || user.role === "guest") {
+    return Response.json({ error: "User access required" }, { status: 403 });
   }
 
   const { name } = await req.json();
-  const key = `sk_${crypto.randomBytes(16).toString('hex')}`;
-  const keyHash = createHash('sha256').update(key.trim()).digest('hex');
+  const key = `sk_${crypto.randomBytes(16).toString("hex")}`;
+  const keyHash = createHash("sha256").update(key.trim()).digest("hex");
 
   await apiKeys.insertOne({
     email: user.email,
-    name: name || 'Unnamed Key',
+    name: name || "Unnamed Key",
     key,
     keyHash,
-    keyType: 'sha256',
+    keyType: "sha256",
     revoked: false,
     createdAt: new Date(),
   });
@@ -424,20 +494,22 @@ async function createApiKeyHandler(req: Request) {
 
 async function revokeApiKeyHandler(req: Request) {
   const sessionToken = getSessionCookie(req);
-  if (!sessionToken) return Response.json({ error: 'Authentication required' }, { status: 401 });
+  if (!sessionToken)
+    return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const session = await verifySession(sessionToken);
-  if (!session) return Response.json({ error: 'Authentication required' }, { status: 401 });
+  if (!session)
+    return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const user = await loadUser(session.email);
-  if (!user || user.role === 'guest') {
-    return Response.json({ error: 'User access required' }, { status: 403 });
+  if (!user || user.role === "guest") {
+    return Response.json({ error: "User access required" }, { status: 403 });
   }
 
   const { keyId } = await req.json();
   await apiKeys.updateOne(
     { _id: keyId, email: user.email },
-    { $set: { revoked: true, revokedAt: new Date() } }
+    { $set: { revoked: true, revokedAt: new Date() } },
   );
 
   return Response.json({ success: true });
@@ -446,52 +518,62 @@ async function revokeApiKeyHandler(req: Request) {
 // Models
 async function getModelsHandler() {
   const res = await fetch(`${LITELLM_URL}/model/info`, {
-    headers: { 'Authorization': LITELLM_AUTH },
+    headers: { Authorization: LITELLM_AUTH },
     signal: AbortSignal.timeout(8000),
   });
 
   if (!res.ok) {
-    return Response.json({ error: 'Failed to fetch models' }, { status: res.status });
+    return Response.json(
+      { error: "Failed to fetch models" },
+      { status: res.status },
+    );
   }
 
   const data = await res.json();
-  return Response.json({ models: data.data || [], count: data.data?.length || 0 });
+  return Response.json({
+    models: data.data || [],
+    count: data.data?.length || 0,
+  });
 }
 
 // Admin: pending requests
 async function getPendingRequestsHandler(req: Request) {
   const sessionToken = getSessionCookie(req);
-  if (!sessionToken) return Response.json({ error: 'Authentication required' }, { status: 401 });
+  if (!sessionToken)
+    return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const session = await verifySession(sessionToken);
-  if (!session) return Response.json({ error: 'Authentication required' }, { status: 401 });
+  if (!session)
+    return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const user = await loadUser(session.email);
-  if (!user || user.role !== 'admin') {
-    return Response.json({ error: 'Admin access required' }, { status: 403 });
+  if (!user || user.role !== "admin") {
+    return Response.json({ error: "Admin access required" }, { status: 403 });
   }
 
-  const requests = await accessRequests.find({ status: 'pending' }).toArray();
+  const requests = await accessRequests.find({ status: "pending" }).toArray();
   return Response.json({ requests });
 }
 
 // Admin: approve user
 async function approveUserHandler(req: Request) {
   const sessionToken = getSessionCookie(req);
-  if (!sessionToken) return Response.json({ error: 'Authentication required' }, { status: 401 });
+  if (!sessionToken)
+    return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const session = await verifySession(sessionToken);
-  if (!session) return Response.json({ error: 'Authentication required' }, { status: 401 });
+  if (!session)
+    return Response.json({ error: "Authentication required" }, { status: 401 });
 
   const user = await loadUser(session.email);
-  if (!user || user.role !== 'admin') {
-    return Response.json({ error: 'Admin access required' }, { status: 403 });
+  if (!user || user.role !== "admin") {
+    return Response.json({ error: "Admin access required" }, { status: 403 });
   }
 
   const { email } = await req.json();
   await validatedUsers.updateOne(
     { email: email.toLowerCase() },
-    { $set: { role: 'user', approvedAt: new Date() } }
+    { $set: { role: "user", approvedAt: new Date() } },
   );
 
   userProfileCache.delete(email.toLowerCase());
@@ -501,7 +583,7 @@ async function approveUserHandler(req: Request) {
 // LiteLLM Proxy
 async function proxyHandler(req: Request) {
   const url = new URL(req.url);
-  const path = url.pathname.replace(/^\/v1/, '');
+  const path = url.pathname.replace(/^\/v1/, "");
   const targetUrl = `${LITELLM_URL}/v1${path}${url.search}`;
 
   const apiKey = extractApiKey(req);
@@ -511,7 +593,7 @@ async function proxyHandler(req: Request) {
   if (apiKey) {
     const keyRecord = await validateApiKey(apiKey);
     if (!keyRecord) {
-      return Response.json({ error: 'Invalid API key' }, { status: 401 });
+      return Response.json({ error: "Invalid API key" }, { status: 401 });
     }
     email = keyRecord.email;
     keyHash = keyRecord.keyHash;
@@ -521,7 +603,7 @@ async function proxyHandler(req: Request) {
       const session = await verifySession(sessionToken);
       if (session) {
         const user = await loadUser(session.email);
-        if (user && user.role !== 'guest') {
+        if (user && user.role !== "guest") {
           email = user.email;
         }
       }
@@ -529,20 +611,22 @@ async function proxyHandler(req: Request) {
   }
 
   if (!email) {
-    return Response.json({ error: 'Authentication required' }, { status: 401 });
+    return Response.json({ error: "Authentication required" }, { status: 401 });
   }
 
   // Read body for usage tracking
   const body = await req.text();
   let bodyObj: any = {};
-  try { bodyObj = JSON.parse(body); } catch {}
+  try {
+    bodyObj = JSON.parse(body);
+  } catch {}
 
-  const model = bodyObj.model || 'unknown';
+  const model = bodyObj.model || "unknown";
 
   // Forward request
   const headers = new Headers(req.headers);
-  headers.set('Authorization', LITELLM_AUTH);
-  headers.delete('x-api-key');
+  headers.set("Authorization", LITELLM_AUTH);
+  headers.delete("x-api-key");
 
   const proxyRes = await fetch(targetUrl, {
     method: req.method,
@@ -557,7 +641,13 @@ async function proxyHandler(req: Request) {
       const data = await resClone.json();
       const usage = data.usage;
       if (usage) {
-        trackUsage(email!, model, usage.prompt_tokens || 0, usage.completion_tokens || 0, keyHash);
+        trackUsage(
+          email!,
+          model,
+          usage.prompt_tokens || 0,
+          usage.completion_tokens || 0,
+          keyHash,
+        );
       }
     } catch {}
   }
@@ -587,52 +677,52 @@ const server = Bun.serve({
 
   routes: {
     // Static files
-    '/public/*': async (req) => {
+    "/public/*": async (req) => {
       const url = new URL(req.url);
       const path = url.pathname;
       const response = await serveStaticFile(path);
-      return response || new Response('Not found', { status: 404 });
+      return response || new Response("Not found", { status: 404 });
     },
-    '/src/index.css': async (req) => {
-      const response = await serveStaticFile('/src/index.css');
-      return response || new Response('Not found', { status: 404 });
+    "/src/index.css": async (req) => {
+      const response = await serveStaticFile("/src/index.css");
+      return response || new Response("Not found", { status: 404 });
     },
 
     // Health
-    '/api/health': { GET: healthHandler },
+    "/api/health": { GET: healthHandler },
 
     // Auth
-    '/api/auth/request-otp': { POST: requestOtpHandler },
-    '/api/auth/verify-otp': { POST: verifyOtpHandler },
-    '/api/auth/status': { GET: sessionStatusHandler },
-    '/api/auth/logout': { GET: logoutHandler },
+    "/api/auth/request-otp": { POST: requestOtpHandler },
+    "/api/auth/verify-otp": { POST: verifyOtpHandler },
+    "/api/auth/status": { GET: sessionStatusHandler },
+    "/api/auth/logout": { GET: logoutHandler },
 
     // API Keys
-    '/api/keys': { GET: getApiKeysHandler, POST: createApiKeyHandler },
-    '/api/keys/revoke': { POST: revokeApiKeyHandler },
+    "/api/keys": { GET: getApiKeysHandler, POST: createApiKeyHandler },
+    "/api/keys/revoke": { POST: revokeApiKeyHandler },
 
     // Models
-    '/api/models': { GET: getModelsHandler },
+    "/api/models": { GET: getModelsHandler },
 
     // Admin
-    '/api/admin/pending': { GET: getPendingRequestsHandler },
-    '/api/admin/approve': { POST: approveUserHandler },
+    "/api/admin/pending": { GET: getPendingRequestsHandler },
+    "/api/admin/approve": { POST: approveUserHandler },
 
     // Proxy (LiteLLM)
-    '/v1/chat/completions': { POST: proxyHandler },
-    '/v1/embeddings': { POST: proxyHandler },
-    '/v1/completions': { POST: proxyHandler },
-    '/v1/audio/transcriptions': { POST: proxyHandler },
-    '/v1/models': { GET: proxyHandler },
-    '/v1/model/info': { GET: proxyHandler },
+    "/v1/chat/completions": { POST: proxyHandler },
+    "/v1/embeddings": { POST: proxyHandler },
+    "/v1/completions": { POST: proxyHandler },
+    "/v1/audio/transcriptions": { POST: proxyHandler },
+    "/v1/models": { GET: proxyHandler },
+    "/v1/model/info": { GET: proxyHandler },
 
     // Frontend - serve index.html for all UI routes
-    '/auth': { GET: serveFrontend },
-    '/dashboard': { GET: serveFrontend },
-    '/dashboard/*': { GET: serveFrontend },
+    "/auth": { GET: serveFrontend },
+    "/dashboard": { GET: serveFrontend },
+    "/dashboard/*": { GET: serveFrontend },
 
     // Root
-    '/': { GET: () => Response.redirect('/dashboard', 302) },
+    "/": { GET: () => Response.redirect("/dashboard", 302) },
   },
 
   development: {
