@@ -24,4 +24,5 @@ if [ -d "$VENV_DIR" ]; then
   export PATH="$VENV_DIR/bin:$PATH"
 fi
 
+export PYTHONPATH="$BIN_DIR${PYTHONPATH:+:$PYTHONPATH}"
 exec python3 -m lib "$@"
