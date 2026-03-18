@@ -6,13 +6,14 @@ let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
 let smtpAvailable = false;
 
 function initTransporter(): boolean {
-  const email = process.env.GATEWAY_PROTON_EMAIL || process.env.PROTON_EMAIL;
+  // hydroxide SMTP auth uses the ProtonMail username (not email address)
+  const smtpUser = process.env.GATEWAY_PROTON_USERNAME || process.env.GATEWAY_PROTON_EMAIL || process.env.PROTON_EMAIL;
   const pass  = process.env.GATEWAY_PROTON_BRIDGE_PASS
     || process.env.GATEWAY_PROTON_PASSWORD
     || process.env.PROTON_PASSWORD;
 
-  if (!email || !pass) {
-    console.warn('⚠️ ProtonMail credentials not configured (set GATEWAY_PROTON_EMAIL + GATEWAY_PROTON_BRIDGE_PASS in .env)');
+  if (!smtpUser || !pass) {
+    console.warn('⚠️ ProtonMail credentials not configured (set GATEWAY_PROTON_USERNAME + GATEWAY_PROTON_BRIDGE_PASS in .env)');
     return false;
   }
 
@@ -21,7 +22,7 @@ function initTransporter(): boolean {
       host: process.env.GATEWAY_PROTON_SMTP_HOST || process.env.PROTON_SMTP_HOST || '127.0.0.1',
       port: parseInt(process.env.GATEWAY_PROTON_SMTP_PORT || process.env.PROTON_SMTP_PORT || '1025'),
       secure: false, // hydroxide uses plain SMTP locally
-      auth: { user: email, pass }
+      auth: { user: smtpUser, pass }
     });
     return true;
   } catch (error) {
@@ -90,6 +91,11 @@ This code will expire in ${expiryMinutes} minutes.
 
 If you didn't request this code, please ignore this email.
   `.trim();
+
+  // Lazy-init: try to connect if not yet verified
+  if (!smtpAvailable) {
+    await verifyConnection();
+  }
 
   // If SMTP is not available, log the code for testing
   if (!smtpAvailable || !transporter) {

@@ -87,13 +87,51 @@ def _hydroxide_bin() -> str | None:
 
 
 def _hydroxide_authenticated() -> bool:
-    auth_dir = os.path.expanduser("~/.config/hydroxide")
-    return os.path.isdir(auth_dir) and bool(os.listdir(auth_dir))
+    """Check if hydroxide has stored credentials (file on Linux, keychain on macOS)."""
+    # Linux: XDG config dir
+    xdg = os.path.expanduser("~/.config/hydroxide")
+    if os.path.isdir(xdg) and os.listdir(xdg):
+        return True
+    # macOS: go-appdir uses ~/Library/Application Support
+    mac = os.path.expanduser("~/Library/Application Support/hydroxide")
+    if os.path.isdir(mac) and os.listdir(mac):
+        return True
+    # Fallback: try briefly running hydroxide smtp to see if it starts without prompting
+    hbin = _hydroxide_bin()
+    if not hbin:
+        return False
+    try:
+        import time
+        proc = subprocess.Popen(
+            [hbin, "smtp"],
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        time.sleep(1)
+        running = proc.poll() is None
+        proc.terminate()
+        proc.wait(timeout=2)
+        return running
+    except Exception:
+        return False
+
+
+def _totp_code(secret: str) -> str:
+    """Generate current 6-digit TOTP code from a base32 secret (RFC 6238)."""
+    import base64, hmac, hashlib, struct, time
+    secret = secret.upper().strip()
+    pad = (-len(secret)) % 8
+    key = base64.b32decode(secret + "=" * pad)
+    t = struct.pack(">Q", int(time.time()) // 30)
+    h = hmac.new(key, t, hashlib.sha1).digest()
+    offset = h[-1] & 0x0F
+    code = struct.unpack(">I", h[offset:offset + 4])[0] & 0x7FFFFFFF
+    return str(code % 1_000_000).zfill(6)
 
 
 def hydroxide_auth_auto() -> bool:
-    """Authenticate hydroxide non-interactively using GATEWAY_PROTON_PASSWORD from env."""
-    import pty, select
+    """Authenticate hydroxide non-interactively using env credentials."""
+    import pty, select, time
 
     hbin = _hydroxide_bin()
     if not hbin:
@@ -102,6 +140,7 @@ def hydroxide_auth_auto() -> bool:
 
     username = os.environ.get("GATEWAY_PROTON_USERNAME", "")
     password = os.environ.get("GATEWAY_PROTON_PASSWORD", "")
+    totp_secret = os.environ.get("GATEWAY_PROTON_2FA_SECRET", "")
     if not username or not password:
         warn("Set GATEWAY_PROTON_USERNAME and GATEWAY_PROTON_PASSWORD in .env first")
         return False
@@ -115,8 +154,8 @@ def hydroxide_auth_auto() -> bool:
     os.close(slave_fd)
 
     buf = b""
-    sent = False
-    import time
+    sent_password = False
+    sent_totp = False
     deadline = time.time() + 30
     try:
         while proc.poll() is None and time.time() < deadline:
@@ -124,9 +163,19 @@ def hydroxide_auth_auto() -> bool:
             if r:
                 chunk = os.read(master_fd, 1024)
                 buf += chunk
-                if not sent and b"Password" in buf:
+                if not sent_password and b"Password" in buf:
                     os.write(master_fd, (password + "\n").encode())
-                    sent = True
+                    sent_password = True
+                elif sent_password and not sent_totp and b"2FA" in buf:
+                    if totp_secret:
+                        code = _totp_code(totp_secret)
+                        info(f"Sending 2FA TOTP code: {code}")
+                        os.write(master_fd, (code + "\n").encode())
+                    else:
+                        warn("2FA required but GATEWAY_PROTON_2FA_SECRET not set in .env")
+                        proc.terminate()
+                        break
+                    sent_totp = True
         proc.wait(timeout=5)
     except Exception:
         pass
@@ -138,9 +187,33 @@ def hydroxide_auth_auto() -> bool:
 
     if _hydroxide_authenticated():
         info("hydroxide authenticated successfully")
+        # Extract bridge password from output and save to .env
+        import re
+        m = re.search(rb"Bridge password: (.+)", buf)
+        if m:
+            bridge_pass = m.group(1).decode().strip()
+            _save_env_var("GATEWAY_PROTON_BRIDGE_PASS", bridge_pass)
+            info(f"Bridge password saved to .env")
         return True
-    warn("hydroxide authentication may have failed — check: ls ~/.config/hydroxide/")
+    warn("hydroxide authentication failed")
     return False
+
+
+def _save_env_var(key: str, value: str) -> None:
+    """Upsert a KEY=value line in PROJECT_DIR/.env."""
+    from ..common.paths import PROJECT_DIR
+    env_file = PROJECT_DIR / ".env"
+    if not env_file.exists():
+        return
+    text = env_file.read_text()
+    import re
+    pattern = re.compile(rf"^{re.escape(key)}=.*$", re.MULTILINE)
+    new_line = f"{key}={value}"
+    if pattern.search(text):
+        text = pattern.sub(new_line, text)
+    else:
+        text = text.rstrip("\n") + f"\n{new_line}\n"
+    env_file.write_text(text)
 
 
 def hydroxide_start() -> bool:
