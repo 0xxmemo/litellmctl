@@ -68,7 +68,7 @@ export function ModelUsagePieChart({ data }: ModelUsagePieChartProps) {
         {/* On mobile show only first MOBILE_SHOW unless expanded */}
         {(legendExpanded ? data : visibleItems).map((entry, index) => (
           <div
-            key={entry.name}
+            key={`${entry.name}-${index}`}
             className="flex items-center gap-1.5 min-w-0"
             title={entry.name}
           >
@@ -117,7 +117,7 @@ export function ModelUsagePieChart({ data }: ModelUsagePieChartProps) {
               dataKey="value"
             >
               {data.map((entry, index) => (
-                <Cell key={entry.name} fill={COLORS[index % COLORS.length]} />
+                <Cell key={`${entry.name}-${index}`} fill={COLORS[index % COLORS.length]} />
               ))}
             </Pie>
             <Tooltip 
@@ -163,7 +163,7 @@ export function ModelUsagePieChart({ data }: ModelUsagePieChartProps) {
                 const effectiveProviderName = model.providerName || formatProviderName(effectiveProvider)
                 const pct = typeof model.percentage === 'number' ? model.percentage : parseFloat(String(model.percentage)) || 0
                 return (
-                  <TableRow key={model.name} className="h-8">
+                  <TableRow key={`${model.name}-${index}`} className="h-8">
                     <TableCell className="py-1 pl-2 pr-1 font-medium max-w-0">
                       <div className="flex items-center gap-1.5 min-w-0">
                         <span
