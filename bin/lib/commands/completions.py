@@ -15,10 +15,11 @@ BASH_COMPLETIONS = r"""_litellmctl_completions() {
   prev="${COMP_WORDS[COMP_CWORD-1]}"
   pprev="${COMP_WORDS[COMP_CWORD-2]:-}"
 
-  commands="auth wizard install init-env start stop restart r logs proxy status local gateway uninstall toggle-claude setup-completions help"
+  commands="auth wizard install init-env start stop restart r logs proxy status local gateway protonmail uninstall toggle-claude setup-completions help"
   auth_cmds="chatgpt gemini qwen kimi codex status refresh export import"
   uninstall_cmds="service db embedding transcription searxng gateway protonmail"
   gateway_cmds="start stop restart status logs set-role users routes api"
+  protonmail_cmds="start stop restart status auth"
   # gateway api <cmd...> → dynamic completions from route source files
   # Find position of "api" in COMP_WORDS and complete segments after it
   local api_pos=-1
@@ -65,6 +66,9 @@ print(' '.join(_completable_segments([s for s in '''$segs'''.split() if s])))" 2
     gateway)
       COMPREPLY=( $(compgen -W "$gateway_cmds" -- "$cur") )
       return ;;
+    protonmail)
+      COMPREPLY=( $(compgen -W "$protonmail_cmds" -- "$cur") )
+      return ;;
   esac
 }
 complete -F _litellmctl_completions litellmctl"""
@@ -85,6 +89,7 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
     'status:Show auth + proxy + local server status'
     'local:Check local inference server reachability'
     'gateway:Manage LLM API Gateway UI (start/stop/status/api)'
+    'protonmail:Manage ProtonMail SMTP bridge (start/stop/status/auth)'
     'uninstall:Uninstall service, database config, or local servers'
     'toggle-claude:Toggle Claude Code between direct API and proxy'
     'setup-completions:Add litellmctl to your shell'
@@ -121,6 +126,14 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
     'routes:List all API endpoints'
     'api:Call a gateway API endpoint (bypasses auth)'
   )
+  local -a protonmail_cmds
+  protonmail_cmds=(
+    'start:Start hydroxide SMTP bridge'
+    'stop:Stop hydroxide SMTP bridge'
+    'restart:Restart hydroxide SMTP bridge'
+    'status:Show ProtonMail bridge status'
+    'auth:Authenticate hydroxide with ProtonMail'
+  )
   if (( CURRENT == 2 )); then
     _describe 'command' commands
   elif (( CURRENT == 3 )); then
@@ -131,6 +144,7 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
       start|proxy) compadd -- --port --config ;;
       install) compadd -- --with-db --without-db --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription --with-searxng --without-searxng --with-gateway --without-gateway --with-protonmail --without-protonmail ;;
       gateway) _describe 'gateway command' gateway_cmds ;;
+      protonmail) _describe 'protonmail command' protonmail_cmds ;;
     esac
   elif (( CURRENT == 4 )); then
     case "${words[2]}" in

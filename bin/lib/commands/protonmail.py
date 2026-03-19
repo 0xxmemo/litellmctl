@@ -198,6 +198,66 @@ def hydroxide_auth_auto() -> bool:
     return False
 
 
+def hydroxide_auth_interactive(hbin: str, username: str) -> bool:
+    """Run hydroxide auth interactively, capturing bridge password from output."""
+    import pty, re, select, time
+
+    info(f"Authenticating hydroxide as {username} ...")
+    info("Enter your ProtonMail password when prompted.")
+    console.print()
+
+    master_fd, slave_fd = pty.openpty()
+    proc = subprocess.Popen(
+        [hbin, "auth", username],
+        stdin=slave_fd, stdout=slave_fd, stderr=slave_fd,
+    )
+    os.close(slave_fd)
+
+    buf = b""
+    deadline = time.time() + 120  # generous timeout for interactive auth
+    try:
+        import sys
+        while proc.poll() is None and time.time() < deadline:
+            r, _, _ = select.select([master_fd], [], [], 0.1)
+            if r:
+                chunk = os.read(master_fd, 1024)
+                buf += chunk
+                # Pass output through to the terminal
+                sys.stdout.buffer.write(chunk)
+                sys.stdout.buffer.flush()
+
+            # Forward user input to the pty
+            ri, _, _ = select.select([sys.stdin], [], [], 0)
+            if ri:
+                user_input = os.read(sys.stdin.fileno(), 1024)
+                os.write(master_fd, user_input)
+        proc.wait(timeout=5)
+    except Exception:
+        pass
+    finally:
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
+
+    console.print()
+
+    if _hydroxide_authenticated():
+        info("hydroxide authenticated successfully")
+        m = re.search(rb"Bridge password: (.+)", buf)
+        if m:
+            bridge_pass = m.group(1).decode().strip()
+            _save_env_var("GATEWAY_PROTON_BRIDGE_PASS", bridge_pass)
+            info("Bridge password saved to .env")
+        else:
+            warn("Could not extract bridge password from output.")
+            warn("Set GATEWAY_PROTON_BRIDGE_PASS manually in .env")
+        info("Run: litellmctl protonmail start")
+        return True
+    warn("hydroxide authentication failed")
+    return False
+
+
 def _save_env_var(key: str, value: str) -> None:
     """Upsert a KEY=value line in PROJECT_DIR/.env."""
     from ..common.paths import PROJECT_DIR
@@ -333,14 +393,24 @@ def cmd_protonmail(subcmd: str = "status") -> None:
             if ok:
                 info("Run: litellmctl protonmail start")
         else:
-            # No password in env — print manual instructions
+            # No password in env — run hydroxide auth interactively
+            # and capture the bridge password from its output
             hbin = _hydroxide_bin()
             if not hbin:
                 warn("hydroxide not installed. Run: litellmctl install --with-protonmail")
                 return
-            username = os.environ.get("GATEWAY_PROTON_USERNAME", "<your-username>")
-            info(f"Run: {hbin} auth {username}")
-            info("After authenticating, run: litellmctl protonmail start")
+            username = os.environ.get("GATEWAY_PROTON_USERNAME", "")
+            if not username:
+                from ..common.platform import is_interactive as _is_interactive
+                if _is_interactive():
+                    from ..common.deps import require_questionary
+                    username = require_questionary().text(
+                        "ProtonMail username:",
+                    ).ask() or ""
+                if not username:
+                    warn("Set GATEWAY_PROTON_USERNAME in .env or pass interactively")
+                    return
+            hydroxide_auth_interactive(hbin, username)
     else:
         from ..common.formatting import error
         error(f"Unknown subcommand: {subcmd}")
