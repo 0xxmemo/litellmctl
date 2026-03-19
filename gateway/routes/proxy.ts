@@ -2,12 +2,9 @@ import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
 import { extractApiKey } from "../lib/auth";
 import { validateApiKey, requireUser, trackUsage } from "../lib/db";
 
-const _textDecoder = new TextDecoder();
-
 /**
  * Resolve x-litellm-model-id to the actual underlying model by querying
- * LiteLLM /model/info. Atomic per-request — no pre-built maps.
- * Runs in the fire-and-forget tracking path so it never blocks the client.
+ * LiteLLM /model/info. Runs in the background tracking path only.
  */
 async function resolveModelById(modelId: string): Promise<string | null> {
   try {
@@ -24,6 +21,80 @@ async function resolveModelById(modelId: string): Promise<string | null> {
     }
   } catch {}
   return null;
+}
+
+/**
+ * Fire-and-forget: extract usage from a cloned non-streaming response.
+ */
+function trackFromJson(
+  clone: Response,
+  email: string,
+  requestedModel: string | null,
+  keyHash: string | null,
+  endpoint: string,
+  litellmModelId: string | null,
+) {
+  clone.json().then(async (data) => {
+    const usage = data.usage;
+    if (!usage) return;
+    let actualModel = data.model || requestedModel || "unknown";
+    if (litellmModelId) {
+      const resolved = await resolveModelById(litellmModelId);
+      if (resolved) actualModel = resolved;
+    }
+    trackUsage(
+      email,
+      actualModel,
+      usage.prompt_tokens ?? usage.input_tokens ?? 0,
+      usage.completion_tokens ?? usage.output_tokens ?? 0,
+      keyHash,
+      requestedModel || undefined,
+      endpoint,
+    );
+  }).catch(() => {});
+}
+
+/**
+ * Fire-and-forget: extract usage from the final SSE events of a cloned
+ * streaming response.
+ */
+function trackFromSSE(
+  clone: Response,
+  email: string,
+  requestedModel: string | null,
+  keyHash: string | null,
+  endpoint: string,
+  litellmModelId: string | null,
+) {
+  clone.text().then(async (text) => {
+    let usage: any = null;
+    let model: string | null = null;
+    // Scan backwards — usage is in one of the last events
+    for (const line of text.split("\n").reverse()) {
+      if (!line.startsWith("data: ")) continue;
+      try {
+        const evt = JSON.parse(line.slice(6));
+        if (evt.usage) { usage = evt.usage; model = model || evt.model; break; }
+        if (evt.type === "message_delta" && evt.usage) { usage = evt.usage; break; }
+        if (evt.type === "message_start" && evt.message) { model = evt.message.model; }
+      } catch {}
+    }
+    if (!usage) return;
+    let actualModel = model || requestedModel || "unknown";
+    if (litellmModelId) {
+      const resolved = await resolveModelById(litellmModelId);
+      if (resolved) actualModel = resolved;
+    }
+    trackUsage(
+      email,
+      actualModel,
+      usage.prompt_tokens ?? usage.input_tokens ?? 0,
+      usage.completion_tokens ?? usage.output_tokens ?? 0,
+      keyHash,
+      requestedModel || undefined,
+      endpoint,
+    );
+  }).catch(() => {});
 }
 
 // LiteLLM Proxy — requireUser (not guest), with fire-and-forget usage tracking
@@ -43,15 +114,14 @@ async function proxyHandler(req: Request) {
     if (keyRecord) keyHash = keyRecord.keyHash;
   }
 
-  // Read body to extract requested model
-  const body = await req.text();
+  // Read body once to extract requested model
+  const body = await req.arrayBuffer();
   let requestedModel: string | null = null;
   try {
-    const parsed = JSON.parse(body);
-    requestedModel = parsed.model || null;
+    requestedModel = JSON.parse(new TextDecoder().decode(body)).model || null;
   } catch {}
 
-  // Forward request to LiteLLM
+  // Forward to LiteLLM — let Bun handle the proxy pipeline natively
   const headers = new Headers(req.headers);
   headers.set("Authorization", LITELLM_AUTH);
   headers.delete("x-api-key");
@@ -59,71 +129,34 @@ async function proxyHandler(req: Request) {
   const proxyRes = await fetch(targetUrl, {
     method: req.method,
     headers,
-    body: body || undefined,
+    body: body.byteLength > 0 ? body : undefined,
   });
 
-  // Fire-and-forget usage tracking via tee() — client gets response immediately
-  if (proxyRes.body && proxyRes.ok) {
-    const [trackStream, clientStream] = proxyRes.body.tee();
-    // Grab the model-id header before returning (headers are available immediately)
+  // Usage tracking via Response.clone() — Bun streams the original to the
+  // client through its native pipeline; the clone is consumed in background.
+  if (proxyRes.ok) {
     const litellmModelId = proxyRes.headers.get("x-litellm-model-id");
+    const contentType = proxyRes.headers.get("content-type") || "";
+    const isSSE = contentType.includes("text/event-stream");
+    const clone = proxyRes.clone();
 
-    // Background: read the tracking copy and log usage (never blocks client)
-    (async () => {
-      try {
-        const reader = trackStream.getReader();
-        const chunks: Uint8Array[] = [];
-        let totalLen = 0;
-        for (;;) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          chunks.push(value);
-          totalLen += value.length;
-        }
-        const merged = new Uint8Array(totalLen);
-        let offset = 0;
-        for (const chunk of chunks) {
-          merged.set(chunk, offset);
-          offset += chunk.length;
-        }
-        const data = JSON.parse(_textDecoder.decode(merged));
-        const usage = data.usage;
-        if (usage) {
-          // Resolve the actual underlying model from x-litellm-model-id.
-          // This is the deployment that actually handled the request,
-          // even through fallback chains. No cached maps needed.
-          let actualModel = data.model || requestedModel || "unknown";
-          if (litellmModelId) {
-            const resolved = await resolveModelById(litellmModelId);
-            if (resolved) actualModel = resolved;
-          }
-
-          trackUsage(
-            auth.email,
-            actualModel,
-            usage.prompt_tokens ?? usage.input_tokens ?? 0,
-            usage.completion_tokens ?? usage.output_tokens ?? 0,
-            keyHash,
-            requestedModel || undefined,
-            endpoint,
-          );
-        }
-      } catch { /* non-fatal */ }
-    })();
-
-    return new Response(clientStream, {
-      status: proxyRes.status,
-      headers: proxyRes.headers,
-    });
+    if (isSSE) {
+      trackFromSSE(clone, auth.email, requestedModel, keyHash, endpoint, litellmModelId);
+    } else {
+      trackFromJson(clone, auth.email, requestedModel, keyHash, endpoint, litellmModelId);
+    }
   }
 
-  // Error or empty body — return as-is
   return proxyRes;
 }
 
 export const proxyRoutes = {
   "/v1/chat/completions":     { POST: proxyHandler },
+  "/v1/messages":             { POST: proxyHandler },
+  "/v1/responses":            { POST: proxyHandler },
   "/v1/embeddings":           { POST: proxyHandler },
   "/v1/completions":          { POST: proxyHandler },
+  "/v1/images/generations":   { POST: proxyHandler },
+  "/v1/audio/speech":         { POST: proxyHandler },
   "/v1/audio/transcriptions": { POST: proxyHandler },
 };
