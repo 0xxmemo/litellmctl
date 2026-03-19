@@ -134,14 +134,31 @@ def _find_transcription_bin() -> str:
 def _build_transcription_cmd(transcr_bin: str, port: str, model: str) -> list[str]:
     """Build the command to start the transcription server.
 
-    Both speaches and faster-whisper-server accept env vars AND CLI flags.
-    Use CLI flags (--host, --port, --model) as primary — most reliable across
-    versions. Set env vars as fallback for versions that only read those.
+    Probe the binary's --help to detect which CLI style it uses:
+    - older faster-whisper-server: positional model arg + --port flag
+    - speaches / newer: env vars (WHISPER__MODEL, UVICORN_PORT) or --model flag
     """
+    # Always set env vars as a safety net
     os.environ["UVICORN_PORT"] = port
     os.environ["UVICORN_HOST"] = "0.0.0.0"
     os.environ["WHISPER__MODEL"] = model
-    return [transcr_bin, "--host", "0.0.0.0", "--port", port, "--model", model]
+
+    # Probe --help output to detect supported flags
+    try:
+        result = subprocess.run(
+            [transcr_bin, "--help"],
+            capture_output=True, text=True, timeout=10,
+        )
+        help_text = result.stdout + result.stderr
+    except Exception:
+        help_text = ""
+
+    if "--model" in help_text:
+        # speaches / newer faster-whisper-server with --model flag
+        return [transcr_bin, "--host", "0.0.0.0", "--port", port, "--model", model]
+    else:
+        # older faster-whisper-server: model is a positional arg
+        return [transcr_bin, "--host", "0.0.0.0", "--port", port, model]
 
 
 def install_embedding() -> None:
@@ -168,11 +185,25 @@ def install_embedding() -> None:
             if _ollama_start(embed_base):
                 info(f"Ollama started at {embed_base}")
             else:
-                warn("Ollama did not respond — start manually:")
+                # Check if systemd service exists but failed
                 if is_linux() and shutil.which("systemctl"):
-                    warn("  sudo systemctl start ollama")
+                    svc = subprocess.run(
+                        ["systemctl", "is-enabled", "--quiet", "ollama"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                    if svc.returncode == 0:
+                        status = subprocess.run(
+                            ["systemctl", "status", "ollama", "--no-pager", "-l"],
+                            capture_output=True, text=True,
+                        )
+                        warn("Ollama did not respond. Service status:")
+                        for line in status.stdout.strip().splitlines()[:8]:
+                            console.print(f"    {line}")
+                    else:
+                        warn("Ollama did not respond — service not installed.")
+                        warn("  Reinstall: curl -fsSL https://ollama.com/install.sh | sh")
                 else:
-                    warn("  ollama serve")
+                    warn("Ollama did not respond — start manually: ollama serve")
 
         for model in ["nomic-embed-text", "mxbai-embed-large"]:
             result = subprocess.run(["ollama", "list"], capture_output=True, text=True)
