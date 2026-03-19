@@ -23,9 +23,13 @@ import { toast } from 'sonner'
 import { PrettyDate } from '@/components/PrettyDate'
 import { PrettyAmount } from '@/components/PrettyAmount'
 import { ConfigEditor } from '@/components/ConfigEditor'
+import { useConfigEditor } from '@/hooks/useSettings'
+import { useModels } from '@/lib/models-hooks'
 
 export function Admin() {
   const { user: currentUser } = useAuth()
+  const configEditor = useConfigEditor()
+  const modelsResult = useModels()
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
 
   // Add user modal state
@@ -153,7 +157,7 @@ export function Admin() {
         </TabsList>
 
         <TabsContent value="config">
-          <ConfigEditor />
+          <ConfigEditor configEditor={configEditor} models={modelsResult} />
         </TabsContent>
 
         <TabsContent value="users">

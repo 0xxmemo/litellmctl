@@ -10,6 +10,7 @@ import { RequestsTable } from '@/components/RequestsTable'
 import { getDisplayName, formatProviderName, getProviderColor, extractProvider, resolveProvider } from '@lib/models'
 import { useGlobalStats, useUserStats } from '@/hooks/useStats'
 import { useAuth } from '@/hooks/useAuth'
+import { useRequestsTable } from '@/hooks/useRequests'
 import {
   LineChart,
   Line,
@@ -106,6 +107,7 @@ export function Overview() {
   const { user: currentUser, loading: authLoading } = useAuth()
   const authChecked = !authLoading
   const isLoggedIn = !!currentUser
+  const requestsTable = useRequestsTable()
 
   const {
     globalStats,
@@ -314,7 +316,7 @@ export function Overview() {
             ) : null}
 
             {/* Recent Requests Table */}
-            <RequestsTable />
+            <RequestsTable requestsTable={requestsTable} />
           </TabsContent>
         )}
       </Tabs>

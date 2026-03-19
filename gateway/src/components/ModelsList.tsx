@@ -1,7 +1,7 @@
 import {} from 'react'
 import { Loader2, Cpu, Eye, Zap, Brain, Key } from 'lucide-react'
 import { formatProviderName, getProviderColor } from '@lib/models'
-import { useExtendedModels } from '@/lib/models-hooks'
+import type { ExtendedModel } from '@lib/models'
 
 /** Format cost per token to a readable string (e.g. $3.00/M) */
 function formatCost(costPerToken: number | null): string | null {
@@ -10,8 +10,13 @@ function formatCost(costPerToken: number | null): string | null {
   return `$${perMillion.toFixed(2)}/M`
 }
 
-export function ModelsList() {
-  const { models, loading, error } = useExtendedModels()
+export interface ModelsListProps {
+  models: ExtendedModel[]
+  loading: boolean
+  error: string | null
+}
+
+export function ModelsList({ models, loading, error }: ModelsListProps) {
 
   if (loading) {
     return (

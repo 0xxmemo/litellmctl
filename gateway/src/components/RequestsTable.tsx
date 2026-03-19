@@ -1,5 +1,4 @@
 'use client'
-import { useState, useCallback, useEffect, useRef } from 'react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import {
@@ -10,56 +9,16 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Activity, Loader2, ChevronDown } from 'lucide-react'
-import { StackedRequestItem, GroupedRequest } from '@/components/StackedRequestItem'
-import { useGroupedRequests, type PaginationMeta } from '@/hooks/useRequests'
+import { StackedRequestItem } from '@/components/StackedRequestItem'
+import type { UseRequestsTableReturn } from '@/hooks/useRequests'
 
 interface RequestsTableProps {
   className?: string
+  requestsTable: UseRequestsTableReturn
 }
 
-export function RequestsTable({ className }: RequestsTableProps) {
-  const [page, setPage] = useState(1)
-  const [allGroups, setAllGroups] = useState<GroupedRequest[]>([])
-  const [pagination, setPagination] = useState<PaginationMeta | null>(null)
-  // track which pages we've already merged to avoid double-appending on re-renders
-  const mergedPages = useRef<Set<number>>(new Set())
-
-  const { data, isLoading, error, isFetching, refetch } = useGroupedRequests(page)
-
-  // Merge incoming page data into allGroups
-  useEffect(() => {
-    if (!data) return
-    const incomingPage = data.pagination.page
-
-    if (incomingPage === 1) {
-      // Full reset on page 1 (initial load / auto-refresh)
-      mergedPages.current = new Set([1])
-      setAllGroups(data.groups)
-    } else if (!mergedPages.current.has(incomingPage)) {
-      mergedPages.current.add(incomingPage)
-      setAllGroups(prev => {
-        const existingIds = new Set(prev.map(g => g.id))
-        const newGroups = data.groups.filter(g => !existingIds.has(g.id))
-        return [...prev, ...newGroups]
-      })
-    }
-
-    setPagination(data.pagination)
-  }, [data])
-
-  const handleLoadMore = useCallback(() => {
-    if (pagination?.hasMore && !isFetching) {
-      setPage(prev => prev + 1)
-    }
-  }, [pagination?.hasMore, isFetching])
-
-  const handleRetry = useCallback(() => {
-    mergedPages.current = new Set()
-    setPage(1)
-    setAllGroups([])
-    setPagination(null)
-    refetch()
-  }, [refetch])
+export function RequestsTable({ className, requestsTable }: RequestsTableProps) {
+  const { allGroups, pagination, isLoading, error, isFetching, handleLoadMore, handleRetry } = requestsTable
 
   const showingCount = allGroups.length
   const totalGroups = pagination?.totalGroups ?? 0

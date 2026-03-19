@@ -68,6 +68,9 @@ export function useExtendedModels() {
   return { models, loading, error: rawError?.message ?? null }
 }
 
+export type UseModelsReturn = ReturnType<typeof useModels>
+export type UseExtendedModelsReturn = ReturnType<typeof useExtendedModels>
+
 // ─── LocalStorage helpers ─────────────────────────────────────────────────────
 
 const LS_MODEL_PREFIX = 'llm-gateway-model:'

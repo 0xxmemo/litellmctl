@@ -4,12 +4,13 @@ import { Outlet } from '@tanstack/react-router'
 import { Sidebar } from '@/components/Sidebar'
 import { TopBar } from '@/components/TopBar'
 import { Toaster } from 'sonner'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuth, useLogout } from '@/hooks/useAuth'
 import { useConfig } from '@/hooks/useSettings'
 
 export function DashboardLayout() {
   // Fetch config early so registerAliases runs before model lists render
-  const { user } = useAuth()
+  const { user, loading } = useAuth()
+  const logoutMutation = useLogout()
   useConfig({ enabled: user?.role === 'admin' })
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('dark')
@@ -67,7 +68,7 @@ export function DashboardLayout() {
             </a>
           </div>
           <div className="p-3 lg:p-4">
-            <Sidebar />
+            <Sidebar user={user} />
           </div>
         </div>
       </div>
@@ -97,7 +98,7 @@ export function DashboardLayout() {
               </a>
             </div>
             <div className="p-3 flex-1 overflow-y-auto">
-              <Sidebar />
+              <Sidebar user={user} />
             </div>
           </div>
         </div>
@@ -133,7 +134,7 @@ export function DashboardLayout() {
               <span className="text-sm font-bold truncate hidden sm:block">LLM API Gateway</span>
             </a>
           </div>
-          <TopBar />
+          <TopBar user={user} loading={loading} onLogout={() => logoutMutation.mutate()} />
         </div>
 
         {/* Page content */}

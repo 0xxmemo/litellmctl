@@ -185,3 +185,12 @@ export function useRevokeAllKeys() {
     },
   })
 }
+
+export type UseAdminUsersReturn = ReturnType<typeof useAdminUsers>
+export type UseAdminTopUsersReturn = ReturnType<typeof useAdminTopUsers>
+export type UseApproveUserReturn = ReturnType<typeof useApproveUser>
+export type UseRejectUserReturn = ReturnType<typeof useRejectUser>
+export type UseAddUserReturn = ReturnType<typeof useAddUser>
+export type UseDeleteUserReturn = ReturnType<typeof useDeleteUser>
+export type UseDisapproveAllReturn = ReturnType<typeof useDisapproveAll>
+export type UseRevokeAllKeysReturn = ReturnType<typeof useRevokeAllKeys>

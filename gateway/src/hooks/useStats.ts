@@ -127,3 +127,7 @@ export function useUserStatsAnalytics() {
     queryFn: fetchUserStats,
   })
 }
+
+export type UseGlobalStatsReturn = ReturnType<typeof useGlobalStats>
+export type UseUserStatsReturn = ReturnType<typeof useUserStats>
+export type UseUserStatsAnalyticsReturn = ReturnType<typeof useUserStatsAnalytics>

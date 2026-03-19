@@ -8,13 +8,16 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
-import { useAuth, useLogout } from '@/hooks/useAuth'
+import type { User as UserType } from '@/hooks/useAuth'
 
-export function TopBar() {
+interface TopBarProps {
+  user: UserType | undefined
+  loading: boolean
+  onLogout: () => void
+}
+
+export function TopBar({ user, loading, onLogout }: TopBarProps) {
   const [profileOpen, setProfileOpen] = useState(false)
-
-  const { user, loading } = useAuth()
-  const logoutMutation = useLogout()
 
   const getRoleColor = (role: string) => {
     switch (role) {
@@ -56,7 +59,7 @@ export function TopBar() {
                 variant="ghost"
                 size="sm"
                 className="w-full justify-start text-red-500 hover:text-red-600 hover:bg-red-50"
-                onClick={() => logoutMutation.mutate()}
+                onClick={onLogout}
               >
                 <LogOut className="w-4 h-4 mr-2" />
                 Logout

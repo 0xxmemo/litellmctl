@@ -1,6 +1,5 @@
 'use client'
 import React, { useState } from 'react'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -13,8 +12,8 @@ import {
 import { toast } from 'sonner'
 import { ConfigModelSelector } from './ModelSelector'
 import type { NormalizedModel } from '@lib/models'
-import { useModels } from '@/lib/models-hooks'
-import { queryKeys } from '@/lib/query-keys'
+import type { UseConfigEditorReturn } from '@/hooks/useSettings'
+import type { UseModelsReturn } from '@/lib/models-hooks'
 import {
   DndContext,
   closestCenter,
@@ -80,63 +79,6 @@ interface ModelEntry {
   }
   model_info?: Record<string, unknown>
 }
-
-// ─── API helpers ──────────────────────────────────────────────────────────────
-
-async function fetchConfig(): Promise<LiteLLMConfig> {
-  const res = await fetch('/api/admin/litellm-config', {
-    credentials: 'include',
-    headers: { 'Accept': 'application/json' },
-  })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.error || `HTTP ${res.status}`)
-  }
-  const data = await res.json()
-  // Ensure router_settings exists
-  if (!data.router_settings) {
-    data.router_settings = {}
-  }
-  return data
-}
-
-async function patchConfig(patch: Partial<LiteLLMConfig> & { update_router?: boolean; save_to_file?: boolean }): Promise<LiteLLMConfig> {
-  console.log('[ConfigEditor] PATCH /api/admin/litellm-config body:', JSON.stringify(patch, null, 2))
-  const res = await fetch('/api/admin/litellm-config', {
-    method: 'PATCH',
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(patch),
-  })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    console.error('[ConfigEditor] PATCH error response:', body)
-    // Normalize error message — detail may be an array of Pydantic validation errors
-    let errorMsg = body.error || body.detail
-    if (Array.isArray(errorMsg)) {
-      errorMsg = errorMsg.map((e: any) => e.msg || JSON.stringify(e)).join('; ')
-    } else if (typeof errorMsg === 'object' && errorMsg !== null) {
-      errorMsg = JSON.stringify(errorMsg)
-    }
-    throw new Error(errorMsg || `HTTP ${res.status}`)
-  }
-  return res.json()
-}
-
-async function resetConfig(): Promise<unknown> {
-  const res = await fetch('/api/admin/litellm-config/reset', {
-    method: 'POST',
-    credentials: 'include',
-    headers: { 'Accept': 'application/json' },
-  })
-  if (!res.ok) {
-    const body = await res.json().catch(() => ({}))
-    throw new Error(body.error || body.detail || `HTTP ${res.status}`)
-  }
-  return res.json().catch(() => ({}))
-}
-
-
 
 
 // ─── Tab: Fallbacks (merged: model_group_alias as Primary + fallback chains) ────
@@ -455,14 +397,15 @@ function FallbacksEditor({
   onAliasesChange,
   fallbacks,
   onChange,
+  allModels,
 }: {
   aliases: ModelGroupAlias
   onAliasesChange: (a: ModelGroupAlias) => void
   fallbacks: FallbackChain[]
   onChange: (f: FallbackChain[]) => void
+  allModels: NormalizedModel[]
 }) {
   const chains = buildMergedChains(aliases, fallbacks)
-  const { models: allModels } = useModels()
 
   const commit = (next: MergedChain[]) => {
     const { aliases: a, fallbacks: f } = splitMergedChains(next)
@@ -783,8 +726,14 @@ const DEFAULT_ROUTER_SETTINGS: RouterSettings = {
   set_verbose: false,
 }
 
-export function ConfigEditor() {
-  const queryClient = useQueryClient()
+interface ConfigEditorProps {
+  configEditor: UseConfigEditorReturn
+  models: UseModelsReturn
+}
+
+export function ConfigEditor({ configEditor, models }: ConfigEditorProps) {
+  const { data: config, isLoading: loading, error: queryError, refetch, saveMutation, resetMutation } = configEditor
+  const allModels = models.models
 
   // Editable local state — seeded from query data
   const [aliases, setAliases] = useState<ModelGroupAlias>({})
@@ -795,13 +744,6 @@ export function ConfigEditor() {
   const [seeded, setSeeded] = useState(false)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
 
-  // ── Fetch config via useQuery ──
-  const { data: config, isLoading: loading, error: queryError, refetch } = useQuery({
-    queryKey: ['litellm', 'config'],
-    queryFn: fetchConfig,
-    staleTime: 5 * 60_000, // 5 min — config rarely changes on its own
-  })
-
   // Seed local editors when config loads (only once, or on explicit refresh)
   if (config && !seeded) {
     const rs = (config.router_settings as any) || {}
@@ -810,75 +752,10 @@ export function ConfigEditor() {
     setFallbacks(fb)
     const { model_group_alias: _mga, fallbacks: _fb, ...routerOnly } = rs
     setRouterSettings({ ...DEFAULT_ROUTER_SETTINGS, ...routerOnly } as RouterSettings)
-    setModelList(config.model_list || [])
+    setModelList((config.model_list as ModelEntry[]) || [])
     setDirty(false)
     setSeeded(true)
   }
-
-  // ── Save via useMutation ──
-  const saveMutation = useMutation({
-    mutationFn: async () => {
-      // Strip model_info from each entry — LiteLLM's /config/update rejects
-      // computed metadata fields like mode="responses" or mode="audio_transcription"
-      // that it populates itself from model/info but won't accept back via the API.
-      const sanitizedModelList = modelList.map(({ model_info: _mi, ...rest }) => rest)
-      const patch: Partial<LiteLLMConfig> & { update_router: boolean; save_to_file: boolean } = {
-        router_settings: {
-          ...routerSettings,
-          model_group_alias: aliases,
-          fallbacks,
-        } as unknown as RouterSettings,
-        model_list: sanitizedModelList.length > 0 ? sanitizedModelList : undefined,
-        update_router: true,
-        save_to_file: true,
-      }
-      if (!patch.model_list) delete patch.model_list
-      return patchConfig(patch)
-    },
-    onSuccess: () => {
-      setDirty(false)
-      setSeeded(false) // allow re-seed on next query result
-      queryClient.invalidateQueries({ queryKey: ['litellm', 'config'] })
-      refetch() // explicit refetch to immediately pull saved state into UI
-      toast.success('Config saved ✓')
-      Promise.allSettled([
-        queryClient.invalidateQueries({ queryKey: queryKeys.models }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.config }),
-      ]).catch(() => {})
-    },
-    onError: (err: any) => {
-      // err.message may be "[object Object]" if the Error was created with an object
-      // Fall back to JSON.stringify for full visibility
-      const msg = err?.message && err.message !== '[object Object]'
-        ? err.message
-        : JSON.stringify(err) !== '{}' ? JSON.stringify(err) : String(err)
-      toast.error(`Save failed: ${msg}`)
-    },
-  })
-
-  // ── Reset to YAML defaults via useMutation ──
-  const resetMutation = useMutation({
-    mutationFn: resetConfig,
-    onSuccess: async () => {
-      setSeeded(false) // re-seed from fresh query result
-      setDirty(false)
-      setShowResetConfirm(false)
-      await queryClient.invalidateQueries({ queryKey: ['litellm', 'config'] })
-      refetch() // explicit refetch to immediately pull reset defaults into UI
-      toast.success('Config reset to YAML defaults ✓')
-      Promise.allSettled([
-        queryClient.invalidateQueries({ queryKey: queryKeys.models }),
-        queryClient.invalidateQueries({ queryKey: queryKeys.config }),
-      ]).catch(() => {})
-    },
-    onError: (err: any) => {
-      setShowResetConfirm(false)
-      const msg = err?.message && err.message !== '[object Object]'
-        ? err.message
-        : JSON.stringify(err) !== '{}' ? JSON.stringify(err) : String(err)
-      toast.error(`Reset failed: ${msg}`)
-    },
-  })
 
   const handleRefresh = () => {
     setSeeded(false) // allow re-seed after refresh
@@ -891,6 +768,57 @@ export function ConfigEditor() {
       setter(v as any)
       setDirty(true)
     }
+
+  const handleSave = () => {
+    // Strip model_info from each entry — LiteLLM's /config/update rejects
+    // computed metadata fields like mode="responses" or mode="audio_transcription"
+    // that it populates itself from model/info but won't accept back via the API.
+    const sanitizedModelList = modelList.map(({ model_info: _mi, ...rest }) => rest)
+    const patch = {
+      router_settings: {
+        ...routerSettings,
+        model_group_alias: aliases,
+        fallbacks,
+      } as unknown as LiteLLMConfig['router_settings'],
+      model_list: sanitizedModelList.length > 0 ? sanitizedModelList : undefined,
+      update_router: true,
+      save_to_file: true,
+    }
+    if (!patch.model_list) delete patch.model_list
+    saveMutation.mutate(patch, {
+      onSuccess: () => {
+        setDirty(false)
+        setSeeded(false) // allow re-seed on next query result
+        refetch() // explicit refetch to immediately pull saved state into UI
+        toast.success('Config saved ✓')
+      },
+      onError: (err: any) => {
+        const msg = err?.message && err.message !== '[object Object]'
+          ? err.message
+          : JSON.stringify(err) !== '{}' ? JSON.stringify(err) : String(err)
+        toast.error(`Save failed: ${msg}`)
+      },
+    })
+  }
+
+  const handleReset = () => {
+    resetMutation.mutate(undefined, {
+      onSuccess: () => {
+        setSeeded(false) // re-seed from fresh query result
+        setDirty(false)
+        setShowResetConfirm(false)
+        refetch() // explicit refetch to immediately pull reset defaults into UI
+        toast.success('Config reset to YAML defaults ✓')
+      },
+      onError: (err: any) => {
+        setShowResetConfirm(false)
+        const msg = err?.message && err.message !== '[object Object]'
+          ? err.message
+          : JSON.stringify(err) !== '{}' ? JSON.stringify(err) : String(err)
+        toast.error(`Reset failed: ${msg}`)
+      },
+    })
+  }
 
   const error = queryError ? (queryError instanceof Error ? queryError.message : 'Failed to load config') : null
   const saving = saveMutation.isPending
@@ -975,7 +903,7 @@ export function ConfigEditor() {
               <Button
                 size="sm"
                 variant="ghost"
-                onClick={() => resetMutation.mutate()}
+                onClick={handleReset}
                 disabled={resetting}
                 className="h-6 px-2 text-xs text-amber-600 hover:bg-amber-500/20 gap-1"
               >
@@ -995,7 +923,7 @@ export function ConfigEditor() {
           )}
           <Button
             size="sm"
-            onClick={() => saveMutation.mutate()}
+            onClick={handleSave}
             disabled={saving || !dirty || resetting}
             className="gap-1.5 h-8"
           >
@@ -1027,6 +955,7 @@ export function ConfigEditor() {
                 onAliasesChange={wrapSet(setAliases)}
                 fallbacks={fallbacks}
                 onChange={wrapSet(setFallbacks)}
+                allModels={allModels}
               />
             </TabsContent>
 

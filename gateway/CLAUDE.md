@@ -98,6 +98,45 @@ export function KeyManager() {
 }
 ```
 
+## Component Props Pattern
+
+Pages and layout components call hooks and pass data down as props. Components NEVER call hooks directly.
+
+### Rules
+
+- **Hook files export their return types** — every exported hook `useX()` has `export type UseXReturn = ReturnType<typeof useX>` in the same file.
+- **Components import hook return types** for prop interfaces — never define duplicate types in component files.
+- **No hook calls in components** — no `useQuery`, `useMutation`, `useQueryClient`, or any custom hook from `@/hooks/*` or `@/lib/models-hooks` inside `src/components/*.tsx`.
+- **Pages and layout call hooks** — `src/pages/*.tsx` and `src/layout/*.tsx` call hooks and pass the full return value (or destructured fields) to components.
+
+### Example
+
+```tsx
+// src/hooks/useKeys.ts
+export function useKeys() { return useQuery(...) }
+export type UseKeysReturn = ReturnType<typeof useKeys>
+
+// src/pages/ApiKeys.tsx
+import { useKeys } from '@/hooks/useKeys'
+import { KeysList } from '@/components/KeysList'
+export function ApiKeys() {
+  const keysQuery = useKeys()
+  return <KeysList keysQuery={keysQuery} />
+}
+
+// src/components/KeysList.tsx — NO hook imports
+import type { UseKeysReturn } from '@/hooks/useKeys'
+interface Props { keysQuery: UseKeysReturn }
+export function KeysList({ keysQuery }: Props) {
+  const { data: keys = [], isLoading } = keysQuery
+  // render UI
+}
+```
+
+### Exceptions (document here if any)
+
+- `useModels()` in `ModelSelector.tsx` sub-components: generic reusable dropdown that requires models. These call the hook internally. When the parent has already fetched models, pass via the `models` prop to skip the internal fetch.
+
 ## Auth Gates
 
 Three standardized role gates in `lib/db.ts`. All support both API key and session auth:

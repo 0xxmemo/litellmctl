@@ -51,7 +51,7 @@ async function performLogout(): Promise<void> {
 
 // ── Hooks ────────────────────────────────────────────────────────────────────
 
-interface UseAuthReturn {
+export interface UseAuthReturn {
   user: User | undefined
   loading: boolean
   refreshUser: () => Promise<void>
@@ -105,3 +105,6 @@ export function useLogout() {
     },
   })
 }
+
+export type UseAuthStatusReturn = ReturnType<typeof useAuthStatus>
+export type UseLogoutReturn = ReturnType<typeof useLogout>

@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { ApiKeyInput, EndpointTryCard, useApiKey } from '@/components/EndpointTryCard'
 import { ModelsList } from '@/components/ModelsList'
+import { useExtendedModels, useModels } from '@/lib/models-hooks'
 
 // ─── Copy button ──────────────────────────────────────────────────────────────
 
@@ -299,6 +300,8 @@ function ClaudeCodeSection({ apiKey }: { apiKey: string }) {
 
 export function Docs() {
   const { apiKey, setApiKey } = useApiKey()
+  const extendedModels = useExtendedModels()
+  const { models: selectorModels, loading: selectorLoading, error: selectorError } = useModels()
 
   return (
     <div className="prose dark:prose-invert max-w-4xl mx-auto p-4 sm:p-6">
@@ -345,7 +348,7 @@ export function Docs() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <ModelsList />
+          <ModelsList models={extendedModels.models} loading={extendedModels.loading} error={extendedModels.error} />
         </CardContent>
       </Card>
 

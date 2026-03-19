@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { queryKeys } from '@/lib/query-keys'
 import type { GroupedRequest } from '@/components/StackedRequestItem'
 
@@ -81,3 +82,52 @@ export function useGroupItems(group: GroupedRequest, enabled: boolean) {
     staleTime: 60_000,
   })
 }
+
+// ── useRequestsTable: manages page + allGroups accumulation ───────────────────
+
+export function useRequestsTable() {
+  const [page, setPage] = useState(1)
+  const [allGroups, setAllGroups] = useState<GroupedRequest[]>([])
+  const [pagination, setPagination] = useState<PaginationMeta | null>(null)
+  const mergedPages = useRef<Set<number>>(new Set())
+
+  const query = useGroupedRequests(page)
+  const { data, isFetching, refetch } = query
+
+  useEffect(() => {
+    if (!data) return
+    const incomingPage = data.pagination.page
+    if (incomingPage === 1) {
+      mergedPages.current = new Set([1])
+      setAllGroups(data.groups)
+    } else if (!mergedPages.current.has(incomingPage)) {
+      mergedPages.current.add(incomingPage)
+      setAllGroups(prev => {
+        const existingIds = new Set(prev.map(g => g.id))
+        const newGroups = data.groups.filter(g => !existingIds.has(g.id))
+        return [...prev, ...newGroups]
+      })
+    }
+    setPagination(data.pagination)
+  }, [data])
+
+  const handleLoadMore = useCallback(() => {
+    if (pagination?.hasMore && !isFetching) {
+      setPage(prev => prev + 1)
+    }
+  }, [pagination?.hasMore, isFetching])
+
+  const handleRetry = useCallback(() => {
+    mergedPages.current = new Set()
+    setPage(1)
+    setAllGroups([])
+    setPagination(null)
+    refetch()
+  }, [refetch])
+
+  return { ...query, allGroups, pagination, handleLoadMore, handleRetry }
+}
+
+export type UseRequestsTableReturn = ReturnType<typeof useRequestsTable>
+export type UseGroupedRequestsReturn = ReturnType<typeof useGroupedRequests>
+export type UseGroupItemsReturn = ReturnType<typeof useGroupItems>

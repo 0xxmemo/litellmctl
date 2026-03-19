@@ -3,10 +3,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 import { TierModelSelector } from '@/components/ModelSelector'
-import { useModelOverrides, useSaveModelOverrides, useTierAliases, useSaveProfile } from '@/hooks/useSettings'
+import type { UseAuthReturn } from '@/hooks/useAuth'
+import type { UseModelOverridesReturn, UseTierAliasesReturn, UseSaveModelOverridesReturn, UseSaveProfileReturn } from '@/hooks/useSettings'
 import {
   User,
   Palette,
@@ -22,8 +22,21 @@ const ROLE_BADGE_VARIANT: Record<string, 'destructive' | 'default' | 'secondary'
   guest: 'secondary',
 }
 
-export function SettingsPanel() {
-  const { user, loading } = useAuth()
+interface SettingsPanelProps {
+  auth: UseAuthReturn
+  modelOverrides: UseModelOverridesReturn
+  tierAliases: UseTierAliasesReturn
+  saveModelOverrides: UseSaveModelOverridesReturn
+  saveProfile: UseSaveProfileReturn
+}
+
+export function SettingsPanel({ auth, modelOverrides, tierAliases, saveModelOverrides, saveProfile }: SettingsPanelProps) {
+  const { user, loading } = auth
+  const { data: fetchedOverrides, isLoading: loadingOverrides } = modelOverrides
+  const { data: tierAliasMap, isLoading: aliasesLoading } = tierAliases
+  const saveOverridesMutation = saveModelOverrides
+  const saveProfileMutation = saveProfile
+
   const [loggingOut, setLoggingOut] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [overridesMessage, setOverridesMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -106,24 +119,12 @@ export function SettingsPanel() {
     return () => mediaQuery.removeEventListener('change', handleChange)
   }, [])
 
-  // ── Model Overrides Query ─────────────────────────────────────────────────
-  const { data: fetchedOverrides, isLoading: loadingOverrides } = useModelOverrides()
-
   // Sync fetched overrides into local editable state
   useEffect(() => {
     if (fetchedOverrides) {
       setOverrides(fetchedOverrides)
     }
   }, [fetchedOverrides])
-
-  // ── Tier Aliases Query ────────────────────────────────────────────────────
-  const { data: tierAliasMap, isLoading: aliasesLoading } = useTierAliases()
-
-  // ── Save Overrides Mutation ───────────────────────────────────────────────
-  const saveOverridesMutation = useSaveModelOverrides()
-
-  // ── Save Profile Mutation ─────────────────────────────────────────────────
-  const saveProfileMutation = useSaveProfile()
 
   const handleSaveProfile = async (e: { preventDefault: () => void }) => {
     e.preventDefault()
@@ -157,7 +158,7 @@ export function SettingsPanel() {
 
   // Dynamic tier aliases from dedicated non-admin endpoint
   const modelGroupAlias: Record<string, string> = tierAliasMap ?? {}
-  const tierAliases = Object.keys(modelGroupAlias)
+  const tierAliasKeys = Object.keys(modelGroupAlias)
 
   const savingProfile = saveProfileMutation.isPending
   const savingOverrides = saveOverridesMutation.isPending
@@ -276,8 +277,8 @@ export function SettingsPanel() {
           </div>
           <CardDescription>
             Map tier aliases (
-            {tierAliases.length > 0
-              ? tierAliases.map((alias, i) => (
+            {tierAliasKeys.length > 0
+              ? tierAliasKeys.map((alias, i) => (
                   <Fragment key={alias}>
                     {i > 0 && ', '}
                     <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">{alias}</code>
@@ -308,13 +309,13 @@ export function SettingsPanel() {
               <Loader2 className="h-4 w-4 animate-spin" />
               Loading tier aliases…
             </div>
-          ) : tierAliases.length === 0 ? (
+          ) : tierAliasKeys.length === 0 ? (
             <div className="text-muted-foreground text-sm">
               No tier aliases configured. Contact your admin.
             </div>
           ) : (
             <div className="space-y-4">
-              {tierAliases.map((alias) => (
+              {tierAliasKeys.map((alias) => (
                 <div key={alias} className="space-y-1.5">
                   <div>
                     <label className="text-sm font-medium font-mono">{alias}</label>

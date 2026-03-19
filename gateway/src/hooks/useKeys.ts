@@ -93,3 +93,7 @@ export function useRevokeKey() {
     },
   })
 }
+
+export type UseKeysReturn = ReturnType<typeof useKeys>
+export type UseCreateKeyReturn = ReturnType<typeof useCreateKey>
+export type UseRevokeKeyReturn = ReturnType<typeof useRevokeKey>
