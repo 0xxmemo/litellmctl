@@ -6,7 +6,7 @@ export async function getAPIKeys() {
 }
 
 export async function getUserStats() {
-  const res = await fetch('/api/dashboard/user-stats', {
+  const res = await fetch('/api/stats/user', {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
   })

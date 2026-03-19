@@ -49,7 +49,7 @@ async function fetchModelOverrides(): Promise<Record<string, string>> {
 }
 
 async function fetchTierAliases(): Promise<Record<string, string>> {
-  const r = await fetch('/api/config/aliases', { credentials: 'include' })
+  const r = await fetch('/api/user/aliases', { credentials: 'include' })
   const data = await r.json()
   return data.model_group_alias || {}
 }

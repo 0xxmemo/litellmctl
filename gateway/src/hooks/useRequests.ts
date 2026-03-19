@@ -37,7 +37,7 @@ const PAGE_SIZE = 20
 
 async function fetchGroupedRequests(page: number): Promise<GroupedRequestsResponse> {
   const res = await fetch(
-    `/api/overview/requests/grouped?page=${page}&pageSize=${PAGE_SIZE}`,
+    `/api/stats/requests?page=${page}&pageSize=${PAGE_SIZE}`,
     { credentials: 'include' },
   )
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -57,7 +57,7 @@ async function fetchGroupItems(group: GroupedRequest): Promise<ApiRequestItem[]>
     ...(group.endpoint ? { endpoint: group.endpoint } : {}),
   })
 
-  const res = await fetch(`/api/overview/requests/group-items?${params}`, { credentials: 'include' })
+  const res = await fetch(`/api/stats/requests/items?${params}`, { credentials: 'include' })
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
   const data = await res.json()
   return data.items ?? []

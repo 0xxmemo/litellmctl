@@ -41,7 +41,7 @@ async function fetchAdminUsers(): Promise<UserRecord[]> {
 }
 
 async function fetchTopUsers(): Promise<TopUser[]> {
-  const res = await fetch('/api/dashboard/global-stats', {
+  const res = await fetch('/api/stats/global', {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
   })

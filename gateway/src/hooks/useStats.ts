@@ -44,7 +44,7 @@ export interface UserStats {
 // ── Fetch helpers (internal) ─────────────────────────────────────────────────
 
 async function fetchGlobalStats(): Promise<GlobalStats> {
-  const r = await fetch('/api/dashboard/global-stats', { credentials: 'include' })
+  const r = await fetch('/api/stats/global', { credentials: 'include' })
   if (r.status === 429) throw Object.assign(new Error('Rate limited'), { status: 429 })
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
   const data = await r.json()
@@ -53,7 +53,7 @@ async function fetchGlobalStats(): Promise<GlobalStats> {
 }
 
 async function fetchUserStats(): Promise<UserStats> {
-  const res = await fetch('/api/dashboard/user-stats', {
+  const res = await fetch('/api/stats/user', {
     credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
   })

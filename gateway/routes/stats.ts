@@ -2,7 +2,7 @@ import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
 import { apiKeys, validatedUsers, usageLogs, requireAuth, requireUser, calcCost } from "../lib/db";
 import { extractProvider } from "../lib/models";
 
-// GET /api/dashboard/global-stats — requireAuth (any authenticated user incl. guests)
+// GET /api/stats/global — requireAuth (any authenticated user incl. guests)
 async function globalStatsHandler(req: Request) {
   const auth = await requireAuth(req);
   if (auth instanceof Response) return auth;
@@ -82,7 +82,7 @@ async function globalStatsHandler(req: Request) {
   }
 }
 
-// GET /api/dashboard/user-stats — requireUser (not guest)
+// GET /api/stats/user — requireUser (not guest)
 async function userStatsHandler(req: Request) {
   const auth = await requireUser(req);
   if (auth instanceof Response) return auth;
@@ -192,7 +192,7 @@ async function buildUserMatchClause(email: string) {
     : { email };
 }
 
-// GET /api/overview/requests/grouped — requireAuth (any authenticated user incl. guests)
+// GET /api/stats/requests — requireAuth (any authenticated user incl. guests)
 // Uses a cursor to stream only enough docs to fill the requested page of groups,
 // instead of loading 10K docs into memory. Stops as soon as we have enough groups.
 async function groupedRequestsHandler(req: Request) {
@@ -283,7 +283,7 @@ async function groupedRequestsHandler(req: Request) {
   }
 }
 
-// GET /api/overview/requests/group-items — fetch individual items for an expanded group
+// GET /api/stats/requests/items — fetch individual items for an expanded group
 async function groupItemsHandler(req: Request) {
   const auth = await requireUser(req);
   if (auth instanceof Response) return auth;
@@ -343,8 +343,8 @@ async function groupItemsHandler(req: Request) {
 }
 
 export const statsRoutes = {
-  "/api/dashboard/global-stats":       { GET: globalStatsHandler },
-  "/api/dashboard/user-stats":         { GET: userStatsHandler },
-  "/api/overview/requests/grouped":    { GET: groupedRequestsHandler },
-  "/api/overview/requests/group-items": { GET: groupItemsHandler },
+  "/api/stats/global":          { GET: globalStatsHandler },
+  "/api/stats/user":            { GET: userStatsHandler },
+  "/api/stats/requests":        { GET: groupedRequestsHandler },
+  "/api/stats/requests/items":  { GET: groupItemsHandler },
 };

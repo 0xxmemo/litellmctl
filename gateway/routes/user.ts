@@ -60,7 +60,7 @@ async function putUserModelOverridesHandler(req: Request) {
   }
 }
 
-// GET /api/config/aliases — requireUser (not guest)
+// GET /api/user/aliases — requireUser (not guest)
 async function getConfigAliasesHandler(req: Request) {
   const auth = await requireUser(req);
   if (auth instanceof Response) return auth;
@@ -83,5 +83,5 @@ async function getConfigAliasesHandler(req: Request) {
 export const userRoutes = {
   "/api/user/profile":         { PUT: userProfileHandler },
   "/api/user/model-overrides": { GET: getUserModelOverridesHandler, PUT: putUserModelOverridesHandler },
-  "/api/config/aliases":       { GET: getConfigAliasesHandler },
+  "/api/user/aliases":         { GET: getConfigAliasesHandler },
 };

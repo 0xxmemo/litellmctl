@@ -1,0 +1,11 @@
+# SearXNG settings override — inherits all defaults, enables JSON API format.
+# Mounted into container at /etc/searxng/settings.yml
+use_default_settings: true
+
+server:
+  secret_key: "litellmctl-searxng-local-instance"
+
+search:
+  formats:
+    - html
+    - json

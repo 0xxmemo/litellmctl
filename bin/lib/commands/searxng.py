@@ -6,9 +6,13 @@ import os
 import shutil
 import subprocess
 import time
+from pathlib import Path
 
 from ..common.formatting import console, info, warn
 from ..common.network import http_check
+
+PROJECT_DIR = Path(__file__).resolve().parents[3]
+SETTINGS_FILE = PROJECT_DIR / "searxng" / "settings.yml"
 
 
 def install_searxng() -> bool:
@@ -42,14 +46,19 @@ def install_searxng() -> bool:
         time.sleep(3)
     else:
         info("Creating SearXNG container ...")
-        ret = subprocess.call([
+        cmd = [
             "docker", "run", "-d",
             "--name", container,
             "--restart", "unless-stopped",
             "-p", f"{port}:8080",
             "-e", f"SEARXNG_BASE_URL=http://localhost:{port}/",
-            "searxng/searxng:latest",
-        ])
+        ]
+        # Mount local settings override (enables JSON API format)
+        if SETTINGS_FILE.exists():
+            cmd += ["-v", f"{SETTINGS_FILE}:/etc/searxng/settings.yml"]
+        cmd.append("searxng/searxng:latest")
+
+        ret = subprocess.call(cmd)
         if ret != 0:
             warn("Failed to create SearXNG container")
             return False

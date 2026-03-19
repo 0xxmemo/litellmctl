@@ -82,8 +82,8 @@ async function handler(req: Request) {
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/v1/model/info` | Model metadata (proxy to LiteLLM) |
-| GET | `/api/dashboard/global-stats` | Global usage statistics |
-| GET | `/api/overview/requests/grouped` | Grouped request history |
+| GET | `/api/stats/global` | Global usage statistics |
+| GET | `/api/stats/requests` | Grouped request history |
 
 ### requireUser (user or admin)
 
@@ -95,8 +95,8 @@ async function handler(req: Request) {
 | PUT | `/api/keys/:id` | Update key name/alias |
 | GET | `/api/models` | Model list (from LiteLLM /model/info) |
 | GET | `/api/models/extended` | Extended model metadata with capabilities |
-| GET | `/api/config/aliases` | Model group aliases from config |
-| GET | `/api/dashboard/user-stats` | Per-user usage stats |
+| GET | `/api/user/aliases` | Model group aliases from config |
+| GET | `/api/stats/user` | Per-user usage stats |
 | PUT | `/api/user/profile` | Update name/company |
 | GET/PUT | `/api/user/model-overrides` | Per-user model overrides |
 | POST | `/v1/chat/completions` | Chat proxy to LiteLLM |
