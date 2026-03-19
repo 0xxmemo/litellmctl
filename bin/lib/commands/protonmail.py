@@ -54,8 +54,7 @@ def install_protonmail() -> bool:
 
     info(f"hydroxide installed at {shutil.which('hydroxide')}")
 
-    auth_dir = os.path.expanduser("~/.config/hydroxide")
-    if os.path.isdir(auth_dir) and os.listdir(auth_dir):
+    if _hydroxide_authenticated():
         info("hydroxide already authenticated")
     else:
         console.print()
