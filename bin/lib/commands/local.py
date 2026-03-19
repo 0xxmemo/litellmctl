@@ -52,6 +52,12 @@ def _ollama_start(embed_base: str) -> bool:
         # for a password (breaks headless/EC2 with key-based auth).
         subprocess.call(["sudo", "systemctl", "start", "ollama"],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # If systemd failed (service not installed), fall back to ollama serve
+        if subprocess.call(["systemctl", "is-active", "--quiet", "ollama"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
+            subprocess.Popen(["ollama", "serve"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                             start_new_session=True)
     else:
         subprocess.Popen(["ollama", "serve"],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -128,22 +134,14 @@ def _find_transcription_bin() -> str:
 def _build_transcription_cmd(transcr_bin: str, port: str, model: str) -> list[str]:
     """Build the command to start the transcription server.
 
-    speaches uses uvicorn env vars for port and WHISPER__MODEL for model.
-    faster-whisper-server uses --port and model as positional arg (older versions)
-    or the same env-var style (newer versions).
+    Both speaches and faster-whisper-server accept env vars AND CLI flags.
+    Use CLI flags (--host, --port, --model) as primary — most reliable across
+    versions. Set env vars as fallback for versions that only read those.
     """
-    if transcr_bin == "speaches":
-        # speaches uses env vars: UVICORN_PORT, WHISPER__MODEL
-        os.environ["UVICORN_PORT"] = port
-        os.environ["UVICORN_HOST"] = "0.0.0.0"
-        os.environ["WHISPER__MODEL"] = model
-        return [transcr_bin]
-    else:
-        # faster-whisper-server: try env-var style (works on all versions)
-        os.environ["UVICORN_PORT"] = port
-        os.environ["UVICORN_HOST"] = "0.0.0.0"
-        os.environ["WHISPER__MODEL"] = model
-        return [transcr_bin]
+    os.environ["UVICORN_PORT"] = port
+    os.environ["UVICORN_HOST"] = "0.0.0.0"
+    os.environ["WHISPER__MODEL"] = model
+    return [transcr_bin, "--host", "0.0.0.0", "--port", port, "--model", model]
 
 
 def install_embedding() -> None:
