@@ -244,8 +244,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
   }, [])
 
-  // ── Global Stats — React Query (lazy, enabled only after auth check) ─────────
-  const [globalStatsEnabled, setGlobalStatsEnabled] = useState(false)
+  // ── Global Stats — auto-enable once auth is confirmed (any authenticated user)
+  // Matches reference: requiresApiKeyOrSession (guests can see global stats)
+  const globalStatsEnabled = authChecked && !rateLimited
 
   const globalStatsQuery = useQuery({
     queryKey: GLOBAL_STATS_KEY,
@@ -258,13 +259,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     },
     enabled: globalStatsEnabled,
-    refetchInterval: 60_000,        // 60s background polling
+    refetchInterval: 60_000,
     staleTime: 30_000,
-    refetchIntervalInBackground: false, // don't poll when tab is hidden
+    refetchIntervalInBackground: false,
   })
 
-  // ── User Stats — React Query (lazy, enabled only when user is logged in) ─────
-  const [userStatsEnabled, setUserStatsEnabled] = useState(false)
+  // ── User Stats — auto-enable once auth confirmed and user is non-guest
+  // Matches reference: requireUserOrAdmin (guests blocked)
+  const userStatsEnabled = authChecked && !!currentUser && currentUser.role !== 'guest'
 
   const userStatsQuery = useQuery({
     queryKey: USER_STATS_KEY,
@@ -282,14 +284,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     refetchIntervalInBackground: false,
   })
 
-  // ── Manual refresh shims (preserve existing API surface for Overview.tsx) ────
+  // ── Manual refresh (invalidate without toggling enabled) ─────────────────────
   const refreshGlobalStats = useCallback(async () => {
-    setGlobalStatsEnabled(true)
     await queryClient.invalidateQueries({ queryKey: GLOBAL_STATS_KEY })
   }, [queryClient])
 
   const refreshUserStats = useCallback(async () => {
-    setUserStatsEnabled(true)
     await queryClient.invalidateQueries({ queryKey: USER_STATS_KEY })
   }, [queryClient])
 
