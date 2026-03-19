@@ -155,6 +155,7 @@ export function EndpointTryCard({
 }: EndpointTryCardProps) {
   // Try panel state
   const [body, setBody] = useState(defaultBody ?? '')
+  const [queryParams, setQueryParams] = useState('')
   const [loading, setLoading] = useState(false)
   const [response, setResponse] = useState<{
     status: number | null
@@ -198,19 +199,20 @@ export function EndpointTryCard({
         headers['Content-Type'] = 'application/json'
       }
 
-      const res = await fetch(path, {
+      const fetchPath = method === 'GET' && queryParams.trim()
+        ? `${path}?${queryParams.trim()}`
+        : path
+      const res = await fetch(fetchPath, {
         method,
         headers,
         ...(method === 'POST' && body.trim() ? { body: body.trim() } : {}),
       })
       const timingMs = Math.round(performance.now() - start)
-      let text = ''
+      const raw = await res.text()
+      let text = raw
       try {
-        const json = await res.json()
-        text = JSON.stringify(json, null, 2)
-      } catch {
-        text = await res.text()
-      }
+        text = JSON.stringify(JSON.parse(raw), null, 2)
+      } catch {}
 
       setResponse({ status: res.status, statusText: res.statusText, body: text, timingMs, error: null })
     } catch (err: any) {
@@ -249,7 +251,7 @@ export function EndpointTryCard({
             const displayCurl = activeCurl
             // Copy: use actual key from localStorage if available, else placeholder
             const copyCurl = apiKey
-              ? activeCurl.replace(/YOUR_API_KEY/g, apiKey)
+              ? activeCurl.split('YOUR_API_KEY').join(apiKey)
               : activeCurl
             return (
               <div className="relative">
@@ -282,7 +284,7 @@ export function EndpointTryCard({
               />
             )}
 
-            {/* Body editor */}
+            {/* Body / query params editor */}
             {method === 'POST' ? (
               <div>
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2 block">
@@ -296,8 +298,22 @@ export function EndpointTryCard({
                 />
               </div>
             ) : (
-              <div className="text-xs text-muted-foreground bg-muted/30 p-3 rounded-lg">
-                {bodyNote ?? 'No request body required.'}
+              <div className="space-y-2">
+                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
+                  Query Parameters
+                </label>
+                <Input
+                  className="font-mono text-xs"
+                  placeholder="q=hello&language=en"
+                  value={queryParams}
+                  onChange={(e) => setQueryParams(e.target.value)}
+                  spellCheck={false}
+                />
+                {bodyNote && (
+                  <div className="text-xs text-muted-foreground bg-muted/30 p-3 rounded-lg">
+                    {bodyNote}
+                  </div>
+                )}
               </div>
             )}
 
