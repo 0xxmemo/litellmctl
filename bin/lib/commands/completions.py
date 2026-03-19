@@ -17,7 +17,7 @@ BASH_COMPLETIONS = r'''_litellmctl_completions() {
   commands="auth wizard install init-env start stop restart r logs proxy status local gateway uninstall toggle-claude setup-completions help"
   auth_cmds="chatgpt gemini qwen kimi codex status refresh export import"
   uninstall_cmds="service db embedding transcription searxng gateway protonmail"
-  gateway_cmds="start stop restart status logs"
+  gateway_cmds="start stop restart status logs set-role users"
 
   case "$prev" in
     litellmctl)
@@ -96,7 +96,7 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
       refresh|export) compadd chatgpt gemini qwen kimi ;;
       start|proxy) compadd -- --port --config ;;
       install) compadd -- --with-db --without-db --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription --with-searxng --without-searxng --with-gateway --without-gateway --with-protonmail --without-protonmail ;;
-      gateway) compadd start stop restart status logs ;;
+      gateway) compadd start stop restart status logs set-role users ;;
     esac
   elif (( CURRENT == 4 )); then
     case "${words[3]}" in

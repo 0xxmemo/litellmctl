@@ -243,6 +243,23 @@ def gateway_logs() -> None:
     cmd_gateway("logs")
 
 
+@gateway_app.command("set-role")
+def gateway_set_role_cmd(
+    email: str = typer.Argument(..., help="User email address"),
+    role: str = typer.Argument(..., help="Role to assign: guest | user | admin"),
+) -> None:
+    """Set a gateway user's role (guest/user/admin)."""
+    from .commands.gateway import gateway_set_role
+    gateway_set_role(email, role)
+
+
+@gateway_app.command("users")
+def gateway_users_cmd() -> None:
+    """List all gateway users and their roles."""
+    from .commands.gateway import gateway_user_list
+    gateway_user_list()
+
+
 # ProtonMail subcommands
 @protonmail_app.command("start")
 def protonmail_start() -> None:
