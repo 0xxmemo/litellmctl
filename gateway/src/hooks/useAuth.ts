@@ -39,13 +39,7 @@ async function performLogout(): Promise<void> {
 
 // ── Hooks ────────────────────────────────────────────────────────────────────
 
-export interface UseAuthReturn {
-  user: User | undefined
-  loading: boolean
-  refreshUser: () => Promise<void>
-}
-
-export function useAuth(): UseAuthReturn {
+export function useAuth() {
   const queryClient = useQueryClient()
 
   const { data: user, isLoading: loading } = useQuery({
@@ -61,17 +55,6 @@ export function useAuth(): UseAuthReturn {
   return { user, loading, refreshUser }
 }
 
-export function useAuthStatus() {
-  const { user, loading, refreshUser } = useAuth()
-
-  return {
-    authenticated: user ? true : loading ? null : false,
-    role: user?.role ?? null,
-    isLoading: loading,
-    invalidate: refreshUser,
-  }
-}
-
 export function useLogout() {
   return useMutation({
     mutationFn: performLogout,
@@ -84,5 +67,5 @@ export function useLogout() {
   })
 }
 
-export type UseAuthStatusReturn = ReturnType<typeof useAuthStatus>
+export type UseAuthReturn = ReturnType<typeof useAuth>
 export type UseLogoutReturn = ReturnType<typeof useLogout>

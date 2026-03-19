@@ -10,7 +10,7 @@ import { Settings } from './pages/Settings';
 import { Admin } from './pages/Admin';
 import { Docs } from './pages/Docs';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useAuthStatus } from './hooks/useAuth';
+import { useAuth } from './hooks/useAuth';
 import {
   createRouter,
   createRoute,
@@ -86,17 +86,8 @@ declare module '@tanstack/react-router' {
 // ─── Inner App (inside QueryClientProvider) ──────────────────────────────────
 
 function AppInner() {
-  const [userRole, setUserRole] = useState<string | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('dark');
-
-  const { authenticated: isAuthenticated, role, isLoading, invalidate } = useAuthStatus();
-
-  // Keep userRole in sync
-  useEffect(() => {
-    if (role) {
-      setUserRole(role);
-    }
-  }, [role]);
+  const { user, loading } = useAuth();
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | 'system' | null;
@@ -113,7 +104,7 @@ function AppInner() {
     }
   }, [theme]);
 
-  if (isLoading || isAuthenticated === null) {
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-muted-foreground">Loading...</div>
@@ -121,22 +112,14 @@ function AppInner() {
     );
   }
 
-  if (!isAuthenticated) {
+  if (!user || user.role === 'guest') {
     return (
       <>
         <Toaster position="bottom-right" richColors theme={theme === 'system' ? 'system' : theme} />
-        <AuthPage
-          onAuthSuccess={(authRole: string) => {
-            setUserRole(authRole);
-            // Invalidate auth status so the query re-fetches
-            invalidate();
-          }}
-        />
+        <AuthPage />
       </>
     );
   }
-
-  void userRole; // used for auth check above; role detail comes from useAuth hook
 
   return <RouterProvider router={router} />;
 }

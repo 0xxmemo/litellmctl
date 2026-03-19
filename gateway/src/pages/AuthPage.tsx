@@ -4,23 +4,27 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Zap, Mail, Key, Clock } from 'lucide-react'
 import { toast } from 'sonner'
+import { useAuth } from '@/hooks/useAuth'
 
-interface AuthPageProps {
-  onAuthSuccess?: (role: string) => void
-}
+export function AuthPage() {
+  const { user, refreshUser } = useAuth()
 
-export function AuthPage({ onAuthSuccess: _onAuthSuccess }: AuthPageProps) {
-  const [step, setStep] = useState<'email' | 'otp' | 'pending'>('email')
+  const [step, setStep] = useState<'email' | 'otp' | 'pending'>(() => {
+    if (user?.role === 'guest') return 'pending'
+    return 'email'
+  })
   const [email, setEmail] = useState('')
   const [otp, setOtp] = useState('')
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [otpCooldown, setOtpCooldown] = useState(0)
 
-  // Check session status on mount
+  // Sync step with user role changes (e.g. admin approves while on pending screen)
   useEffect(() => {
-    checkStatus()
-  }, [])
+    if (user?.role === 'guest') {
+      setStep('pending')
+    }
+  }, [user?.role])
 
   // OTP resend cooldown timer
   useEffect(() => {
@@ -33,24 +37,6 @@ export function AuthPage({ onAuthSuccess: _onAuthSuccess }: AuthPageProps) {
     }, 1000)
     return () => clearInterval(timer)
   }, [otpCooldown])
-
-  const checkStatus = async () => {
-    try {
-      const res = await fetch('/api/auth/me', { credentials: 'include' })
-      const data = await res.json()
-      const role = data.user?.role
-
-      if (!data.authenticated) {
-        setStep('email')
-      } else if (role === 'guest') {
-        setStep('pending')
-      } else if (role === 'user' || role === 'admin') {
-        window.location.href = '/'
-      }
-    } catch (error) {
-      console.error('Error checking status:', error)
-    }
-  }
 
   const handleRequestOTP = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -100,8 +86,11 @@ export function AuthPage({ onAuthSuccess: _onAuthSuccess }: AuthPageProps) {
       const data = await res.json()
 
       if (res.ok) {
-        toast.success('Verified! Waiting for admin approval...')
-        setStep('pending')
+        // Refresh auth — AppInner will redirect to dashboard if role is user/admin
+        await refreshUser()
+        if (data.role === 'guest' || !data.role) {
+          toast.success('Verified! Waiting for admin approval...')
+        }
       } else {
         setMessage(data.error || 'Invalid OTP')
         toast.error(data.error || 'Invalid OTP')
@@ -131,8 +120,8 @@ export function AuthPage({ onAuthSuccess: _onAuthSuccess }: AuthPageProps) {
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
-              <p>✅ Email <strong>{email}</strong> verified</p>
-              <p className="mt-2">⏳ An admin will review your request. Refresh to check status.</p>
+              <p>Email <strong>{email || user?.email}</strong> verified</p>
+              <p className="mt-2">An admin will review your request. Click below to check status.</p>
             </div>
             <div className="flex space-x-2">
               <Button
@@ -148,7 +137,7 @@ export function AuthPage({ onAuthSuccess: _onAuthSuccess }: AuthPageProps) {
               <Button
                 variant="default"
                 className="flex-1"
-                onClick={checkStatus}
+                onClick={() => refreshUser()}
               >
                 Check Status
               </Button>
