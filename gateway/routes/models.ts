@@ -56,10 +56,11 @@ async function getExtendedModelsHandler(req: Request) {
   }
 }
 
-// GET /v1/models — public, no auth required (clients need to discover models)
+// GET /v1/models — public to gateway clients, uses master key when proxying to LiteLLM
 async function publicModelsHandler(_req: Request) {
   try {
     const res = await fetch(`${LITELLM_URL}/v1/models`, {
+      headers: { Authorization: LITELLM_AUTH },
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) return Response.json({ error: "Failed to fetch models" }, { status: 502 });
