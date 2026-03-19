@@ -9,9 +9,9 @@ import { useConfig } from '@/hooks/useSettings'
 
 export function DashboardLayout() {
   // Fetch config early so registerAliases runs before model lists render
-  const { user, loading } = useAuth()
+  const auth = useAuth()
   const logoutMutation = useLogout()
-  useConfig({ enabled: user?.role === 'admin' })
+  useConfig({ enabled: auth.user?.role === 'admin' })
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('dark')
 
@@ -68,7 +68,7 @@ export function DashboardLayout() {
             </a>
           </div>
           <div className="p-3 lg:p-4">
-            <Sidebar user={user} />
+            <Sidebar auth={auth} />
           </div>
         </div>
       </div>
@@ -98,7 +98,7 @@ export function DashboardLayout() {
               </a>
             </div>
             <div className="p-3 flex-1 overflow-y-auto">
-              <Sidebar user={user} />
+              <Sidebar auth={auth} />
             </div>
           </div>
         </div>
@@ -134,7 +134,7 @@ export function DashboardLayout() {
               <span className="text-sm font-bold truncate hidden sm:block">LLM API Gateway</span>
             </a>
           </div>
-          <TopBar user={user} loading={loading} onLogout={() => logoutMutation.mutate()} />
+          <TopBar auth={auth} onLogout={() => logoutMutation.mutate()} />
         </div>
 
         {/* Page content */}

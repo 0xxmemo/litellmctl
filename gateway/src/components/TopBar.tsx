@@ -8,15 +8,15 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
-import type { User as UserType } from '@/hooks/useAuth'
+import type { UseAuthReturn } from '@/hooks/useAuth'
 
 interface TopBarProps {
-  user: UserType | undefined
-  loading: boolean
+  auth: UseAuthReturn
   onLogout: () => void
 }
 
-export function TopBar({ user, loading, onLogout }: TopBarProps) {
+export function TopBar({ auth, onLogout }: TopBarProps) {
+  const { user, loading } = auth
   const [profileOpen, setProfileOpen] = useState(false)
 
   const getRoleColor = (role: string) => {

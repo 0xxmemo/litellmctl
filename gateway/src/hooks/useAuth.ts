@@ -15,9 +15,9 @@ interface AuthData {
 
 // ── Fetch helpers (internal) ─────────────────────────────────────────────────
 
-async function fetchAuthMe(): Promise<User | undefined> {
+async function fetchAuthMe(): Promise<User | null> {
   const res = await fetch('/api/auth/me', { credentials: 'include' })
-  if (!res.ok) return undefined
+  if (!res.ok) return null
   const data: AuthData = await res.json()
   if (data.authenticated && data.user) {
     return {
@@ -27,7 +27,7 @@ async function fetchAuthMe(): Promise<User | undefined> {
       company: data.user.company,
     }
   }
-  return undefined
+  return null
 }
 
 async function performLogout(): Promise<void> {
@@ -46,6 +46,7 @@ export function useAuth() {
     queryKey: queryKeys.auth,
     queryFn: fetchAuthMe,
     staleTime: 60_000,
+    retry: false,
   })
 
   const refreshUser = async () => {
