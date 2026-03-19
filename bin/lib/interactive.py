@@ -2,42 +2,44 @@
 
 from __future__ import annotations
 
-import questionary
-from questionary import Style
-
+from .common.deps import require_questionary
 from .common.formatting import console, info, warn
 
-MENU_STYLE = Style([
-    ("qmark",       "fg:ansicyan bold"),
-    ("question",    "bold"),
-    ("answer",      "fg:ansigreen bold"),
-    ("pointer",     "fg:ansicyan bold"),
-    ("highlighted", "fg:ansicyan bold"),
-    ("selected",    "fg:ansigreen"),
-    ("separator",   "fg:ansiblue"),
-    ("disabled",    "fg:ansidarkgray italic"),
-    ("instruction", "fg:ansidarkgray"),
-])
+
+def _menu_style():
+    q = require_questionary()
+    return q.Style([
+        ("qmark",       "fg:ansicyan bold"),
+        ("question",    "bold"),
+        ("answer",      "fg:ansigreen bold"),
+        ("pointer",     "fg:ansicyan bold"),
+        ("highlighted", "fg:ansicyan bold"),
+        ("selected",    "fg:ansigreen"),
+        ("separator",   "fg:ansiblue"),
+        ("disabled",    "fg:ansidarkgray italic"),
+        ("instruction", "fg:ansidarkgray"),
+    ])
 
 
 def _build_choices(running: bool, port: int) -> list:
-    on  = lambda label: questionary.Choice(label)
-    off = lambda label, reason: questionary.Choice(label, disabled=reason)
+    q = require_questionary()
+    on  = lambda label: q.Choice(label)
+    off = lambda label, reason: q.Choice(label, disabled=reason)
 
     return [
-        questionary.Separator("  ─ service ─────────────────────────"),
+        q.Separator("  ─ service ─────────────────────────"),
         on("start")    if not running else off("start",   "already running"),
         on("stop")     if running     else off("stop",    "not running"),
         on("restart")  if running     else off("restart", "not running"),
         on("status"),
         on("logs")     if running     else off("logs",    "not running"),
-        questionary.Separator("  ─ setup ──────────────────────────"),
+        q.Separator("  ─ setup ──────────────────────────"),
         on("install"),
         on("auth"),
         on("wizard"),
         on("gateway"),
         on("uninstall"),
-        questionary.Separator("  ─────────────────────────────────"),
+        q.Separator("  ─────────────────────────────────"),
         on("help"),
         on("quit"),
     ]
@@ -45,6 +47,8 @@ def _build_choices(running: bool, port: int) -> list:
 
 def interactive_menu() -> None:
     """Main interactive menu loop."""
+    q = require_questionary()
+    style = _menu_style()
     while True:
         from .common.process import get_proxy_port, find_proxy_pid
         port    = get_proxy_port()
@@ -53,10 +57,10 @@ def interactive_menu() -> None:
         console.print(f"\n[bold]litellmctl[/]  [dim]proxy[/] {state}")
 
         try:
-            choice = questionary.select(
+            choice = q.select(
                 "›",
                 choices=_build_choices(running, port),
-                style=MENU_STYLE,
+                style=style,
                 instruction="(↑↓ arrows, enter to select)",
             ).ask()
         except KeyboardInterrupt:
@@ -116,25 +120,27 @@ def interactive_menu() -> None:
 
 def auth_interactive() -> None:
     """Interactive auth provider selection using questionary."""
+    q = require_questionary()
+    style = _menu_style()
     from .auth.transfer import AUTH_PROVIDERS
 
-    choices: list = [questionary.Separator("  ─ login ──────────────────────────")]
+    choices: list = [q.Separator("  ─ login ──────────────────────────")]
     for key, label, _ in AUTH_PROVIDERS:
-        choices.append(questionary.Choice(f"{key}  ({label})"))
+        choices.append(q.Choice(f"{key}  ({label})"))
     choices += [
-        questionary.Separator("  ─ manage ─────────────────────────"),
-        questionary.Choice("status"),
-        questionary.Choice("refresh"),
-        questionary.Choice("export"),
-        questionary.Separator("  ───────────────────────────────────"),
-        questionary.Choice("back"),
+        q.Separator("  ─ manage ─────────────────────────"),
+        q.Choice("status"),
+        q.Choice("refresh"),
+        q.Choice("export"),
+        q.Separator("  ───────────────────────────────────"),
+        q.Choice("back"),
     ]
 
     try:
-        result = questionary.select(
+        result = q.select(
             "› auth",
             choices=choices,
-            style=MENU_STYLE,
+            style=style,
             instruction="(↑↓ arrows, enter to select)",
         ).ask()
     except KeyboardInterrupt:
@@ -151,10 +157,10 @@ def auth_interactive() -> None:
     elif cmd == "status":
         auth_dispatch(["status"])
     elif cmd == "refresh":
-        provider = questionary.select(
+        provider = q.select(
             "› refresh",
             choices=["chatgpt", "gemini", "qwen", "kimi"],
-            style=MENU_STYLE,
+            style=style,
         ).ask()
         if provider:
             auth_dispatch(["refresh", provider])

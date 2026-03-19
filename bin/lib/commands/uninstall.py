@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import os
 
-import questionary
-
 from ..common.env import load_env, remove_db_env_config
 from ..common.formatting import console, info, warn, error
 from ..common.platform import is_macos, is_linux, is_interactive
@@ -138,9 +136,10 @@ def cmd_uninstall(target: str | None = None) -> None:
     load_env()
 
     if target is None and is_interactive():
+        from ..common.deps import require_questionary
         choices = [f"{name:<16} {desc}" for name, desc in UNINSTALL_TARGETS]
         choices.append("all              All of the above")
-        result = questionary.select(
+        result = require_questionary().select(
             "Uninstall — select component:",
             choices=choices,
         ).ask()

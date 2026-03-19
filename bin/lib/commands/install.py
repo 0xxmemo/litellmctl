@@ -20,8 +20,6 @@ from .searxng import install_searxng
 from .protonmail import install_protonmail
 from ..common.process import find_proxy_pid
 
-import questionary
-
 
 def cmd_install(
     *,
@@ -88,7 +86,8 @@ def cmd_install(
         if "DATABASE_URL=" in text:
             db_mode = "yes"
         elif is_interactive():
-            if questionary.confirm("Set up local PostgreSQL database for LiteLLM now?", default=True).ask():
+            from ..common.deps import require_questionary
+            if require_questionary().confirm("Set up local PostgreSQL database for LiteLLM now?", default=True).ask():
                 db_mode = "yes"
             else:
                 db_mode = "no"
@@ -118,13 +117,15 @@ def cmd_install(
             transcr_mode = "yes"
 
     if not embed_mode and is_interactive():
-        if questionary.confirm("Set up local embedding server (Ollama)?", default=True).ask():
+        from ..common.deps import require_questionary
+        if require_questionary().confirm("Set up local embedding server (Ollama)?", default=True).ask():
             embed_mode = "yes"
         else:
             embed_mode = "no"
 
     if not transcr_mode and is_interactive():
-        if questionary.confirm("Set up local transcription server (faster-whisper-server)?", default=True).ask():
+        from ..common.deps import require_questionary
+        if require_questionary().confirm("Set up local transcription server (faster-whisper-server)?", default=True).ask():
             transcr_mode = "yes"
         else:
             transcr_mode = "no"
@@ -147,7 +148,8 @@ def cmd_install(
             searxng_mode = "yes"
 
     if not searxng_mode and is_interactive():
-        if questionary.confirm("Set up SearXNG search server?", default=True).ask():
+        from ..common.deps import require_questionary
+        if require_questionary().confirm("Set up SearXNG search server?", default=True).ask():
             searxng_mode = "yes"
         else:
             searxng_mode = "no"
@@ -162,7 +164,8 @@ def cmd_install(
         gateway_mode = "yes"
 
     if not gateway_mode and is_interactive():
-        if questionary.confirm("Set up LLM API Gateway UI?", default=True).ask():
+        from ..common.deps import require_questionary
+        if require_questionary().confirm("Set up LLM API Gateway UI?", default=True).ask():
             gateway_mode = "yes"
         else:
             gateway_mode = "no"
@@ -181,7 +184,8 @@ def cmd_install(
             proton_mode = "yes"
 
     if not proton_mode and gateway_mode == "yes" and is_interactive():
-        if questionary.confirm("Set up ProtonMail SMTP bridge (hydroxide) for OTP emails?", default=False).ask():
+        from ..common.deps import require_questionary
+        if require_questionary().confirm("Set up ProtonMail SMTP bridge (hydroxide) for OTP emails?", default=False).ask():
             proton_mode = "yes"
         else:
             proton_mode = "no"
@@ -204,7 +208,8 @@ def cmd_install(
 
     if running:
         if is_interactive():
-            if questionary.confirm("Proxy is running. Restart now?", default=True).ask():
+            from ..common.deps import require_questionary
+            if require_questionary().confirm("Proxy is running. Restart now?", default=True).ask():
                 cmd_restart()
             else:
                 info("Skipped restart. Run 'litellmctl restart' when ready.")

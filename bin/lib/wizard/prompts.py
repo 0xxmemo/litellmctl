@@ -2,25 +2,29 @@
 
 from __future__ import annotations
 
-import questionary
-from questionary import Style
+from ..common.deps import require_questionary
 
-WIZARD_STYLE = Style([
-    ("qmark", "fg:cyan bold"),
-    ("question", "bold"),
-    ("answer", "fg:green bold"),
-    ("pointer", "fg:cyan bold"),
-    ("highlighted", "fg:cyan bold"),
-    ("selected", "fg:green"),
-])
+
+def _style():
+    q = require_questionary()
+    return q.Style([
+        ("qmark", "fg:cyan bold"),
+        ("question", "bold"),
+        ("answer", "fg:green bold"),
+        ("pointer", "fg:cyan bold"),
+        ("highlighted", "fg:cyan bold"),
+        ("selected", "fg:green"),
+    ])
 
 
 def ask(prompt: str, default: str = "") -> str:
-    return questionary.text(prompt, default=default, style=WIZARD_STYLE).ask() or default
+    q = require_questionary()
+    return q.text(prompt, default=default, style=_style()).ask() or default
 
 
 def confirm(prompt: str, default: bool = True) -> bool:
-    result = questionary.confirm(prompt, default=default, style=WIZARD_STYLE).ask()
+    q = require_questionary()
+    result = q.confirm(prompt, default=default, style=_style()).ask()
     if result is None:
         raise KeyboardInterrupt
     return result
@@ -28,8 +32,9 @@ def confirm(prompt: str, default: bool = True) -> bool:
 
 def pick_one(prompt: str, choices: list[str], default: str | None = None) -> int:
     """Pick one item. Returns 0-based index."""
-    result = questionary.select(
-        prompt, choices=choices, default=default, style=WIZARD_STYLE,
+    q = require_questionary()
+    result = q.select(
+        prompt, choices=choices, default=default, style=_style(),
     ).ask()
     if result is None:
         raise KeyboardInterrupt
@@ -38,8 +43,9 @@ def pick_one(prompt: str, choices: list[str], default: str | None = None) -> int
 
 def pick_many(prompt: str, choices: list[str]) -> list[int]:
     """Pick multiple items. Returns list of 0-based indices."""
-    result = questionary.checkbox(
-        prompt, choices=choices, style=WIZARD_STYLE,
+    q = require_questionary()
+    result = q.checkbox(
+        prompt, choices=choices, style=_style(),
     ).ask()
     if result is None:
         raise KeyboardInterrupt
