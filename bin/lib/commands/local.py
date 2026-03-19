@@ -47,14 +47,11 @@ def _ollama_start(embed_base: str) -> bool:
         subprocess.call(["brew", "services", "start", "ollama"],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     elif is_linux() and shutil.which("systemctl"):
-        # The curl installer creates an ollama.service — try that first
-        subprocess.call(["systemctl", "start", "ollama"],
+        # The curl installer creates a system-level ollama.service.
+        # Use sudo directly — bare systemctl triggers polkit which prompts
+        # for a password (breaks headless/EC2 with key-based auth).
+        subprocess.call(["sudo", "systemctl", "start", "ollama"],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        # Also try user-level service in case system-level needs sudo
-        if subprocess.call(["systemctl", "is-active", "--quiet", "ollama"],
-                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
-            subprocess.call(["sudo", "systemctl", "start", "ollama"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
         subprocess.Popen(["ollama", "serve"],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
