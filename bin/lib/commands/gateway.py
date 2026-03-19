@@ -60,7 +60,7 @@ def gateway_start() -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_f = open(LOG_DIR / "gateway.log", "a")
     proc = subprocess.Popen(
-        ["bun", "run", "index.ts"],
+        ["bun", "--env-file=../.env", "run", "index.ts"],
         cwd=str(gateway_dir),
         stdout=log_f, stderr=log_f,
         start_new_session=True,

@@ -1,5 +1,6 @@
 import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
 import { getAuthenticatedUser } from "../lib/db";
+import { buildExtendedModel } from "../src/lib/models";
 
 // Models — requireUserOrAdmin (matches reference)
 async function getModelsHandler(req: Request) {
@@ -43,12 +44,13 @@ async function getExtendedModelsHandler(req: Request) {
     if (!res.ok) return Response.json({ models: [], error: `LiteLLM returned ${res.status}` }, { status: 502 });
     const data = await res.json();
     const seen = new Set<string>();
-    const models = (data.data || []).filter((entry: any) => {
+    const unique = (data.data || []).filter((entry: any) => {
       const name = entry.model_name;
       if (!name || seen.has(name)) return false;
       seen.add(name);
       return true;
     });
+    const models = unique.map(buildExtendedModel);
     return Response.json({ models, count: models.length });
   } catch (err) {
     console.error("GET /api/models/extended error:", (err as Error).message);
