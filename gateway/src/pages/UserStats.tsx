@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Activity, Key, DollarSign, TrendingUp, RefreshCw } from 'lucide-react'
 import { PrettyAmount } from '@/components/PrettyAmount'
-import { PrettyDate } from '@/components/PrettyDate'
 import { useUserStats } from '@/hooks/useStats'
 
 /** Shows "Updated Xs ago" with spinning icon during background refetch */
@@ -83,7 +81,7 @@ export function UserStats() {
     },
   ]
 
-  const requestHistory = user?.requestHistory || []
+  const requestHistory = user?.dailyRequests || []
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
@@ -179,8 +177,8 @@ export function UserStats() {
                       Loading...
                     </TableCell>
                   </TableRow>
-                ) : user?.modelUsage?.length > 0 ? (
-                  user.modelUsage.map((model: any, i: number) => {
+                ) : (user?.modelUsage?.length ?? 0) > 0 ? (
+                  user!.modelUsage!.map((model: any, i: number) => {
                     const aliases: string[] = model.requested_aliases || []
                     const hasAlias = aliases.length > 0
                     return (
@@ -236,19 +234,6 @@ export function UserStats() {
                       Loading...
                     </TableCell>
                   </TableRow>
-                ) : user?.keys?.length > 0 ? (
-                  user.keys.map((key: any, i: number) => (
-                    <TableRow key={i}>
-                      <TableCell className="font-medium">{key.name || 'API Key'}</TableCell>
-                      <TableCell><PrettyDate date={key.createdAt} format="date" size="sm" /></TableCell>
-                      <TableCell>
-                        <Badge variant={key.revoked ? 'destructive' : 'success'}>
-                          {key.revoked ? 'Revoked' : 'Active'}
-                        </Badge>
-                      </TableCell>
-                      <TableCell><PrettyAmount amountFormatted={key.requests ?? 0} size="sm" /></TableCell>
-                    </TableRow>
-                  ))
                 ) : (
                   <TableRow>
                     <TableCell colSpan={4} className="text-center text-muted-foreground">

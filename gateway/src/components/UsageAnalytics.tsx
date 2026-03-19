@@ -31,15 +31,15 @@ export function UsageAnalytics() {
     if (!rawData) return { requests: [], models: [], endpoints: [] }
     return {
       requests: [{ date: new Date().toISOString().split('T')[0], requests: rawData.requests }],
-      models: rawData.models || [],
+      models: rawData.modelUsage || [],
       endpoints: [],
     }
   }, [rawData])
 
   const costData = useMemo(() => {
-    if (!rawData?.models || rawData.models.length === 0) return []
-    const totalCost = rawData.models.reduce((sum: number, m: any) => sum + (m.spend || 0), 0)
-    return rawData.models.map((m: any) => ({
+    if (!rawData?.modelUsage || rawData.modelUsage.length === 0) return []
+    const totalCost = rawData.modelUsage.reduce((sum: number, m: any) => sum + (m.spend || 0), 0)
+    return rawData.modelUsage.map((m: any) => ({
       category: m.model_name?.split('-')[0] || m.model_name || 'Unknown',
       amount: m.spend || 0,
       percentage: totalCost > 0 ? ((m.spend / totalCost) * 100).toFixed(1) : '0'

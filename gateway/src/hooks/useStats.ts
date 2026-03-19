@@ -27,6 +27,10 @@ export interface UserStats {
   tokens: number
   spend: number
   keys: number
+  requestsChange?: string
+  tokensChange?: string
+  spendChange?: string
+  keysChange?: string
   dailyRequests?: Array<{ date: string; requests: number }>
   modelUsage?: Array<{
     model_name: string
