@@ -4,21 +4,27 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 
-from ..common.paths import PROJECT_DIR, BIN_DIR, VENV_DIR, ENV_FILE
+from ..common.paths import PROJECT_DIR, BIN_DIR, ENV_FILE
 from ..common.env import load_env, patch_db_flags, patch_local_defaults
 from ..common.formatting import info, warn, console
 from ..common.platform import is_macos, is_linux, is_interactive
+from ..common.network import http_check, transcr_http_check, port_in_use
 
 from .service import _activate_venv, cmd_restart
 from .service import launchd_is_running, systemd_is_running, nohup_is_running
 from .local import install_embedding, install_transcription
 from .db import ensure_db_ready
-from .gateway import install_gateway
+from .gateway import install_gateway, gateway_is_running
 from .searxng import install_searxng
 from .protonmail import install_protonmail
 from ..common.process import find_proxy_pid
+
+
+def _confirm(prompt: str, default: bool = True) -> bool:
+    """Interactive confirm — lazy-loads questionary."""
+    from ..common.deps import require_questionary
+    return require_questionary().confirm(prompt, default=default).ask()
 
 
 def cmd_install(
@@ -80,14 +86,13 @@ def cmd_install(
     _activate_venv()
     load_env()
 
-    # DB setup
+    # ── DB setup ──────────────────────────────────────────────────────────
     if not db_mode:
         text = ENV_FILE.read_text() if ENV_FILE.exists() else ""
         if "DATABASE_URL=" in text:
             db_mode = "yes"
         elif is_interactive():
-            from ..common.deps import require_questionary
-            if require_questionary().confirm("Set up local PostgreSQL database for LiteLLM now?", default=True).ask():
+            if _confirm("Set up local PostgreSQL database for LiteLLM now?"):
                 db_mode = "yes"
             else:
                 db_mode = "no"
@@ -106,29 +111,40 @@ def cmd_install(
     patch_local_defaults()
     load_env()
 
-    # Local inference servers
+    # ── Local inference servers ────────────────────────────────────────────
     import shutil
     os.environ["PATH"] = f"{os.path.expanduser('~/.local/bin')}:{os.path.expanduser('~/.cargo/bin')}:{os.environ.get('PATH', '')}"
 
-    if not embed_mode and shutil.which("ollama"):
-        embed_mode = "yes"
-    if not transcr_mode:
-        if shutil.which("faster-whisper-server") or shutil.which("speaches"):
-            transcr_mode = "yes"
+    embed_base = os.environ.get(
+        "LOCAL_EMBEDDING_API_BASE",
+        os.environ.get("OLLAMA_API_BASE", "http://localhost:11434"),
+    )
+    transcr_base = os.environ.get(
+        "LOCAL_TRANSCRIPTION_API_BASE", "http://localhost:10300/v1",
+    )
 
-    if not embed_mode and is_interactive():
-        from ..common.deps import require_questionary
-        if require_questionary().confirm("Set up local embedding server (Ollama)?", default=True).ask():
+    # Auto-detect: skip if already running, install if binary found but not running
+    if not embed_mode:
+        if http_check(f"{embed_base.rstrip('/')}/v1/models", timeout=2):
+            info(f"Embedding server already running at {embed_base}")
+        elif shutil.which("ollama"):
             embed_mode = "yes"
-        else:
-            embed_mode = "no"
+        elif is_interactive():
+            if _confirm("Set up local embedding server (Ollama)?"):
+                embed_mode = "yes"
+            else:
+                embed_mode = "no"
 
-    if not transcr_mode and is_interactive():
-        from ..common.deps import require_questionary
-        if require_questionary().confirm("Set up local transcription server (faster-whisper-server)?", default=True).ask():
+    if not transcr_mode:
+        if transcr_http_check(transcr_base.rstrip("/"), timeout=2):
+            info(f"Transcription server already running at {transcr_base}")
+        elif shutil.which("faster-whisper-server") or shutil.which("speaches"):
             transcr_mode = "yes"
-        else:
-            transcr_mode = "no"
+        elif is_interactive():
+            if _confirm("Set up local transcription server (faster-whisper-server)?"):
+                transcr_mode = "yes"
+            else:
+                transcr_mode = "no"
 
     if embed_mode == "yes" or transcr_mode == "yes":
         console.print()
@@ -138,64 +154,71 @@ def cmd_install(
         if transcr_mode == "yes":
             install_transcription()
 
-    # SearXNG
-    if not searxng_mode and shutil.which("docker"):
-        result = subprocess.run(
-            ["docker", "ps", "--format", "{{.Names}}"],
-            capture_output=True, text=True,
-        )
-        if "searxng" in result.stdout.splitlines():
-            searxng_mode = "yes"
-
-    if not searxng_mode and is_interactive():
-        from ..common.deps import require_questionary
-        if require_questionary().confirm("Set up SearXNG search server?", default=True).ask():
-            searxng_mode = "yes"
-        else:
-            searxng_mode = "no"
+    # ── SearXNG ───────────────────────────────────────────────────────────
+    if not searxng_mode:
+        if shutil.which("docker"):
+            result = subprocess.run(
+                ["docker", "ps", "--format", "{{.Names}}"],
+                capture_output=True, text=True,
+            )
+            if "searxng" in result.stdout.splitlines():
+                info("SearXNG already running — skipping")
+            elif is_interactive():
+                if _confirm("Set up SearXNG search server?"):
+                    searxng_mode = "yes"
+                else:
+                    searxng_mode = "no"
+        elif is_interactive():
+            if _confirm("Set up SearXNG search server?"):
+                searxng_mode = "yes"
+            else:
+                searxng_mode = "no"
 
     if searxng_mode == "yes":
         console.print()
-        info("Setting up SearXNG search server")
         install_searxng()
 
-    # Gateway
-    if not gateway_mode and (PROJECT_DIR / "gateway").exists() and shutil.which("bun"):
-        gateway_mode = "yes"
-
-    if not gateway_mode and is_interactive():
-        from ..common.deps import require_questionary
-        if require_questionary().confirm("Set up LLM API Gateway UI?", default=True).ask():
+    # ── Gateway ───────────────────────────────────────────────────────────
+    if not gateway_mode:
+        if gateway_is_running():
+            info("Gateway already running — skipping")
+        elif (PROJECT_DIR / "gateway" / "dist").exists():
+            info("Gateway already built — start with: litellmctl gateway start")
+        elif (PROJECT_DIR / "gateway").exists() and shutil.which("bun"):
             gateway_mode = "yes"
-        else:
-            gateway_mode = "no"
+        elif is_interactive():
+            if _confirm("Set up LLM API Gateway UI?"):
+                gateway_mode = "yes"
+            else:
+                gateway_mode = "no"
 
     if gateway_mode == "yes":
         console.print()
         info("Setting up LLM API Gateway UI")
         install_gateway()
 
-    # ProtonMail
-    if not proton_mode and shutil.which("hydroxide"):
-        proton_mode = "yes"
+    # ── ProtonMail ────────────────────────────────────────────────────────
     if not proton_mode:
-        hydroxide_path = os.path.expanduser("~/go/bin/hydroxide")
-        if os.path.isfile(hydroxide_path) and os.access(hydroxide_path, os.X_OK):
-            proton_mode = "yes"
-
-    if not proton_mode and gateway_mode == "yes" and is_interactive():
-        from ..common.deps import require_questionary
-        if require_questionary().confirm("Set up ProtonMail SMTP bridge (hydroxide) for OTP emails?", default=False).ask():
-            proton_mode = "yes"
+        if port_in_use(1025):
+            info("ProtonMail bridge already running — skipping")
+        elif shutil.which("hydroxide"):
+            pass  # installed but not running — don't reinstall, don't prompt
         else:
-            proton_mode = "no"
+            hydroxide_path = os.path.expanduser("~/go/bin/hydroxide")
+            if os.path.isfile(hydroxide_path) and os.access(hydroxide_path, os.X_OK):
+                pass  # installed but not running
+            elif gateway_mode == "yes" and is_interactive():
+                if _confirm("Set up ProtonMail SMTP bridge (hydroxide) for OTP emails?", default=False):
+                    proton_mode = "yes"
+                else:
+                    proton_mode = "no"
 
     if proton_mode == "yes":
         console.print()
         info("Setting up ProtonMail SMTP bridge")
         install_protonmail()
 
-    # Restart prompt
+    # ── Restart prompt ────────────────────────────────────────────────────
     running = False
     if is_macos() and launchd_is_running():
         running = True
@@ -208,8 +231,7 @@ def cmd_install(
 
     if running:
         if is_interactive():
-            from ..common.deps import require_questionary
-            if require_questionary().confirm("Proxy is running. Restart now?", default=True).ask():
+            if _confirm("Proxy is running. Restart now?"):
                 cmd_restart()
             else:
                 info("Skipped restart. Run 'litellmctl restart' when ready.")
