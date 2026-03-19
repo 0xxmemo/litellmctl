@@ -12,7 +12,7 @@ import {
 import { toast } from 'sonner'
 import { ConfigModelSelector } from './ModelSelector'
 import type { NormalizedModel } from '@lib/models'
-import type { UseConfigEditorReturn } from '@/hooks/useSettings'
+import type { UseConfigEditorReturn, ModelGroupAlias, FallbackChain, RouterSettings, ModelEntry, LiteLLMConfig } from '@/hooks/useSettings'
 import type { UseModelsReturn } from '@/lib/models-hooks'
 import {
   DndContext,
@@ -33,52 +33,6 @@ import {
   useSortable,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface ModelGroupAlias {
-  [alias: string]: string
-}
-
-interface FallbackChain {
-  [primaryModel: string]: string[]
-}
-
-interface RouterSettings {
-  num_retries: number
-  timeout: number | null
-  cooldown_time: number
-  allowed_fails: number
-  retry_after: number
-  enable_pre_call_checks: boolean
-  set_verbose: boolean
-  // These live inside router_settings in LiteLLM (not top-level)
-  model_group_alias?: ModelGroupAlias
-  fallbacks?: FallbackChain[]
-  [key: string]: unknown
-}
-
-interface LiteLLMConfig {
-  model_group_alias?: ModelGroupAlias
-  router_settings?: RouterSettings
-  litellm_settings?: Record<string, unknown>
-  model_list?: ModelEntry[]
-  // fallbacks lives inside router_settings in newer LiteLLM, but may appear top-level
-  fallbacks?: FallbackChain[]
-  [key: string]: unknown
-}
-
-interface ModelEntry {
-  model_name: string
-  litellm_params: {
-    model: string
-    api_base?: string
-    api_key?: string
-    [key: string]: unknown
-  }
-  model_info?: Record<string, unknown>
-}
 
 
 // ─── Tab: Fallbacks (merged: model_group_alias as Primary + fallback chains) ────
@@ -732,7 +686,8 @@ interface ConfigEditorProps {
 }
 
 export function ConfigEditor({ configEditor, models }: ConfigEditorProps) {
-  const { data: config, isLoading: loading, error: queryError, refetch, saveMutation, resetMutation } = configEditor
+  const { data: config, isLoading, error: queryError, refetch, saveMutation, resetMutation } = configEditor
+  const loading = isLoading
   const allModels = models.models
 
   // Editable local state — seeded from query data
