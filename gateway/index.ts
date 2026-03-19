@@ -14,6 +14,8 @@ import { statsRoutes } from "./routes/stats";
 import { userRoutes } from "./routes/user";
 import { adminRoutes } from "./routes/admin";
 import { proxyRoutes } from "./routes/proxy";
+import { searchRoutes } from "./routes/search";
+import { healthRoutes } from "./routes/health";
 
 // ============================================================================
 // CONFIGURATION
@@ -70,11 +72,6 @@ setInterval(() => {
 // ============================================================================
 // STATIC FILE HELPERS
 // ============================================================================
-
-// Health check
-async function healthHandler() {
-  return Response.json({ status: "ok", uptime: process.uptime() });
-}
 
 // Serve frontend
 async function serveFrontend() {
@@ -156,10 +153,7 @@ Bun.serve({
       return response || new Response("Not found", { status: 404 });
     },
 
-    // Health
-    "/api/health": { GET: healthHandler },
-
-    // Auth, keys, models, stats, user, admin, proxy routes
+    // Auth, keys, models, stats, user, admin, proxy, search, health routes
     ...authRoutes,
     ...keysRoutes,
     ...modelsRoutes,
@@ -167,6 +161,8 @@ Bun.serve({
     ...userRoutes,
     ...adminRoutes,
     ...proxyRoutes,
+    ...searchRoutes,
+    ...healthRoutes,
 
     // Icons (served from /public/)
     "/favicon.ico": async () => (await serveStaticFile("/public/favicon.ico")) || new Response("Not found", { status: 404 }),

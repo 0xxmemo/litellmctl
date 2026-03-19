@@ -33,4 +33,4 @@ ref/
 *.db-shm
 *.db-wal
 prisma/migrations/
-.prisma/
+.prisma/gateway/index

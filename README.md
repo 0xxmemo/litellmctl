@@ -395,12 +395,31 @@ Once running, SearXNG provides:
 - **Web UI**: http://localhost:8888
 - **Search API**: http://localhost:8888/search
 
+#### Direct API (SearXNG)
+
 ```bash
 # Direct API search
 curl "http://localhost:8888/search?q=your+query&format=json"
 
 # Using jq to format results
 curl "http://localhost:8888/search?q=AI+news&format=json" | jq '.results[:5] | .[] | {title, url}'
+```
+
+#### Via Gateway
+
+The gateway exposes an authenticated `/api/search` endpoint that proxies requests to SearXNG:
+
+```bash
+# Check if search is enabled
+curl http://localhost:14041/api/health | jq .features.search
+
+# Search with API key
+curl -H "x-api-key: $GATEWAY_KEY" \
+  "http://localhost:14041/api/search?q=AI+news" | jq '.results[:3]'
+
+# Search with session (requires prior /api/auth/login)
+curl -b cookies.txt "http://localhost:14041/api/search?q=AI+news&categories=general" \
+  | jq '.results[:3] | .[] | {title, url}'
 ```
 
 ### Status
@@ -439,6 +458,51 @@ SEARXNG_PORT=9999
 - Removes tracking parameters from URLs
 - No ads or personalization bubbles
 - Self-hosted — no external API dependencies
+
+## Gateway API Endpoints
+
+The gateway exposes authenticated REST endpoints for health checks and feature detection.
+
+### `GET /api/health`
+
+Returns gateway status and optional features availability.
+
+**Response:**
+```json
+{
+  "status": "ok",
+  "uptime": 42.3,
+  "features": {
+    "search": true
+  }
+}
+```
+
+**Examples:**
+```bash
+# Check overall health
+curl http://localhost:14041/api/health | jq .
+
+# Check if search is enabled
+curl http://localhost:14041/api/health | jq .features.search
+```
+
+### `GET /api/search` (requires auth)
+
+Proxies authenticated search requests to SearXNG. Supports all SearXNG query parameters.
+
+**Query Parameters:** Same as SearXNG (`q`, `categories`, `language`, `time_range`, etc.)
+
+**Examples:**
+```bash
+# Search with API key
+curl -H "x-api-key: $GATEWAY_KEY" \
+  "http://localhost:14041/api/search?q=LLM+research" | jq '.results[:2]'
+
+# Search with session
+curl -b cookies.txt \
+  "http://localhost:14041/api/search?q=Python+async&categories=tech" | jq .
+```
 
 ## Config API Endpoints
 
