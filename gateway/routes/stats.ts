@@ -198,7 +198,20 @@ async function userStatsHandler(req: Request) {
   }
 }
 
+// Helper: build match clause for a user's usage logs (email + API key hashes)
+async function buildUserMatchClause(email: string) {
+  const userKeys = await apiKeys
+    .find({ email, revoked: false }, { projection: { keyHash: 1 } })
+    .toArray();
+  const keyHashes = userKeys.map((k: any) => k.keyHash).filter(Boolean);
+  return keyHashes.length
+    ? { $or: [{ email }, { apiKeyHash: { $in: keyHashes } }] }
+    : { email };
+}
+
 // GET /api/overview/requests/grouped — requireAuth (any authenticated user incl. guests)
+// Uses a cursor to stream only enough docs to fill the requested page of groups,
+// instead of loading 10K docs into memory. Stops as soon as we have enough groups.
 async function groupedRequestsHandler(req: Request) {
   const auth = await requireAuth(req);
   if (auth instanceof Response) return auth;
@@ -207,73 +220,76 @@ async function groupedRequestsHandler(req: Request) {
     const url = new URL(req.url);
     const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10));
     const pageSize = Math.min(100, Math.max(1, parseInt(url.searchParams.get("pageSize") || "20", 10)));
+    const matchClause = await buildUserMatchClause(auth.email);
 
-    const userKeys = await apiKeys.find({ email: auth.email, revoked: false }).toArray();
-    const keyHashes = userKeys.map((k: any) => k.keyHash).filter(Boolean);
-    const matchClause = keyHashes.length
-      ? { $or: [{ email: auth.email }, { apiKeyHash: { $in: keyHashes } }] }
-      : { email: auth.email };
+    // Target: we need (offset + pageSize) groups, plus 1 to know if there's more
+    const targetGroups = (page - 1) * pageSize + pageSize + 1;
 
-    const [raw, totalRequests] = await Promise.all([
-      usageLogs.find(matchClause).sort({ timestamp: -1 }).limit(10000).toArray(),
-      usageLogs.countDocuments(matchClause),
-    ]);
+    // Cursor-based scan: project only needed fields, stop when we have enough groups
+    const cursor = usageLogs.aggregate([
+      { $match: matchClause },
+      { $sort: { timestamp: -1 } },
+      { $project: {
+        _m: { $ifNull: ["$actualModel", "$model"] },
+        endpoint: 1,
+        promptTokens: { $ifNull: ["$promptTokens", 0] },
+        completionTokens: { $ifNull: ["$completionTokens", 0] },
+        tokens: { $add: [{ $ifNull: ["$tokens", 0] }, { $ifNull: ["$totalTokens", 0] }] },
+        timestamp: 1,
+      }},
+    ], { maxTimeMS: 8000 });
 
-    // Group consecutive same model+endpoint requests
-    const allGroups: any[] = [];
+    const groups: any[] = [];
     let groupCounter = 0;
-    for (const r of raw) {
-      const model = r.actualModel || r.model || null;
-      const endpoint = r.endpoint || null;
-      const provider = model && model.includes("/") ? model.split("/")[0] : (model || "unknown");
-      const groupKey = `${provider}|${model}|${endpoint}`;
-      const cost = calcCost(model, r.promptTokens || 0, r.completionTokens || 0);
-      const tokens = r.tokens || r.totalTokens || 0;
-      const item = {
-        _id: r._id.toString(),
-        requestedModel: r.requestedModel || null,
-        actualModel: model,
-        endpoint,
-        promptTokens: r.promptTokens || 0,
-        completionTokens: r.completionTokens || 0,
-        totalTokens: tokens,
-        cost,
-        timestamp: r.timestamp,
-      };
-      const lastGroup = allGroups.length > 0 ? allGroups[allGroups.length - 1] : null;
-      if (lastGroup && lastGroup._groupKey === groupKey) {
-        lastGroup.count += 1;
-        lastGroup.totalTokens += tokens;
-        lastGroup.totalSpend += cost;
-        lastGroup.lastTimestamp = item.timestamp;
-        lastGroup._itemIds.push(item._id);
+    let docsRead = 0;
+
+    for await (const r of cursor) {
+      docsRead++;
+      const model: string = r._m || "unknown";
+      const ep: string | null = r.endpoint || null;
+      const provider = model.includes("/") ? model.split("/")[0] : model;
+      const groupKey = `${provider}|${model}|${ep}`;
+      const tokens = r.tokens || 0;
+      const cost = calcCost(model, r.promptTokens, r.completionTokens);
+      const last = groups.length > 0 ? groups[groups.length - 1] : null;
+
+      if (last && last._gk === groupKey) {
+        last.count++;
+        last.totalTokens += tokens;
+        last.totalSpend += cost;
+        last.lastTimestamp = r.timestamp;
       } else {
-        groupCounter++;
-        allGroups.push({
-          id: `group-${groupCounter}`,
-          _groupKey: groupKey,
-          _itemIds: [item._id],
-          provider,
-          model,
-          endpoint,
+        // New group — check if we already have enough
+        if (groups.length >= targetGroups) break;
+        groups.push({
+          id: `group-${++groupCounter}`,
+          _gk: groupKey,
+          provider, model, endpoint: ep,
           count: 1,
           totalTokens: tokens,
           totalSpend: cost,
-          firstTimestamp: item.timestamp,
-          lastTimestamp: item.timestamp,
+          firstTimestamp: r.timestamp,
+          lastTimestamp: r.timestamp,
           items: null,
         });
       }
     }
+    await cursor.close();
 
-    const totalGroups = allGroups.length;
-    const totalPages = Math.ceil(totalGroups / pageSize);
+    const hasMore = groups.length > (page - 1) * pageSize + pageSize;
     const offset = (page - 1) * pageSize;
-    const pageGroups = allGroups.slice(offset, offset + pageSize).map(({ _groupKey, _itemIds, ...g }) => g);
+    const pageGroups = groups.slice(offset, offset + pageSize).map(({ _gk, ...g }) => g);
 
     return Response.json({
       groups: pageGroups,
-      pagination: { page, pageSize, totalGroups, totalPages, hasMore: page < totalPages, totalRequests },
+      pagination: {
+        page,
+        pageSize,
+        totalGroups: groups.length - (hasMore ? 1 : 0),
+        totalPages: Math.ceil((groups.length - (hasMore ? 1 : 0)) / pageSize),
+        hasMore,
+        totalRequests: docsRead,
+      },
     });
   } catch (err) {
     console.error("grouped-requests error:", (err as Error).message);
@@ -281,8 +297,68 @@ async function groupedRequestsHandler(req: Request) {
   }
 }
 
+// GET /api/overview/requests/group-items — fetch individual items for an expanded group
+async function groupItemsHandler(req: Request) {
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
+
+  try {
+    const url = new URL(req.url);
+    const model = url.searchParams.get("model");
+    const endpoint = url.searchParams.get("endpoint");
+    const from = url.searchParams.get("from");
+    const to = url.searchParams.get("to");
+
+    if (!model || !from || !to) {
+      return Response.json({ error: "model, from, to are required" }, { status: 400 });
+    }
+
+    const matchClause = await buildUserMatchClause(auth.email);
+
+    const fromDate = new Date(from);
+    const toDate = new Date(to);
+    fromDate.setSeconds(fromDate.getSeconds() - 1);
+    toDate.setSeconds(toDate.getSeconds() + 1);
+
+    // Single $and with all conditions — avoids conflicting top-level $or
+    const items = await usageLogs.aggregate([
+      { $match: {
+        $and: [
+          matchClause,
+          { $or: [{ actualModel: model }, { model: model }] },
+          ...(endpoint ? [{ endpoint }] : []),
+          { timestamp: { $gte: fromDate, $lte: toDate } },
+        ],
+      }},
+      { $sort: { timestamp: -1 } },
+      { $limit: 100 },
+      { $project: {
+        requestedModel: { $ifNull: ["$requestedModel", null] },
+        actualModel: { $ifNull: ["$actualModel", "$model"] },
+        endpoint: { $ifNull: ["$endpoint", null] },
+        promptTokens: { $ifNull: ["$promptTokens", 0] },
+        completionTokens: { $ifNull: ["$completionTokens", 0] },
+        totalTokens: { $ifNull: ["$tokens", 0] },
+        timestamp: 1,
+      }},
+    ], { maxTimeMS: 6000 }).toArray();
+
+    return Response.json({
+      items: items.map((r: any) => ({
+        ...r,
+        _id: r._id.toString(),
+        cost: calcCost(r.actualModel, r.promptTokens, r.completionTokens),
+      })),
+    });
+  } catch (err) {
+    console.error("group-items error:", (err as Error).message);
+    return Response.json({ error: "Failed to fetch group items" }, { status: 500 });
+  }
+}
+
 export const statsRoutes = {
-  "/api/dashboard/global-stats":    { GET: globalStatsHandler },
-  "/api/dashboard/user-stats":      { GET: userStatsHandler },
-  "/api/overview/requests/grouped": { GET: groupedRequestsHandler },
+  "/api/dashboard/global-stats":       { GET: globalStatsHandler },
+  "/api/dashboard/user-stats":         { GET: userStatsHandler },
+  "/api/overview/requests/grouped":    { GET: groupedRequestsHandler },
+  "/api/overview/requests/group-items": { GET: groupItemsHandler },
 };

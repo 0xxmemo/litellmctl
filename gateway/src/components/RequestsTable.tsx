@@ -52,8 +52,8 @@ export function RequestsTable({ className }: RequestsTableProps) {
   const { data, isLoading, error, isFetching, refetch } = useQuery({
     queryKey: ['overview', 'grouped-requests', page],
     queryFn: () => fetchGroupedRequests(page),
-    // auto-refresh only on page 1
-    refetchInterval: page === 1 ? 10_000 : false,
+    // auto-refresh only on page 1, stop on error to avoid loading loop
+    refetchInterval: (query) => query.state.error ? false : (page === 1 ? 10_000 : false),
     staleTime: 5_000,
   })
 

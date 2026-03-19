@@ -53,6 +53,8 @@ setInterval(() => {
   flushUsageQueue().catch(() => {});
 }, 2000).unref();
 
+
+
 // Cleanup rate limit maps periodically
 setInterval(() => {
   const now = Date.now();
@@ -119,6 +121,7 @@ function getContentType(path: string): string {
 
 Bun.serve({
   port: PORT,
+  idleTimeout: 30,
 
   routes: {
     // Static files

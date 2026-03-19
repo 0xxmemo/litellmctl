@@ -22,6 +22,7 @@ export async function connectDB(mongoUri: string) {
     minPoolSize: 5,
     maxIdleTimeMS: 30000,
     serverSelectionTimeoutMS: 5000,
+    socketTimeoutMS: 8000,
   } as MongoClientOptions);
 
   await client.connect();
@@ -33,15 +34,18 @@ export async function connectDB(mongoUri: string) {
   usageLogs = db.collection("usage_logs");
   sessions = db.collection("sessions");
 
-  // Indexes
+  // Indexes (createIndex is a no-op if already exists)
   await apiKeys.createIndex({ key: 1 }, { unique: true });
   await apiKeys.createIndex({ keyHash: 1 }, { sparse: true });
   await validatedUsers.createIndex({ email: 1 }, { unique: true });
   await otps.createIndex({ email: 1, expiresAt: 1 });
-  await usageLogs.createIndex({ apiKeyHash: 1, timestamp: -1 });
-  await usageLogs.createIndex({ email: 1, timestamp: -1 });
-  await usageLogs.createIndex({ timestamp: -1 });
   await sessions.createIndex({ expires: 1 }, { expireAfterSeconds: 0 });
+  // usage_logs: compound indexes covering all query patterns
+  await usageLogs.createIndex({ email: 1, timestamp: -1 });
+  await usageLogs.createIndex({ apiKeyHash: 1, timestamp: -1 });
+  // group-items: model + timestamp for filtered time-range queries
+  await usageLogs.createIndex({ email: 1, model: 1, timestamp: -1 });
+  await usageLogs.createIndex({ email: 1, actualModel: 1, timestamp: -1 });
 
   console.log("✅ MongoDB connected (LLM Gateway - Bun Stack)");
 }
