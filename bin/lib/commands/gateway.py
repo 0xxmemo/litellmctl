@@ -201,25 +201,9 @@ def uninstall_gateway() -> None:
     console.print(f"      rm -rf {gateway_dir}\n")
 
 
-def _load_gateway_env() -> dict:
-    """Read key=value pairs from gateway/.env into a dict."""
-    env: dict = {}
-    env_path = PROJECT_DIR / "gateway" / ".env"
-    if env_path.exists():
-        for line in env_path.read_text().splitlines():
-            line = line.strip()
-            if line and not line.startswith("#") and "=" in line:
-                k, _, v = line.partition("=")
-                env[k.strip()] = v.strip()
-    return env
-
-
 def _gateway_mongo_uri() -> str | None:
-    genv = _load_gateway_env()
-    return (
-        genv.get("GATEWAY_MONGODB_URI")
-        or os.environ.get("GATEWAY_MONGODB_URI")
-    )
+    """Return GATEWAY_MONGODB_URI from root .env (already loaded by load_env())."""
+    return os.environ.get("GATEWAY_MONGODB_URI")
 
 
 def _run_mongo_script(script: str) -> subprocess.CompletedProcess:

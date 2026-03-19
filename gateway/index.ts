@@ -5,23 +5,6 @@
  * Built with Bun.serve() for simplicity and performance.
  */
 
-import { readFileSync } from "fs";
-
-// Load environment variables from root .env file
-try {
-  const envPath = new URL("../.env", import.meta.url).pathname;
-  const envText = readFileSync(envPath, "utf-8");
-  envText.split('\n').forEach((line: string) => {
-    const [key, ...valueParts] = line.split('=');
-    if (key && valueParts.length > 0) {
-      const value = valueParts.join('=').replace(/^["']|["']$/g, '');
-      process.env[key.trim()] = value;
-    }
-  });
-} catch {
-  // .env file not found, use existing env vars
-}
-
 import { initConfig, PORT } from "./lib/config";
 import { connectDB, flushUsageQueue, rateLimitMap, otpRateLimitMap } from "./lib/db";
 import { authRoutes } from "./routes/auth";

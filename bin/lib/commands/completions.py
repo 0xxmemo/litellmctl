@@ -140,4 +140,4 @@ eval "$(~/.litellm/bin/litellmctl --completions)"'''
     with rc_file.open("a") as f:
         f.write(block + "\n")
     info(f"Added litellmctl alias + tab completion to {rc_file}")
-    info(f"Run: source {rc_file}  (or open a new terminal)")
+    info("Open a new terminal to activate (or: exec $SHELL -l)")
