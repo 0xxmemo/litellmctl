@@ -104,6 +104,10 @@ export async function validateApiKey(apiKey: string) {
 // AUTH HELPERS
 // ============================================================================
 
+/**
+ * Authenticate via API key or session cookie. Returns user or null.
+ * This is the single entry point for all auth — every role gate below uses it.
+ */
 export async function getAuthenticatedUser(req: Request): Promise<{ email: string; role: string } | null> {
   const apiKey = extractApiKey(req);
   if (apiKey) {
@@ -121,13 +125,30 @@ export async function getAuthenticatedUser(req: Request): Promise<{ email: strin
   return await loadUser(session.email);
 }
 
+// ── Standardized role gates ─────────────────────────────────────────────────
+// Each returns the authenticated user on success, or a Response to send back.
+// All support both API key and session auth via getAuthenticatedUser.
+
+/** Any authenticated user (including guests). Equivalent to requiresApiKeyOrSession. */
+export async function requireAuth(req: Request): Promise<{ email: string; role: string } | Response> {
+  const user = await getAuthenticatedUser(req);
+  if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
+  return user;
+}
+
+/** Authenticated user with role "user" or "admin" (not guest). */
+export async function requireUser(req: Request): Promise<{ email: string; role: string } | Response> {
+  const user = await getAuthenticatedUser(req);
+  if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
+  if (user.role === "guest") return Response.json({ error: "User access required" }, { status: 403 });
+  return user;
+}
+
+/** Authenticated user with role "admin" only. */
 export async function requireAdmin(req: Request): Promise<{ email: string; role: string } | Response> {
-  const sessionToken = getSessionCookie(req);
-  if (!sessionToken) return Response.json({ error: "Authentication required" }, { status: 401 });
-  const session = await verifySession(sessionToken);
-  if (!session) return Response.json({ error: "Authentication required" }, { status: 401 });
-  const user = await loadUser(session.email);
-  if (!user || user.role !== "admin") return Response.json({ error: "Admin access required" }, { status: 403 });
+  const user = await getAuthenticatedUser(req);
+  if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
+  if (user.role !== "admin") return Response.json({ error: "Admin access required" }, { status: 403 });
   return user;
 }
 

@@ -1,39 +1,22 @@
 import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
-import { extractApiKey, getSessionCookie, verifySession } from "../lib/auth";
-import { validateApiKey, loadUser, trackUsage } from "../lib/db";
+import { extractApiKey } from "../lib/auth";
+import { validateApiKey, requireUser, trackUsage } from "../lib/db";
 
-// LiteLLM Proxy
+// LiteLLM Proxy — requireUser (not guest), with key hash tracking for usage
 async function proxyHandler(req: Request) {
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
+
   const url = new URL(req.url);
   const path = url.pathname.replace(/^\/v1/, "");
   const targetUrl = `${LITELLM_URL}/v1${path}${url.search}`;
 
-  const apiKey = extractApiKey(req);
-  let email: string | null = null;
+  // Resolve keyHash for usage tracking (if authenticated via API key)
   let keyHash: string | null = null;
-
+  const apiKey = extractApiKey(req);
   if (apiKey) {
     const keyRecord = await validateApiKey(apiKey);
-    if (!keyRecord) {
-      return Response.json({ error: "Invalid API key" }, { status: 401 });
-    }
-    email = keyRecord.email;
-    keyHash = keyRecord.keyHash;
-  } else {
-    const sessionToken = getSessionCookie(req);
-    if (sessionToken) {
-      const session = await verifySession(sessionToken);
-      if (session) {
-        const user = await loadUser(session.email);
-        if (user && user.role !== "guest") {
-          email = user.email;
-        }
-      }
-    }
-  }
-
-  if (!email) {
-    return Response.json({ error: "Authentication required" }, { status: 401 });
+    if (keyRecord) keyHash = keyRecord.keyHash;
   }
 
   // Read body for usage tracking
@@ -64,7 +47,7 @@ async function proxyHandler(req: Request) {
       const usage = data.usage;
       if (usage) {
         trackUsage(
-          email!,
+          auth.email,
           model,
           usage.prompt_tokens || 0,
           usage.completion_tokens || 0,

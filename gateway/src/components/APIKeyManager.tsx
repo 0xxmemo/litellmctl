@@ -101,9 +101,11 @@ export function APIKeyManager() {
         body: JSON.stringify({ name: newKeyName || 'New API Key' })
       })
       const data = await res.json()
-      if (data.apiKey) {
-        setCreatedKey(data.apiKey)
-        setKeys([data, ...keys])
+      if (data.key) {
+        setCreatedKey(data.key)
+        // Reload keys from server to get the clean shape
+        const refreshed = await getAPIKeys()
+        setKeys(refreshed)
         setNewKeyName('')
         setCreateDialogOpen(false)
       }

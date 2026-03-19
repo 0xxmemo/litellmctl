@@ -19,6 +19,6 @@
       "@/*": ["./src/*"]
     }
   },
-  "include": ["src/**/*", "lib/**/*", "index.ts", "script", "frontend.tsx"],
+  "include": ["src/**/*", "lib/**/*", "routes/**/*", "index.ts", "script", "frontend.tsx"],
   "exclude": ["node_modules"]
 }

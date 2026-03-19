@@ -1,21 +1,10 @@
 import { CONFIG_PATH } from "../lib/config";
-import { accessRequests, apiKeys, validatedUsers, userProfileCache, apiKeyCache, requireAdmin, loadUser } from "../lib/db";
-import { verifySession, getSessionCookie } from "../lib/auth";
+import { accessRequests, apiKeys, validatedUsers, userProfileCache, apiKeyCache, requireAdmin } from "../lib/db";
 
 // Admin: pending requests
 async function getPendingRequestsHandler(req: Request) {
-  const sessionToken = getSessionCookie(req);
-  if (!sessionToken)
-    return Response.json({ error: "Authentication required" }, { status: 401 });
-
-  const session = await verifySession(sessionToken);
-  if (!session)
-    return Response.json({ error: "Authentication required" }, { status: 401 });
-
-  const user = await loadUser(session.email);
-  if (!user || user.role !== "admin") {
-    return Response.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const auth = await requireAdmin(req);
+  if (auth instanceof Response) return auth;
 
   const requests = await accessRequests.find({ status: "pending" }).toArray();
   return Response.json({ requests });
@@ -23,18 +12,8 @@ async function getPendingRequestsHandler(req: Request) {
 
 // Admin: approve user
 async function approveUserHandler(req: Request) {
-  const sessionToken = getSessionCookie(req);
-  if (!sessionToken)
-    return Response.json({ error: "Authentication required" }, { status: 401 });
-
-  const session = await verifySession(sessionToken);
-  if (!session)
-    return Response.json({ error: "Authentication required" }, { status: 401 });
-
-  const user = await loadUser(session.email);
-  if (!user || user.role !== "admin") {
-    return Response.json({ error: "Admin access required" }, { status: 403 });
-  }
+  const auth = await requireAdmin(req);
+  if (auth instanceof Response) return auth;
 
   const { email } = await req.json();
   await validatedUsers.updateOne(

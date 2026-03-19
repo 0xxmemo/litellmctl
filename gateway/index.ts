@@ -8,7 +8,7 @@
 import { initConfig, PORT } from "./lib/config";
 import { connectDB, flushUsageQueue, rateLimitMap, otpRateLimitMap } from "./lib/db";
 import { authRoutes } from "./routes/auth";
-import { keysRoutes } from "./routes/keys";
+import { keysRoutes, handleKeyById } from "./routes/keys";
 import { modelsRoutes } from "./routes/models";
 import { statsRoutes } from "./routes/stats";
 import { userRoutes } from "./routes/user";
@@ -182,6 +182,19 @@ Bun.serve({
 
     // Root → Overview
     "/": { GET: serveFrontend },
+  },
+
+  // Fallback for parameterized routes not matched by static routes
+  async fetch(req: Request) {
+    const url = new URL(req.url);
+
+    // /api/keys/:id — DELETE, PUT
+    if (url.pathname.startsWith("/api/keys/")) {
+      const res = await handleKeyById(req);
+      if (res) return res;
+    }
+
+    return new Response("Not found", { status: 404 });
   },
 
   development: {

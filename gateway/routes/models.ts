@@ -1,13 +1,11 @@
 import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
-import { getAuthenticatedUser } from "../lib/db";
+import { requireAuth, requireUser } from "../lib/db";
 import { buildExtendedModel } from "../src/lib/models";
 
-// Models — requireUserOrAdmin (matches reference)
+// GET /api/models — requireUser (not guest)
 async function getModelsHandler(req: Request) {
-  const user = await getAuthenticatedUser(req);
-  if (!user || user.role === "guest") {
-    return Response.json({ error: "User access required" }, { status: 403 });
-  }
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
 
   const res = await fetch(`${LITELLM_URL}/model/info`, {
     headers: { Authorization: LITELLM_AUTH },
@@ -28,13 +26,10 @@ async function getModelsHandler(req: Request) {
   });
 }
 
-// GET /api/models/extended — full model metadata including auth, capabilities, pricing
-// Requires user or admin (not guest)
+// GET /api/models/extended — requireUser (not guest)
 async function getExtendedModelsHandler(req: Request) {
-  const user = await getAuthenticatedUser(req);
-  if (!user || user.role === "guest") {
-    return Response.json({ error: "User access required" }, { status: 403 });
-  }
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
 
   try {
     const res = await fetch(`${LITELLM_URL}/model/info`, {
@@ -58,7 +53,7 @@ async function getExtendedModelsHandler(req: Request) {
   }
 }
 
-// GET /v1/models — public to gateway clients, uses master key when proxying to LiteLLM
+// GET /v1/models — public (no auth)
 async function publicModelsHandler(_req: Request) {
   try {
     const res = await fetch(`${LITELLM_URL}/v1/models`, {
@@ -74,7 +69,11 @@ async function publicModelsHandler(_req: Request) {
   }
 }
 
-async function proxyModelInfoHandler(_req: Request) {
+// GET /v1/model/info — requireAuth (any authenticated user incl. guests)
+async function proxyModelInfoHandler(req: Request) {
+  const auth = await requireAuth(req);
+  if (auth instanceof Response) return auth;
+
   const res = await fetch(`${LITELLM_URL}/model/info`, {
     headers: { Authorization: LITELLM_AUTH },
     signal: AbortSignal.timeout(8000),

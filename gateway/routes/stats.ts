@@ -1,10 +1,10 @@
 import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
-import { apiKeys, validatedUsers, usageLogs, getAuthenticatedUser, calcCost } from "../lib/db";
+import { apiKeys, validatedUsers, usageLogs, requireAuth, requireUser, calcCost } from "../lib/db";
 
-// GET /api/dashboard/global-stats — requiresApiKeyOrSession (any authenticated user incl. guests)
+// GET /api/dashboard/global-stats — requireAuth (any authenticated user incl. guests)
 async function globalStatsHandler(req: Request) {
-  const caller = await getAuthenticatedUser(req);
-  if (!caller) return Response.json({ error: "Authentication required" }, { status: 401 });
+  const auth = await requireAuth(req);
+  if (auth instanceof Response) return auth;
 
   try {
     const [users, keys] = await Promise.all([
@@ -25,7 +25,6 @@ async function globalStatsHandler(req: Request) {
     } catch {}
 
     // Model usage from MongoDB usage_logs
-    // Handle both 'tokens' (reference) and 'totalTokens' (legacy field names)
     const tokensExpr = { $add: [{ $ifNull: ["$tokens", 0] }, { $ifNull: ["$totalTokens", 0] }] };
     const modelAgg = await usageLogs.aggregate([
       { $group: {
@@ -55,7 +54,6 @@ async function globalStatsHandler(req: Request) {
         percentage: totalTokensAgg > 0 ? ((tok / totalTokensAgg) * 100).toFixed(1) : "0.0",
       };
     });
-    // Use LiteLLM spend if available, otherwise fall back to calculated
     if (totalSpend === 0) totalSpend = calculatedSpend;
 
     // Top users from usage_logs
@@ -101,18 +99,17 @@ async function globalStatsHandler(req: Request) {
   }
 }
 
-// GET /api/dashboard/user-stats
+// GET /api/dashboard/user-stats — requireUser (not guest)
 async function userStatsHandler(req: Request) {
-  const user = await getAuthenticatedUser(req);
-  if (!user || user.role === "guest") {
-    return Response.json({ error: "Authentication required" }, { status: 401 });
-  }
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
+
   try {
-    const userKeys = await apiKeys.find({ email: user.email, revoked: false }).toArray();
+    const userKeys = await apiKeys.find({ email: auth.email, revoked: false }).toArray();
     const keyHashes = userKeys.map((k: any) => k.keyHash).filter(Boolean);
     const matchClause = keyHashes.length
-      ? { $or: [{ email: user.email }, { apiKeyHash: { $in: keyHashes } }] }
-      : { email: user.email };
+      ? { $or: [{ email: auth.email }, { apiKeyHash: { $in: keyHashes } }] }
+      : { email: auth.email };
 
     const tokensExpr = { $add: [{ $ifNull: ["$tokens", 0] }, { $ifNull: ["$totalTokens", 0] }] };
 
@@ -201,20 +198,21 @@ async function userStatsHandler(req: Request) {
   }
 }
 
-// GET /api/overview/requests/grouped — requiresApiKeyOrSession (any authenticated user incl. guests)
+// GET /api/overview/requests/grouped — requireAuth (any authenticated user incl. guests)
 async function groupedRequestsHandler(req: Request) {
-  const user = await getAuthenticatedUser(req);
-  if (!user) return Response.json({ error: "Authentication required" }, { status: 401 });
+  const auth = await requireAuth(req);
+  if (auth instanceof Response) return auth;
+
   try {
     const url = new URL(req.url);
     const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10));
     const pageSize = Math.min(100, Math.max(1, parseInt(url.searchParams.get("pageSize") || "20", 10)));
 
-    const userKeys = await apiKeys.find({ email: user.email, revoked: false }).toArray();
+    const userKeys = await apiKeys.find({ email: auth.email, revoked: false }).toArray();
     const keyHashes = userKeys.map((k: any) => k.keyHash).filter(Boolean);
     const matchClause = keyHashes.length
-      ? { $or: [{ email: user.email }, { apiKeyHash: { $in: keyHashes } }] }
-      : { email: user.email };
+      ? { $or: [{ email: auth.email }, { apiKeyHash: { $in: keyHashes } }] }
+      : { email: auth.email };
 
     const [raw, totalRequests] = await Promise.all([
       usageLogs.find(matchClause).sort({ timestamp: -1 }).limit(10000).toArray(),

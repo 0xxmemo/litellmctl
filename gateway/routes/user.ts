@@ -1,20 +1,19 @@
 import { CONFIG_PATH } from "../lib/config";
-import { validatedUsers, userProfileCache, getAuthenticatedUser } from "../lib/db";
+import { validatedUsers, userProfileCache, requireUser } from "../lib/db";
 
-// PUT /api/user/profile — update name/company (email is read-only)
+// PUT /api/user/profile — requireUser (not guest)
 async function userProfileHandler(req: Request) {
-  const user = await getAuthenticatedUser(req);
-  if (!user || user.role === "guest") {
-    return Response.json({ error: "User access required" }, { status: 403 });
-  }
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
+
   try {
     const body = await req.json();
     const update: Record<string, string> = {};
     if (typeof body.name === "string") update.name = body.name.trim();
     if (typeof body.company === "string") update.company = body.company.trim();
     if (Object.keys(update).length > 0) {
-      await validatedUsers.updateOne({ email: user.email }, { $set: update });
-      userProfileCache.delete(user.email);
+      await validatedUsers.updateOne({ email: auth.email }, { $set: update });
+      userProfileCache.delete(auth.email);
     }
     return Response.json({ success: true });
   } catch (err) {
@@ -23,14 +22,13 @@ async function userProfileHandler(req: Request) {
   }
 }
 
-// GET /api/user/model-overrides — user's per-alias model overrides
+// GET /api/user/model-overrides — requireUser (not guest)
 async function getUserModelOverridesHandler(req: Request) {
-  const user = await getAuthenticatedUser(req);
-  if (!user || user.role === "guest") {
-    return Response.json({ error: "User access required" }, { status: 403 });
-  }
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
+
   try {
-    const record = await validatedUsers.findOne({ email: user.email }, { projection: { model_overrides: 1 } });
+    const record = await validatedUsers.findOne({ email: auth.email }, { projection: { model_overrides: 1 } });
     return Response.json({ model_overrides: record?.model_overrides || {} });
   } catch (err) {
     console.error("GET /api/user/model-overrides error:", (err as Error).message);
@@ -38,15 +36,13 @@ async function getUserModelOverridesHandler(req: Request) {
   }
 }
 
-// PUT /api/user/model-overrides — update user's per-alias model overrides
+// PUT /api/user/model-overrides — requireUser (not guest)
 async function putUserModelOverridesHandler(req: Request) {
-  const user = await getAuthenticatedUser(req);
-  if (!user || user.role === "guest") {
-    return Response.json({ error: "User access required" }, { status: 403 });
-  }
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
+
   try {
     const body = await req.json();
-    // Only allow plain string values; strip empty strings
     const overrides: Record<string, string> = {};
     if (body && typeof body === "object") {
       for (const [k, v] of Object.entries(body)) {
@@ -55,8 +51,8 @@ async function putUserModelOverridesHandler(req: Request) {
         }
       }
     }
-    await validatedUsers.updateOne({ email: user.email }, { $set: { model_overrides: overrides } });
-    userProfileCache.delete(user.email);
+    await validatedUsers.updateOne({ email: auth.email }, { $set: { model_overrides: overrides } });
+    userProfileCache.delete(auth.email);
     return Response.json({ success: true, model_overrides: overrides });
   } catch (err) {
     console.error("PUT /api/user/model-overrides error:", (err as Error).message);
@@ -64,12 +60,11 @@ async function putUserModelOverridesHandler(req: Request) {
   }
 }
 
-// GET /api/config/aliases — returns model_group_alias from config.yaml (non-admin)
+// GET /api/config/aliases — requireUser (not guest)
 async function getConfigAliasesHandler(req: Request) {
-  const user = await getAuthenticatedUser(req);
-  if (!user || user.role === "guest") {
-    return Response.json({ error: "User access required" }, { status: 403 });
-  }
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
+
   try {
     const yaml = await import("js-yaml");
     const file = Bun.file(CONFIG_PATH);
