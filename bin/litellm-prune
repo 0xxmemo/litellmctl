@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# litellm-prune — Remove unnecessary upstream files from the litellm submodule
+# Run after syncing with upstream, or automatically via the post-merge hook.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+LITELLM_DIR="$(cd "$SCRIPT_DIR/../litellm" && pwd)"
+
+# Directories to remove (relative to litellm submodule root)
+PRUNE_DIRS=(
+    docs
+    tests
+    ui
+    enterprise
+    cookbook
+    litellm-proxy-extras
+    litellm-js
+    .circleci
+    .github
+    .semgrep
+    .devcontainer
+    ci_cd
+    db_scripts
+    deploy
+    docker
+    dist
+    scripts
+)
+
+# Files to remove (relative to litellm submodule root)
+PRUNE_FILES=(
+    .dockerignore
+    .flake8
+    .git-blame-ignore-revs
+    .gitattributes
+    .gitguardian.yaml
+    .pre-commit-config.yaml
+    .trivyignore
+    Dockerfile
+    Makefile
+    docker-compose.yml
+)
+
+bytes_before=$(du -sb "$LITELLM_DIR" 2>/dev/null | cut -f1 || du -sk "$LITELLM_DIR" | awk '{print $1*1024}')
+
+removed=0
+for dir in "${PRUNE_DIRS[@]}"; do
+    target="$LITELLM_DIR/$dir"
+    if [[ -d "$target" ]]; then
+        rm -rf "$target"
+        ((removed++))
+    fi
+done
+
+for file in "${PRUNE_FILES[@]}"; do
+    target="$LITELLM_DIR/$file"
+    if [[ -f "$target" ]]; then
+        rm -f "$target"
+        ((removed++))
+    fi
+done
+
+bytes_after=$(du -sb "$LITELLM_DIR" 2>/dev/null | cut -f1 || du -sk "$LITELLM_DIR" | awk '{print $1*1024}')
+saved=$(( (bytes_before - bytes_after) / 1048576 ))
+
+if [[ "$removed" -gt 0 ]]; then
+    echo "litellm-prune: removed $removed items, freed ~${saved}MB"
+else
+    echo "litellm-prune: nothing to prune"
+fi
