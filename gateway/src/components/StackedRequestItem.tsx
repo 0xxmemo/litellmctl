@@ -15,7 +15,7 @@ import {
   getProviderColor,
   extractProvider,
   resolveProvider,
-} from '@/lib/models'
+} from '@lib/models'
 import { cn } from '@/lib/utils'
 
 export interface GroupedRequest {

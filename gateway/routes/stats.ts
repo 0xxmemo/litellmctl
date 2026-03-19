@@ -1,5 +1,6 @@
 import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
 import { apiKeys, validatedUsers, usageLogs, requireAuth, requireUser, calcCost } from "../lib/db";
+import { extractProvider } from "../lib/models";
 
 // GET /api/dashboard/global-stats — requireAuth (any authenticated user incl. guests)
 async function globalStatsHandler(req: Request) {
@@ -229,7 +230,7 @@ async function groupedRequestsHandler(req: Request) {
       docsRead++;
       const model: string = r._m || "unknown";
       const ep: string | null = r.endpoint || null;
-      const provider = model.includes("/") ? model.split("/")[0] : model;
+      const provider = extractProvider(model) || model;
       const groupKey = `${provider}|${model}|${ep}`;
       const tokens = r.tokens || 0;
       const cost = calcCost(model, r.promptTokens, r.completionTokens);

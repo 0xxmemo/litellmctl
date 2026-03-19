@@ -1,6 +1,6 @@
 import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
 import { requireAuth, requireUser } from "../lib/db";
-import { buildExtendedModel } from "../src/lib/models";
+import { buildExtendedModel } from "../lib/models";
 
 // GET /api/models — requireUser (not guest)
 async function getModelsHandler(req: Request) {

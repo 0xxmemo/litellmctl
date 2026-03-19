@@ -16,7 +16,8 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@lib/*": ["./lib/*"]
     }
   },
   "include": ["src/**/*", "lib/**/*", "routes/**/*", "index.ts", "script", "frontend.tsx"],

@@ -7,7 +7,7 @@ import { PrettyAmount } from '@/components/PrettyAmount'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ModelUsagePieChart } from '@/components/ModelUsagePieChart'
 import { RequestsTable } from '@/components/RequestsTable'
-import { getDisplayName, formatProviderName, getProviderColor, extractProvider, resolveProvider } from '@/lib/models'
+import { getDisplayName, formatProviderName, getProviderColor, extractProvider, resolveProvider } from '@lib/models'
 import { useAppContext } from '@/context/AppContext'
 import {
   LineChart,

@@ -1,6 +1,7 @@
 import {} from 'react'
 import { Loader2, Cpu, Eye, Zap, Brain, Key } from 'lucide-react'
-import { useExtendedModels, formatProviderName, getProviderColor } from '@/lib/models'
+import { formatProviderName, getProviderColor } from '@lib/models'
+import { useExtendedModels } from '@/lib/models-hooks'
 
 /** Format cost per token to a readable string (e.g. $3.00/M) */
 function formatCost(costPerToken: number | null): string | null {

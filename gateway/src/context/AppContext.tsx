@@ -19,10 +19,10 @@ import React, {
 } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  fetchModels,
   registerAliases,
   type NormalizedModel,
-} from '@/lib/models'
+} from '@lib/models'
+import { fetchModels } from '@/lib/models-hooks'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

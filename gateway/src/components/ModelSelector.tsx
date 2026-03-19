@@ -6,10 +6,12 @@ import {
   formatProviderName,
   getProviderColor,
   detectIsStub,
+} from '@lib/models'
+import {
   useModels,
   getStoredModel,
   storeModel,
-} from '@/lib/models'
+} from '@/lib/models-hooks'
 // Lazy import via useContext to avoid circular deps — AppContext imports from lib/models, not ModelSelector
 import { AppContext } from '@/context/AppContext'
 

@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { formatProviderName, getProviderColor, extractProvider, resolveProvider } from '@/lib/models'
+import { formatProviderName, getProviderColor, extractProvider, resolveProvider } from '@lib/models'
 
 const COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#f97316']
 
