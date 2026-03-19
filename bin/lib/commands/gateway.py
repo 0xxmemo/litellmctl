@@ -332,7 +332,12 @@ def cmd_gateway(subcmd: str = "status") -> None:
         gateway_stop()
     elif subcmd == "restart":
         gateway_stop()
-        time.sleep(1)
+        _ensure_bun_path()
+        gateway_dir = PROJECT_DIR / "gateway"
+        info("Building gateway frontend ...")
+        ret = subprocess.call(["bun", "run", "build"], cwd=str(gateway_dir))
+        if ret != 0:
+            warn("Frontend build failed — starting anyway")
         gateway_start()
     elif subcmd == "status":
         gateway_status()
