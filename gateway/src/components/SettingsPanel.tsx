@@ -69,7 +69,7 @@ export function SettingsPanel({ auth, modelOverrides, tierAliases, saveModelOver
     } catch {
       // best-effort
     } finally {
-      window.location.href = '/auth'
+      window.location.href = '/'
     }
   }
 

@@ -327,7 +327,7 @@ export function Overview() {
           <CardContent className="flex flex-col items-center justify-center py-8 gap-3">
             <TrendingUp className="w-10 h-10 text-muted-foreground opacity-40" />
             <p className="text-sm text-muted-foreground text-center">
-              <a href="/auth" className="text-primary font-medium hover:underline">Sign in</a> to see your personal usage stats and usage chart.
+              <a href="/" className="text-primary font-medium hover:underline">Sign in</a> to see your personal usage stats and usage chart.
             </p>
           </CardContent>
         </Card>

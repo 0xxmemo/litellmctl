@@ -60,10 +60,10 @@ export function useLogout() {
   return useMutation({
     mutationFn: performLogout,
     onSuccess: () => {
-      window.location.href = '/auth'
+      window.location.href = '/'
     },
     onError: () => {
-      window.location.href = '/auth'
+      window.location.href = '/'
     },
   })
 }
