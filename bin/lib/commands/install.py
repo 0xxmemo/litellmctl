@@ -9,11 +9,11 @@ from ..common.paths import PROJECT_DIR, BIN_DIR, ENV_FILE
 from ..common.env import load_env, patch_db_flags, patch_local_defaults
 from ..common.formatting import info, warn, console
 from ..common.platform import is_macos, is_linux, is_interactive
-from ..common.network import http_check, transcr_http_check, port_in_use
+from ..common.network import port_in_use
 
 from .service import _activate_venv, cmd_restart
 from .service import launchd_is_running, systemd_is_running, nohup_is_running
-from .local import install_embedding, install_transcription
+from .local import install_embedding, install_transcription, _ollama_is_running, _transcription_is_running
 from .db import ensure_db_ready
 from .gateway import install_gateway, gateway_is_running
 from .searxng import install_searxng
@@ -125,7 +125,7 @@ def cmd_install(
 
     # Auto-detect: skip if already running, install if binary found but not running
     if not embed_mode:
-        if http_check(f"{embed_base.rstrip('/')}/v1/models", timeout=2):
+        if _ollama_is_running(embed_base):
             info(f"Embedding server already running at {embed_base}")
         elif shutil.which("ollama"):
             embed_mode = "yes"
@@ -136,7 +136,7 @@ def cmd_install(
                 embed_mode = "no"
 
     if not transcr_mode:
-        if transcr_http_check(transcr_base.rstrip("/"), timeout=2):
+        if _transcription_is_running(transcr_base):
             info(f"Transcription server already running at {transcr_base}")
         elif shutil.which("faster-whisper-server") or shutil.which("speaches"):
             transcr_mode = "yes"

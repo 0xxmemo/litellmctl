@@ -10,7 +10,30 @@ from ..common.paths import PROJECT_DIR, LOG_DIR
 from ..common.env import load_env
 from ..common.formatting import console, info, warn
 from ..common.platform import is_macos, is_linux
-from ..common.network import http_check, transcr_http_check
+from ..common.network import http_check, transcr_http_check, port_in_use
+
+
+def _extract_port(url: str) -> int:
+    """Extract port number from a URL, defaulting to 80."""
+    import re
+    m = re.search(r":(\d+)", url)
+    return int(m.group(1)) if m else 80
+
+
+def _ollama_is_running(embed_base: str) -> bool:
+    """Check if Ollama is running — port check first, then HTTP."""
+    port = _extract_port(embed_base)
+    if port_in_use(port):
+        return True
+    return http_check(f"{embed_base.rstrip('/')}/v1/models", timeout=2)
+
+
+def _transcription_is_running(transcr_base: str) -> bool:
+    """Check if transcription server is running — port check first, then HTTP."""
+    port = _extract_port(transcr_base)
+    if port_in_use(port):
+        return True
+    return transcr_http_check(transcr_base.rstrip("/"), timeout=2)
 
 
 def local_status() -> None:
@@ -24,13 +47,13 @@ def local_status() -> None:
 
     console.print("[bold]Local inference servers[/]")
 
-    if http_check(f"{embed_base.rstrip('/')}/v1/models"):
+    if _ollama_is_running(embed_base):
         console.print(f"  Embedding     ({embed_base}): [green]reachable[/]")
     else:
         console.print(f"  Embedding     ({embed_base}): [yellow]not running[/]")
         console.print("    [dim]Run: litellmctl install --with-local[/]")
 
-    if transcr_http_check(transcr_base.rstrip("/")):
+    if _transcription_is_running(transcr_base):
         console.print(f"  Transcription ({transcr_base}): [green]reachable[/]")
     else:
         console.print(f"  Transcription ({transcr_base}): [yellow]not running[/]")
@@ -65,7 +88,7 @@ def _ollama_start(embed_base: str) -> bool:
 
     for _ in range(15):
         time.sleep(1)
-        if http_check(f"{embed_base.rstrip('/')}/v1/models", timeout=2):
+        if _ollama_is_running(embed_base):
             return True
     return False
 
@@ -178,7 +201,7 @@ def install_embedding() -> None:
             warn("No brew or curl found — install Ollama manually: https://ollama.com/download")
 
     if shutil.which("ollama"):
-        if http_check(f"{embed_base.rstrip('/')}/v1/models", timeout=2):
+        if _ollama_is_running(embed_base):
             info(f"Ollama already running at {embed_base}")
         else:
             info("Starting Ollama ...")
@@ -264,7 +287,7 @@ def install_transcription() -> None:
             warn("  uv tool install speaches")
 
     if transcr_bin:
-        if transcr_http_check(transcr_base.rstrip("/"), timeout=2):
+        if _transcription_is_running(transcr_base):
             info(f"Transcription server already running at {transcr_base}")
         else:
             port_match = re.search(r":(\d+)", transcr_base)
@@ -305,7 +328,7 @@ def install_transcription() -> None:
                     break
                 except subprocess.TimeoutExpired:
                     pass
-                if transcr_http_check(transcr_base.rstrip("/"), timeout=2):
+                if _transcription_is_running(transcr_base):
                     print()
                     break
 
@@ -314,7 +337,7 @@ def install_transcription() -> None:
             elif proc.poll() is None:
                 warn(f"{transcr_bin} still loading — check later: curl {transcr_base}/audio/transcriptions")
                 info(f"Logs: {transcr_log}")
-    elif transcr_http_check(transcr_base.rstrip("/"), timeout=2):
+    elif _transcription_is_running(transcr_base):
         info(f"Transcription server running at {transcr_base}")
     else:
         warn("Transcription server unavailable — re-run: litellmctl install --with-transcription")
