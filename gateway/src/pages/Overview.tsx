@@ -8,7 +8,8 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ModelUsagePieChart } from '@/components/ModelUsagePieChart'
 import { RequestsTable } from '@/components/RequestsTable'
 import { getDisplayName, formatProviderName, getProviderColor, extractProvider, resolveProvider } from '@lib/models'
-import { useAppContext } from '@/context/AppContext'
+import { useGlobalStats, useUserStats } from '@/hooks/useStats'
+import { useAuth } from '@/hooks/useAuth'
 import {
   LineChart,
   Line,
@@ -102,24 +103,29 @@ function LastUpdated({ ts, spinning }: { ts: number | null; spinning: boolean })
 }
 
 export function Overview() {
+  const { user: currentUser, loading: authLoading } = useAuth()
+  const authChecked = !authLoading
+  const isLoggedIn = !!currentUser
+
   const {
-    currentUser,
-    authChecked,
     globalStats,
     globalStatsLoading,
     globalStatsUpdatedAt,
     globalStatsSpinning,
     refreshGlobalStats,
+  } = useGlobalStats({ enabled: authChecked })
+
+  const {
     userStats,
     userStatsLoading,
     userStatsUpdatedAt,
     userStatsSpinning,
     refreshUserStats,
-    rateLimited,
-  } = useAppContext()
+  } = useUserStats({ enabled: authChecked && isLoggedIn && currentUser.role !== 'guest' })
+
+  const rateLimited = false // react-query retry handles backoff
 
   const [activeTab, setActiveTab] = useState<string>('global')
-  const isLoggedIn = !!currentUser
 
   // Tracks which tabs have had their initial fetch triggered
   const globalFetchedRef = useRef(false)

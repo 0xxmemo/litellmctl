@@ -9,7 +9,6 @@ import { Overview } from './pages/Overview';
 import { Settings } from './pages/Settings';
 import { Admin } from './pages/Admin';
 import { Docs } from './pages/Docs';
-import { AppProvider } from './context/AppContext';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuthStatus } from './hooks/useAuth';
 import {
@@ -137,13 +136,9 @@ function AppInner() {
     );
   }
 
-  void userRole; // used for auth check above; role detail comes from AppContext
+  void userRole; // used for auth check above; role detail comes from useAuth hook
 
-  return (
-    <AppProvider>
-      <RouterProvider router={router} />
-    </AppProvider>
-  );
+  return <RouterProvider router={router} />;
 }
 
 // ─── App ──────────────────────────────────────────────────────────────────────

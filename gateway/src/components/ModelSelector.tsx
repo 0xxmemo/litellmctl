@@ -1,4 +1,4 @@
-import { useContext, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { ChevronDown, Search, Loader2 } from 'lucide-react'
 import {
@@ -12,26 +12,10 @@ import {
   getStoredModel,
   storeModel,
 } from '@/lib/models-hooks'
-// Lazy import via useContext to avoid circular deps — AppContext imports from lib/models, not ModelSelector
-import { AppContext } from '@/context/AppContext'
 
 // Re-export for backward compatibility
 export { useModels, getStoredModel, storeModel }
 export type { NormalizedModel }
-
-/**
- * Internal hook: returns models from AppContext if available, otherwise falls
- * back to the module-level cache in lib/models.ts.
- * This prevents N redundant fetches when many selectors are mounted outside a provider.
- */
-function useContextOrLocalModels() {
-  const ctx = useContext(AppContext)
-  const local = useModels()
-  if (ctx) {
-    return { models: ctx.models, loading: ctx.modelsLoading, error: ctx.modelsError }
-  }
-  return local
-}
 
 // ─── TierModelSelector (for Settings overrides) ───────────────────────────────
 
@@ -45,7 +29,7 @@ interface TierModelSelectorProps {
 }
 
 export function TierModelSelector({ value, defaultAlias, onChange }: TierModelSelectorProps) {
-  const { models, loading, error } = useContextOrLocalModels()
+  const { models, loading, error } = useModels()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const dropdownRef = useRef<HTMLDivElement>(null)
@@ -236,7 +220,7 @@ interface ModelSelectorProps {
 }
 
 export function ModelSelector({ endpointPath, defaultModel, onModelChange }: ModelSelectorProps) {
-  const { models, loading, error } = useContextOrLocalModels()
+  const { models, loading, error } = useModels()
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState('')
   const [selected, setSelected] = useState<string>(() => {
@@ -452,7 +436,7 @@ export function ConfigModelSelector({
 }: ConfigModelSelectorProps) {
   // Internal hook — uses context when available, falls back to module-level cache.
   // Must be called unconditionally (hooks rules), but we ignore its result when modelsProp exists.
-  const internal = useContextOrLocalModels()
+  const internal = useModels()
   const models = modelsProp ?? internal.models
   const loading = modelsProp ? false : internal.loading
   const error = modelsProp ? null : internal.error

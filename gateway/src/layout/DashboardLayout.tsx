@@ -4,8 +4,13 @@ import { Outlet } from '@tanstack/react-router'
 import { Sidebar } from '@/components/Sidebar'
 import { TopBar } from '@/components/TopBar'
 import { Toaster } from 'sonner'
+import { useAuth } from '@/hooks/useAuth'
+import { useConfig } from '@/hooks/useSettings'
 
 export function DashboardLayout() {
+  // Fetch config early so registerAliases runs before model lists render
+  const { user } = useAuth()
+  useConfig({ enabled: user?.role === 'admin' })
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('dark')
 

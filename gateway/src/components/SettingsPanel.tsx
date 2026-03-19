@@ -6,7 +6,6 @@ import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/hooks/useAuth'
 import { cn } from '@/lib/utils'
 import { TierModelSelector } from '@/components/ModelSelector'
-import { useAppContext } from '@/context/AppContext'
 import { useModelOverrides, useSaveModelOverrides, useTierAliases, useSaveProfile } from '@/hooks/useSettings'
 import {
   User,
@@ -25,7 +24,6 @@ const ROLE_BADGE_VARIANT: Record<string, 'destructive' | 'default' | 'secondary'
 
 export function SettingsPanel() {
   const { user, loading } = useAuth()
-  const { config } = useAppContext()
   const [loggingOut, setLoggingOut] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [overridesMessage, setOverridesMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
@@ -157,10 +155,8 @@ export function SettingsPanel() {
     })
   }
 
-  // Dynamic tier aliases — prefer dedicated non-admin endpoint, fall back to config (admin only)
-  const rs = config?.router_settings as any
-  const configAlias: Record<string, string> = rs?.model_group_alias ?? config?.model_group_alias ?? {}
-  const modelGroupAlias: Record<string, string> = tierAliasMap ?? configAlias
+  // Dynamic tier aliases from dedicated non-admin endpoint
+  const modelGroupAlias: Record<string, string> = tierAliasMap ?? {}
   const tierAliases = Object.keys(modelGroupAlias)
 
   const savingProfile = saveProfileMutation.isPending

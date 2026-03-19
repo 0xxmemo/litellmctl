@@ -12,7 +12,9 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { ConfigModelSelector } from './ModelSelector'
-import { useAppContext } from '@/context/AppContext'
+import type { NormalizedModel } from '@lib/models'
+import { useModels } from '@/lib/models-hooks'
+import { queryKeys } from '@/lib/query-keys'
 import {
   DndContext,
   closestCenter,
@@ -200,7 +202,7 @@ interface SortableSlotRowProps {
   slot: ChainSlot
   slotIndex: number   // 0 = Primary
   totalSlots: number
-  allModels: ReturnType<typeof useAppContext>['models']
+  allModels: NormalizedModel[]
   primaryProvider: string | undefined
   onChangeModel: (value: string) => void
   onRemove: () => void
@@ -286,7 +288,7 @@ function SortableSlotRow({
 interface ChainCardProps {
   chain: MergedChain
   chainIdx: number
-  allModels: ReturnType<typeof useAppContext>['models']
+  allModels: NormalizedModel[]
   onCommit: (updated: MergedChain) => void
   onRemoveChain: () => void
   onUpdateAlias: (alias: string) => void
@@ -460,7 +462,7 @@ function FallbacksEditor({
   onChange: (f: FallbackChain[]) => void
 }) {
   const chains = buildMergedChains(aliases, fallbacks)
-  const { models: allModels } = useAppContext()
+  const { models: allModels } = useModels()
 
   const commit = (next: MergedChain[]) => {
     const { aliases: a, fallbacks: f } = splitMergedChains(next)
@@ -782,7 +784,6 @@ const DEFAULT_ROUTER_SETTINGS: RouterSettings = {
 }
 
 export function ConfigEditor() {
-  const { refreshAfterSave } = useAppContext()
   const queryClient = useQueryClient()
 
   // Editable local state — seeded from query data
@@ -840,7 +841,10 @@ export function ConfigEditor() {
       queryClient.invalidateQueries({ queryKey: ['litellm', 'config'] })
       refetch() // explicit refetch to immediately pull saved state into UI
       toast.success('Config saved ✓')
-      refreshAfterSave().catch(() => {})
+      Promise.allSettled([
+        queryClient.invalidateQueries({ queryKey: queryKeys.models }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.config }),
+      ]).catch(() => {})
     },
     onError: (err: any) => {
       // err.message may be "[object Object]" if the Error was created with an object
@@ -862,7 +866,10 @@ export function ConfigEditor() {
       await queryClient.invalidateQueries({ queryKey: ['litellm', 'config'] })
       refetch() // explicit refetch to immediately pull reset defaults into UI
       toast.success('Config reset to YAML defaults ✓')
-      refreshAfterSave().catch(() => {})
+      Promise.allSettled([
+        queryClient.invalidateQueries({ queryKey: queryKeys.models }),
+        queryClient.invalidateQueries({ queryKey: queryKeys.config }),
+      ]).catch(() => {})
     },
     onError: (err: any) => {
       setShowResetConfirm(false)

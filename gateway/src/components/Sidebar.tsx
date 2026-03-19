@@ -7,7 +7,7 @@ import {
   BookOpen,
   Shield,
 } from 'lucide-react'
-import { useAppContext } from '@/context/AppContext'
+import { useAuth } from '@/hooks/useAuth'
 
 const base = 'w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors text-left'
 const sharedLinkProps = {
@@ -17,7 +17,7 @@ const sharedLinkProps = {
 }
 
 export function Sidebar() {
-  const { currentUser } = useAppContext()
+  const { user: currentUser } = useAuth()
 
   return (
     <nav className="space-y-2">
