@@ -7,39 +7,38 @@ async function globalStatsHandler(req: Request) {
   if (auth instanceof Response) return auth;
 
   try {
-    const [users, keys] = await Promise.all([
-      validatedUsers.find({}).toArray(),
-      apiKeys.find({ revoked: false }).toArray(),
-    ]);
-
-    // Try LiteLLM /global/spend
-    let totalSpend = 0;
-    try {
-      const spendRes = await fetch(`${LITELLM_URL}/global/spend`, {
-        headers: { Authorization: LITELLM_AUTH },
-      });
-      if (spendRes.ok) {
-        const data = await spendRes.json();
-        totalSpend = data.spend || data.total_spend || 0;
-      }
-    } catch {}
-
-    // Model usage from MongoDB usage_logs
     const tokensExpr = { $add: [{ $ifNull: ["$tokens", 0] }, { $ifNull: ["$totalTokens", 0] }] };
-    const modelAgg = await usageLogs.aggregate([
-      { $group: {
-        _id: "$model",
-        requests: { $sum: 1 },
-        tokens: { $sum: tokensExpr },
-        promptTokens: { $sum: { $ifNull: ["$promptTokens", 0] } },
-        completionTokens: { $sum: { $ifNull: ["$completionTokens", 0] } },
-      }},
-      { $sort: { tokens: -1 } },
-    ]).toArray();
+
+    // All queries in parallel — DB, LiteLLM spend, and both aggregations
+    const [users, keys, spendResult, modelAgg, usageByEmail] = await Promise.all([
+      validatedUsers.find({}, { projection: { email: 1, role: 1 } }).toArray(),
+      apiKeys.find({ revoked: false }, { projection: { email: 1, keyHash: 1 } }).toArray(),
+      fetch(`${LITELLM_URL}/global/spend`, {
+        headers: { Authorization: LITELLM_AUTH },
+        signal: AbortSignal.timeout(3000),
+      }).then(r => r.ok ? r.json() : null).catch(() => null),
+      usageLogs.aggregate([
+        { $group: {
+          _id: "$model",
+          requests: { $sum: 1 },
+          tokens: { $sum: tokensExpr },
+          promptTokens: { $sum: { $ifNull: ["$promptTokens", 0] } },
+          completionTokens: { $sum: { $ifNull: ["$completionTokens", 0] } },
+        }},
+        { $sort: { tokens: -1 } },
+      ], { maxTimeMS: 8000 }).toArray(),
+      usageLogs.aggregate([
+        { $group: {
+          _id: "$email",
+          requests: { $sum: 1 },
+          tokens: { $sum: tokensExpr },
+        }},
+        { $sort: { requests: -1 } },
+      ], { maxTimeMS: 8000 }).toArray(),
+    ]);
 
     const totalTokensAgg = modelAgg.reduce((s: number, r: any) => s + Number(r.tokens || 0), 0);
     const totalRequests = modelAgg.reduce((s: number, r: any) => s + Number(r.requests || 0), 0);
-    const totalTokens = totalTokensAgg;
 
     let calculatedSpend = 0;
     const modelUsage = modelAgg.map((r: any) => {
@@ -54,45 +53,28 @@ async function globalStatsHandler(req: Request) {
         percentage: totalTokensAgg > 0 ? ((tok / totalTokensAgg) * 100).toFixed(1) : "0.0",
       };
     });
-    if (totalSpend === 0) totalSpend = calculatedSpend;
 
-    // Top users from usage_logs
-    const userKeyMap: Record<string, any[]> = {};
+    const totalSpend = spendResult?.spend || spendResult?.total_spend || calculatedSpend;
+
+    // Build top users
+    const userKeyMap: Record<string, number> = {};
     for (const k of keys) {
-      if (k.email) {
-        userKeyMap[k.email] = userKeyMap[k.email] || [];
-        userKeyMap[k.email].push(k);
-      }
+      if (k.email) userKeyMap[k.email] = (userKeyMap[k.email] || 0) + 1;
     }
+    const emailUsageMap: Record<string, { requests: number; tokens: number }> = {};
+    for (const row of usageByEmail) {
+      if (row._id) emailUsageMap[row._id] = { requests: Number(row.requests || 0), tokens: Number(row.tokens || 0) };
+    }
+    const topUsers = users
+      .filter((u: any) => u.email)
+      .map((u: any) => {
+        const usage = emailUsageMap[u.email] || { requests: 0, tokens: 0 };
+        return { email: u.email, role: u.role || "user", requests: usage.requests, tokens: usage.tokens, spend: 0, keys: userKeyMap[u.email] || 0 };
+      })
+      .filter((u: any) => u.keys > 0 || u.requests > 0)
+      .sort((a: any, b: any) => (b.requests - a.requests) || (b.keys - a.keys));
 
-    let topUsers: any[] = [];
-    try {
-      const usageAgg = await usageLogs.aggregate([
-        { $group: {
-          _id: "$email",
-          requests: { $sum: 1 },
-          tokens: { $sum: tokensExpr },
-        }},
-        { $sort: { requests: -1 } },
-      ]).toArray();
-
-      const emailUsageMap: Record<string, { requests: number; tokens: number }> = {};
-      for (const row of usageAgg) {
-        if (row._id) emailUsageMap[row._id] = { requests: Number(row.requests || 0), tokens: Number(row.tokens || 0) };
-      }
-
-      topUsers = users
-        .filter((u: any) => u.email)
-        .map((u: any) => {
-          const userKeys = userKeyMap[u.email] || [];
-          const usage = emailUsageMap[u.email] || { requests: 0, tokens: 0 };
-          return { email: u.email, role: u.role || "user", requests: usage.requests, tokens: usage.tokens, spend: 0, keys: userKeys.length };
-        })
-        .filter((u: any) => u.keys > 0 || u.requests > 0)
-        .sort((a: any, b: any) => (b.requests - a.requests) || (b.keys - a.keys));
-    } catch {}
-
-    return Response.json({ totalUsers: users.length, activeKeys: keys.length, totalSpend, totalRequests, totalTokens, modelUsage, topUsers });
+    return Response.json({ totalUsers: users.length, activeKeys: keys.length, totalSpend, totalRequests, totalTokens: totalTokensAgg, modelUsage, topUsers });
   } catch (err) {
     console.error("global-stats error:", (err as Error).message);
     return Response.json({ error: "Failed to fetch global stats" }, { status: 500 });

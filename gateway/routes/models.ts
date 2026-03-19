@@ -53,7 +53,7 @@ async function getExtendedModelsHandler(req: Request) {
   }
 }
 
-// GET /v1/models — public (no auth)
+// GET /v1/models — public (no auth). Stream-through proxy, no buffering.
 async function publicModelsHandler(_req: Request) {
   try {
     const res = await fetch(`${LITELLM_URL}/v1/models`, {
@@ -61,25 +61,28 @@ async function publicModelsHandler(_req: Request) {
       signal: AbortSignal.timeout(8000),
     });
     if (!res.ok) return Response.json({ error: "Failed to fetch models" }, { status: 502 });
-    const data = await res.json();
-    return Response.json(data);
+    return new Response(res.body, { status: res.status, headers: res.headers });
   } catch (err) {
     console.error("Proxy error /v1/models:", (err as Error).message);
     return Response.json({ error: "Failed to fetch models" }, { status: 502 });
   }
 }
 
-// GET /v1/model/info — requireAuth (any authenticated user incl. guests)
+// GET /v1/model/info — requireAuth. Stream-through proxy, no buffering.
 async function proxyModelInfoHandler(req: Request) {
   const auth = await requireAuth(req);
   if (auth instanceof Response) return auth;
 
-  const res = await fetch(`${LITELLM_URL}/model/info`, {
-    headers: { Authorization: LITELLM_AUTH },
-    signal: AbortSignal.timeout(8000),
-  });
-  if (!res.ok) return Response.json({ error: "Failed to fetch model info" }, { status: 502 });
-  return res;
+  try {
+    const res = await fetch(`${LITELLM_URL}/model/info`, {
+      headers: { Authorization: LITELLM_AUTH },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return Response.json({ error: "Failed to fetch model info" }, { status: 502 });
+    return new Response(res.body, { status: res.status, headers: res.headers });
+  } catch (err) {
+    return Response.json({ error: "Failed to fetch model info" }, { status: 502 });
+  }
 }
 
 export const modelsRoutes = {
