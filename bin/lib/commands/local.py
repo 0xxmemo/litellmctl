@@ -9,7 +9,7 @@ import time
 from ..common.paths import PROJECT_DIR, LOG_DIR
 from ..common.env import load_env
 from ..common.formatting import console, info, warn
-from ..common.platform import is_macos
+from ..common.platform import is_macos, is_linux
 from ..common.network import http_check, transcr_http_check
 
 
@@ -40,14 +40,27 @@ def local_status() -> None:
 
 
 def _ollama_start(embed_base: str) -> bool:
+    """Start Ollama and wait for it to respond. Tries systemd first on Linux."""
     import shutil
+
     if is_macos() and shutil.which("brew"):
         subprocess.call(["brew", "services", "start", "ollama"],
                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    elif is_linux() and shutil.which("systemctl"):
+        # The curl installer creates an ollama.service — try that first
+        subprocess.call(["systemctl", "start", "ollama"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        # Also try user-level service in case system-level needs sudo
+        if subprocess.call(["systemctl", "is-active", "--quiet", "ollama"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL) != 0:
+            subprocess.call(["sudo", "systemctl", "start", "ollama"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     else:
         subprocess.Popen(["ollama", "serve"],
-                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    for _ in range(12):
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         start_new_session=True)
+
+    for _ in range(15):
         time.sleep(1)
         if http_check(f"{embed_base.rstrip('/')}/v1/models", timeout=2):
             return True
@@ -75,6 +88,67 @@ def _fws_patch_pyproject() -> None:
         f.write('[project]\nname = "faster-whisper-server"\nversion = "0.0.0"\n')
 
 
+def _speaches_patch_pyproject() -> None:
+    uv_python = os.path.expanduser("~/.local/share/uv/tools/speaches/bin/python")
+    if not os.path.isfile(uv_python):
+        return
+    try:
+        result = subprocess.run(
+            [uv_python, "-c",
+             "import sysconfig; print(sysconfig.get_paths()['purelib'])"],
+            capture_output=True, text=True,
+        )
+        site_pkgs = result.stdout.strip()
+    except Exception:
+        return
+    if not os.path.isdir(f"{site_pkgs}/speaches"):
+        return
+    if os.path.isfile(f"{site_pkgs}/pyproject.toml"):
+        return
+    with open(f"{site_pkgs}/pyproject.toml", "w") as f:
+        f.write('[project]\nname = "speaches"\nversion = "0.0.0"\n')
+
+
+def _find_transcription_bin() -> str:
+    """Find available transcription binary: speaches or faster-whisper-server."""
+    import shutil
+    for name in ("speaches", "faster-whisper-server"):
+        if shutil.which(name):
+            ret = subprocess.call([name, "--help"],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if ret != 0:
+                if name == "faster-whisper-server":
+                    _fws_patch_pyproject()
+                elif name == "speaches":
+                    _speaches_patch_pyproject()
+                ret = subprocess.call([name, "--help"],
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if ret == 0:
+                return name
+    return ""
+
+
+def _build_transcription_cmd(transcr_bin: str, port: str, model: str) -> list[str]:
+    """Build the command to start the transcription server.
+
+    speaches uses uvicorn env vars for port and WHISPER__MODEL for model.
+    faster-whisper-server uses --port and model as positional arg (older versions)
+    or the same env-var style (newer versions).
+    """
+    if transcr_bin == "speaches":
+        # speaches uses env vars: UVICORN_PORT, WHISPER__MODEL
+        os.environ["UVICORN_PORT"] = port
+        os.environ["UVICORN_HOST"] = "0.0.0.0"
+        os.environ["WHISPER__MODEL"] = model
+        return [transcr_bin]
+    else:
+        # faster-whisper-server: try env-var style (works on all versions)
+        os.environ["UVICORN_PORT"] = port
+        os.environ["UVICORN_HOST"] = "0.0.0.0"
+        os.environ["WHISPER__MODEL"] = model
+        return [transcr_bin]
+
+
 def install_embedding() -> None:
     import shutil
     embed_base = os.environ.get(
@@ -99,7 +173,11 @@ def install_embedding() -> None:
             if _ollama_start(embed_base):
                 info(f"Ollama started at {embed_base}")
             else:
-                warn("Ollama did not respond — start manually: ollama serve")
+                warn("Ollama did not respond — start manually:")
+                if is_linux() and shutil.which("systemctl"):
+                    warn("  sudo systemctl start ollama")
+                else:
+                    warn("  ollama serve")
 
         for model in ["nomic-embed-text", "mxbai-embed-large"]:
             result = subprocess.run(["ollama", "list"], capture_output=True, text=True)
@@ -114,22 +192,15 @@ def install_embedding() -> None:
 
 def install_transcription() -> None:
     import shutil
+    import re
+
     transcr_base = os.environ.get(
         "LOCAL_TRANSCRIPTION_API_BASE", "http://localhost:10300/v1",
     )
 
     os.environ["PATH"] = f"{os.path.expanduser('~/.local/bin')}:{os.path.expanduser('~/.cargo/bin')}:{os.environ.get('PATH', '')}"
 
-    transcr_bin = ""
-    if shutil.which("faster-whisper-server"):
-        ret = subprocess.call(["faster-whisper-server", "--help"],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if ret != 0:
-            _fws_patch_pyproject()
-        ret = subprocess.call(["faster-whisper-server", "--help"],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        if ret == 0:
-            transcr_bin = "faster-whisper-server"
+    transcr_bin = _find_transcription_bin()
 
     if not transcr_bin:
         if not shutil.which("uv") and shutil.which("curl"):
@@ -138,45 +209,52 @@ def install_transcription() -> None:
             os.environ["PATH"] = f"{os.path.expanduser('~/.local/bin')}:{os.path.expanduser('~/.cargo/bin')}:{os.environ.get('PATH', '')}"
 
         if shutil.which("uv"):
-            info("Installing faster-whisper-server (transcription server) ...")
-            subprocess.call(["uv", "tool", "install", "faster-whisper-server"])
-            _fws_patch_pyproject()
-            if shutil.which("faster-whisper-server"):
-                ret = subprocess.call(["faster-whisper-server", "--help"],
-                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # Try speaches first (newer, actively maintained), fall back to faster-whisper-server
+            for pkg in ("speaches", "faster-whisper-server"):
+                info(f"Installing {pkg} (transcription server) ...")
+                ret = subprocess.call(["uv", "tool", "install", pkg])
                 if ret == 0:
-                    transcr_bin = "faster-whisper-server"
+                    if pkg == "faster-whisper-server":
+                        _fws_patch_pyproject()
+                    elif pkg == "speaches":
+                        _speaches_patch_pyproject()
+                    transcr_bin = _find_transcription_bin()
+                    if transcr_bin:
+                        break
+                    warn(f"{pkg} install failed")
                 else:
-                    warn("faster-whisper-server install failed")
+                    warn(f"{pkg} install failed")
         elif shutil.which("docker"):
             info("Starting transcription server via Docker ...")
             subprocess.call([
                 "docker", "run", "-d", "--name", "faster-whisper",
                 "-p", "10300:8000",
-                "ghcr.io/fedirz/faster-whisper-server:latest-cpu",
+                "-e", "WHISPER__MODEL=Systran/faster-whisper-tiny",
+                "ghcr.io/speaches-ai/speaches:latest-cpu",
             ])
         else:
             warn("No uv or docker found — install uv to enable transcription:")
             warn("  curl -LsSf https://astral.sh/uv/install.sh | sh")
-            warn("  uv tool install faster-whisper-server")
+            warn("  uv tool install speaches")
 
     if transcr_bin:
         if transcr_http_check(transcr_base.rstrip("/"), timeout=2):
             info(f"Transcription server already running at {transcr_base}")
         else:
-            info(f"Starting {transcr_bin} (first start downloads model — may take a minute) ...")
-            # Extract port from base URL
-            import re
             port_match = re.search(r":(\d+)", transcr_base)
             transcr_port = port_match.group(1) if port_match else "10300"
             transcr_log = LOG_DIR / "faster-whisper.log"
             LOG_DIR.mkdir(parents=True, exist_ok=True)
             transcr_model = os.environ.get("LOCAL_TRANSCRIPTION_MODEL", "Systran/faster-whisper-tiny")
 
+            cmd = _build_transcription_cmd(transcr_bin, transcr_port, transcr_model)
+            info(f"Starting {transcr_bin} (first start downloads model — may take a minute) ...")
+
             log_f = open(transcr_log, "w")
             proc = subprocess.Popen(
-                [transcr_bin, "--port", transcr_port, transcr_model],
+                cmd,
                 stdout=log_f, stderr=log_f,
+                start_new_session=True,
             )
 
             import sys
@@ -189,7 +267,15 @@ def install_transcription() -> None:
                 try:
                     proc.wait(timeout=0)
                     print()
-                    warn(f"{transcr_bin} exited unexpectedly. Logs: {transcr_log}")
+                    # Read last few lines of log for diagnostics
+                    try:
+                        lines = transcr_log.read_text().strip().splitlines()
+                        tail = "\n    ".join(lines[-5:]) if lines else "(empty)"
+                    except Exception:
+                        tail = "(could not read)"
+                    warn(f"{transcr_bin} exited unexpectedly (code {proc.returncode})")
+                    warn(f"  Log tail:\n    {tail}")
+                    warn(f"  Full logs: {transcr_log}")
                     break
                 except subprocess.TimeoutExpired:
                     pass
