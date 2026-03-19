@@ -16,6 +16,7 @@ import { adminRoutes } from "./routes/admin";
 import { proxyRoutes } from "./routes/proxy";
 import { searchRoutes } from "./routes/search";
 import { healthRoutes } from "./routes/health";
+import { setupRoutes } from "./routes/setup";
 
 // ============================================================================
 // CONFIGURATION
@@ -54,7 +55,7 @@ await initCliSecret();
 
 const allRoutes = [
   authRoutes, keysRoutes, modelsRoutes, statsRoutes,
-  userRoutes, adminRoutes, proxyRoutes, searchRoutes, healthRoutes,
+  userRoutes, adminRoutes, proxyRoutes, searchRoutes, healthRoutes, setupRoutes,
 ];
 
 function buildRouteManifest() {
@@ -192,6 +193,7 @@ Bun.serve({
     ...proxyRoutes,
     ...searchRoutes,
     ...healthRoutes,
+    ...setupRoutes,
 
     // Icons (served from /public/)
     "/favicon.ico": async () => (await serveStaticFile("/public/favicon.ico")) || new Response("Not found", { status: 404 }),
