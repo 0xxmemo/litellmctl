@@ -6,7 +6,7 @@
  */
 
 import { initConfig, PORT } from "./lib/config";
-import { connectDB, flushUsageQueue, rateLimitMap, otpRateLimitMap, refreshPricingCache } from "./lib/db";
+import { connectDB, initCliSecret, flushUsageQueue, rateLimitMap, otpRateLimitMap, refreshPricingCache } from "./lib/db";
 import { authRoutes } from "./routes/auth";
 import { keysRoutes, handleKeyById } from "./routes/keys";
 import { modelsRoutes } from "./routes/models";
@@ -46,6 +46,32 @@ const port = parseInt(process.env.GATEWAY_PORT || "14041");
 
 initConfig(litellmUrl, masterKey, configPath, port);
 await connectDB(process.env.GATEWAY_MONGODB_URI!);
+await initCliSecret();
+
+// ============================================================================
+// ROUTE MANIFEST (built from route objects, served at /api/_routes)
+// ============================================================================
+
+const allRoutes = [
+  authRoutes, keysRoutes, modelsRoutes, statsRoutes,
+  userRoutes, adminRoutes, proxyRoutes, searchRoutes, healthRoutes,
+];
+
+function buildRouteManifest() {
+  const routes: { method: string; path: string }[] = [];
+  for (const routeObj of allRoutes) {
+    for (const [path, methods] of Object.entries(routeObj)) {
+      for (const method of Object.keys(methods as object)) {
+        routes.push({ method: method.toUpperCase(), path });
+      }
+    }
+  }
+  routes.push({ method: "DELETE", path: "/api/keys/:id" });
+  routes.push({ method: "PUT", path: "/api/keys/:id" });
+  return routes;
+}
+
+const routeManifest = buildRouteManifest();
 
 // ============================================================================
 // INTERVALS
@@ -152,6 +178,9 @@ Bun.serve({
       const response = await serveStaticFile("/public/manifest.json");
       return response || new Response("Not found", { status: 404 });
     },
+
+    // Route manifest (for CLI auto-discovery)
+    "/api/_routes": { GET: () => Response.json({ routes: routeManifest }) },
 
     // Auth, keys, models, stats, user, admin, proxy, search, health routes
     ...authRoutes,

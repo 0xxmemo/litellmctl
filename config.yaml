@@ -34,7 +34,6 @@ model_list:
       mode: responses
     litellm_params:
       model: chatgpt/gpt-5.1
-
   - model_name: anthropic/claude-opus-4-6
     litellm_params:
       model: anthropic/claude-opus-4-6
@@ -47,11 +46,9 @@ model_list:
     litellm_params:
       model: anthropic/claude-haiku-4-5
       api_key: os.environ/ANTHROPIC_API_KEY
-
   - model_name: kimi-code/kimi-for-coding
     litellm_params:
       model: kimi_code/kimi-for-coding
-
   - model_name: gemini-cli/gemini-2.5-pro
     litellm_params:
       model: gemini_cli/gemini-2.5-pro
@@ -61,14 +58,12 @@ model_list:
   - model_name: gemini-cli/gemini-2.5-flash-lite
     litellm_params:
       model: gemini_cli/gemini-2.5-flash-lite
-
   - model_name: qwen-cli/qwen3-coder-plus
     litellm_params:
       model: qwen_portal/qwen3-coder-plus
   - model_name: qwen-cli/qwen3-vl-plus
     litellm_params:
       model: qwen_portal/vision-model
-
   - model_name: alibaba/qwen3.5-plus
     litellm_params:
       model: alibaba/qwen3.5-plus
@@ -89,13 +84,11 @@ model_list:
       model: alibaba/qwen3-coder-next
       timeout: 60
       api_key: os.environ/DASHSCOPE_API_KEY
-
   - model_name: minimax/MiniMax-M2.5-highspeed
     litellm_params:
       model: anthropic/MiniMax-M2.5-highspeed
       api_key: os.environ/MINIMAX_API_KEY
       api_base: https://api.minimax.io/anthropic
-
   - model_name: zai/glm-5
     litellm_params:
       model: anthropic/glm-5
@@ -156,9 +149,6 @@ model_list:
       model: anthropic/glm-5-flash
       api_key: os.environ/ZAI_API_KEY
       api_base: https://api.z.ai/api/anthropic
-
-  # ── Local embedding models (Ollama) ──────────────────────────────────────
-  # Base URL: LOCAL_EMBEDDING_API_BASE env var  (default: http://localhost:11434)
   - model_name: local/nomic-embed-text
     model_info:
       mode: embedding
@@ -191,9 +181,6 @@ model_list:
     litellm_params:
       model: ollama/all-minilm
       api_base: os.environ/LOCAL_EMBEDDING_API_BASE
-
-  # ── Local transcription models (faster-whisper-server / OpenAI-compatible) ──
-  # Base URL: LOCAL_TRANSCRIPTION_API_BASE env var  (default: http://localhost:10300/v1)
   - model_name: local/whisper
     model_info:
       mode: audio_transcription
@@ -222,48 +209,8 @@ model_list:
       model: openai/distil-whisper-large-v3
       api_base: os.environ/LOCAL_TRANSCRIPTION_API_BASE
       api_key: sk-local
-
 router_settings:
-  num_retries: 2
-  timeout: 120
-  retry_after: 1
-  allowed_fails: 3
-  cooldown_time: 15
-  routing_strategy: simple-shuffle
-  model_group_alias:
-    ultra: codex/gpt-5.3-codex
-    plus: anthropic/claude-sonnet-4-6
-    lite: codex/gpt-5.1-codex-mini
-  fallbacks:
-    - ultra:
-        [
-          alibaba/qwen3.5-plus,
-          kimi-code/kimi-for-coding,
-          anthropic/claude-opus-4-6,
-          zai/glm-5,
-          gemini-cli/gemini-2.5-pro,
-          minimax/MiniMax-M2.5-highspeed,
-        ]
-    - plus:
-        [
-          codex/gpt-5.3-codex-spark,
-          qwen-cli/qwen3-coder-plus,
-          alibaba/qwen3-coder-plus,
-          zai/glm-4.5-air,
-          kimi-code/kimi-for-coding,
-          gemini-cli/gemini-2.5-flash,
-          minimax/MiniMax-M2.5-highspeed,
-        ]
-    - lite:
-        [
-          qwen-cli/qwen3-vl-plus,
-          alibaba/qwen3-coder-next,
-          anthropic/claude-haiku-4-5,
-          zai/glm-4.5-flash,
-          gemini-cli/gemini-2.5-flash-lite,
-          minimax/MiniMax-M2.5-highspeed,
-        ]
-
+  num_retries: 3
 litellm_settings:
   drop_params: true
   set_verbose: false
@@ -274,9 +221,6 @@ litellm_settings:
     ttl: 300
   callbacks:
     - bin.system_prompt_injection.proxy_handler_instance
-
 general_settings:
   master_key: os.environ/LITELLM_MASTER_KEY
-
-environment_variables:
-  # Token dirs & auth files are set in .env (machine-specific paths)
+environment_variables: null

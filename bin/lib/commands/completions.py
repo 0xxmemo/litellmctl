@@ -9,15 +9,39 @@ from ..common.formatting import info
 
 
 BASH_COMPLETIONS = r'''_litellmctl_completions() {
-  local cur prev commands auth_cmds uninstall_cmds
+  local cur prev pprev commands auth_cmds uninstall_cmds
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD-1]}"
+  pprev="${COMP_WORDS[COMP_CWORD-2]:-}"
 
   commands="auth wizard install init-env start stop restart r logs proxy status local gateway uninstall toggle-claude setup-completions help"
   auth_cmds="chatgpt gemini qwen kimi codex status refresh export import"
   uninstall_cmds="service db embedding transcription searxng gateway protonmail"
-  gateway_cmds="start stop restart status logs set-role users"
+  gateway_cmds="start stop restart status logs set-role users routes api"
+  # gateway api <cmd...> → dynamic completions from route source files
+  # Find position of "api" in COMP_WORDS and complete segments after it
+  local api_pos=-1
+  for ((i=0; i<COMP_CWORD; i++)); do
+    if [[ "${COMP_WORDS[i]}" == "api" && i -gt 0 && "${COMP_WORDS[i-1]}" == "gateway" ]]; then
+      api_pos=$i
+      break
+    fi
+  done
+  if [[ $api_pos -gt 0 ]]; then
+    # Collect segments typed so far after "api"
+    local segs=""
+    for ((i=api_pos+1; i<COMP_CWORD; i++)); do
+      segs="$segs ${COMP_WORDS[i]}"
+    done
+    local suggestions
+    suggestions=$(python3 -c "
+import sys; sys.path.insert(0, '$HOME/.litellm/bin')
+from lib.commands.gateway import _completable_segments
+print(' '.join(_completable_segments([s for s in '''$segs'''.split() if s])))" 2>/dev/null)
+    COMPREPLY=( $(compgen -W "$suggestions" -- "$cur") )
+    return
+  fi
 
   case "$prev" in
     litellmctl)
@@ -46,7 +70,7 @@ BASH_COMPLETIONS = r'''_litellmctl_completions() {
 complete -F _litellmctl_completions litellmctl'''
 
 ZSH_COMPLETIONS = r'''_litellmctl_completions() {
-  local -a commands auth_cmds uninstall_cmds
+  local -a commands auth_cmds uninstall_cmds gateway_cmds api_methods
   commands=(
     'auth:Manage OAuth tokens'
     'wizard:Interactive config.yaml generator'
@@ -60,7 +84,7 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
     'proxy:Start proxy in foreground (debug)'
     'status:Show auth + proxy + local server status'
     'local:Check local inference server reachability'
-    'gateway:Manage LLM API Gateway UI (start/stop/status)'
+    'gateway:Manage LLM API Gateway UI (start/stop/status/api)'
     'uninstall:Uninstall service, database config, or local servers'
     'toggle-claude:Toggle Claude Code between direct API and proxy'
     'setup-completions:Add litellmctl to your shell'
@@ -86,7 +110,17 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
     'gateway:Show gateway UI stop and uninstall commands'
     'protonmail:Show ProtonMail bridge (hydroxide) stop and uninstall commands'
   )
-
+  gateway_cmds=(
+    'start:Start the gateway'
+    'stop:Stop the gateway'
+    'restart:Rebuild frontend and restart'
+    'status:Show gateway status'
+    'logs:Tail gateway logs'
+    'set-role:Set user role (guest/user/admin)'
+    'users:List all gateway users'
+    'routes:List all API endpoints'
+    'api:Call a gateway API endpoint (bypasses auth)'
+  )
   if (( CURRENT == 2 )); then
     _describe 'command' commands
   elif (( CURRENT == 3 )); then
@@ -96,12 +130,38 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
       refresh|export) compadd chatgpt gemini qwen kimi ;;
       start|proxy) compadd -- --port --config ;;
       install) compadd -- --with-db --without-db --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription --with-searxng --without-searxng --with-gateway --without-gateway --with-protonmail --without-protonmail ;;
-      gateway) compadd start stop restart status logs set-role users ;;
+      gateway) _describe 'gateway command' gateway_cmds ;;
     esac
   elif (( CURRENT == 4 )); then
+    case "${words[2]}" in
+      gateway)
+        case "${words[3]}" in
+          api)
+            # Dynamic: complete first command segment from route parser
+            local -a segs
+            segs=(${(f)"$(python3 -c "
+import sys; sys.path.insert(0, '$HOME/.litellm/bin')
+from lib.commands.gateway import _completable_segments
+print('\n'.join(_completable_segments([])))" 2>/dev/null)"})
+            compadd -- $segs
+            ;;
+        esac
+        ;;
+    esac
     case "${words[3]}" in
       refresh|export) compadd chatgpt gemini qwen kimi ;;
     esac
+  elif (( CURRENT >= 5 )); then
+    # gateway api <seg1> <seg2...> → complete deeper segments
+    if [[ "${words[2]}" == "gateway" && "${words[3]}" == "api" ]]; then
+      local prefix_str="${(j: :)words[4,CURRENT-1]}"
+      local -a segs
+      segs=(${(f)"$(python3 -c "
+import sys; sys.path.insert(0, '$HOME/.litellm/bin')
+from lib.commands.gateway import _completable_segments
+print('\n'.join(_completable_segments('$prefix_str'.split())))" 2>/dev/null)"})
+      compadd -- $segs
+    fi
   fi
 }
 compdef _litellmctl_completions litellmctl'''

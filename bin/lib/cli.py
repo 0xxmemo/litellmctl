@@ -260,6 +260,41 @@ def gateway_users_cmd() -> None:
     gateway_user_list()
 
 
+@gateway_app.command("routes")
+def gateway_routes_cmd() -> None:
+    """List all gateway API endpoints."""
+    from .commands.gateway import gateway_routes
+    gateway_routes()
+
+
+@gateway_app.command("api", context_settings={"allow_extra_args": True, "allow_interspersed_args": True, "ignore_unknown_options": True})
+def gateway_api_cmd(ctx: typer.Context) -> None:
+    """Call a gateway API endpoint (bypasses auth).
+
+    Examples:
+        gateway api health
+        gateway api stats global
+        gateway api admin users
+        gateway api keys delete abc123
+        gateway api search q=hello
+        gateway api admin approve -d '{"email":"x@y.com"}'
+    """
+    from .commands.gateway import gateway_api
+    # Parse -d/--data from extra args manually (typer can't with allow_extra_args)
+    args = list(ctx.args)
+    data: str | None = None
+    for flag in ("-d", "--data"):
+        if flag in args:
+            idx = args.index(flag)
+            if idx + 1 < len(args):
+                data = args[idx + 1]
+                del args[idx:idx + 2]
+            else:
+                del args[idx]
+            break
+    gateway_api(args, data)
+
+
 # ProtonMail subcommands
 @protonmail_app.command("start")
 def protonmail_start() -> None:
@@ -322,8 +357,13 @@ def _show_help() -> None:
   proxy [--port N]     Start proxy in foreground (for debugging)
   status               Show auth + proxy + local server status
   local [status]       Check local inference server reachability
-  gateway [start|stop|restart|status|logs]
+  gateway [start|stop|restart|status|logs|routes|api]
                        Manage LLM API Gateway UI (web dashboard)
+  gateway routes       List all API endpoints (parsed from source)
+  gateway api health   Call gateway endpoints using human commands
+  gateway api stats global
+  gateway api admin approve email=user@example.com
+  gateway api keys delete <id>
   protonmail [start|stop|restart|status|auth]
                        Manage hydroxide SMTP bridge for OTP emails
   uninstall [target]   Stop and remove components

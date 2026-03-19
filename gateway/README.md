@@ -70,64 +70,52 @@ async function handler(req: Request) {
 
 ## API Routes
 
-### Public (no auth)
+All endpoints are callable from the CLI using human-readable commands — no HTTP methods, URLs, or auth needed:
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/v1/models` | List available models |
-| GET | `/api/health` | Health check |
+```bash
+# List all endpoints (parsed from TypeScript source — works offline)
+litellmctl gateway routes
 
-### requireAuth (any authenticated user)
+# Call endpoints using path segments as commands
+litellmctl gateway api health
+litellmctl gateway api stats global
+litellmctl gateway api admin users
+litellmctl gateway api models extended
+litellmctl gateway api search q=hello
+litellmctl gateway api admin approve -d '{"email":"user@example.com"}'
+```
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/v1/model/info` | Model metadata (proxy to LiteLLM) |
-| GET | `/api/stats/global` | Global usage statistics |
-| GET | `/api/stats/requests` | Grouped request history |
+Tab completion discovers commands from route source files (no gateway needed):
 
-### requireUser (user or admin)
+```bash
+litellmctl gateway api <TAB>          # health, stats, admin, keys, ...
+litellmctl gateway api stats <TAB>    # global, requests, user
+litellmctl gateway api admin <TAB>    # users, approve, reject, ...
+```
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/keys` | List user's API keys |
-| POST | `/api/keys` | Create API key |
-| DELETE | `/api/keys/:id` | Revoke API key |
-| PUT | `/api/keys/:id` | Update key name/alias |
-| GET | `/api/models` | Model list (from LiteLLM /model/info) |
-| GET | `/api/models/extended` | Extended model metadata with capabilities |
-| GET | `/api/user/aliases` | Model group aliases from config |
-| GET | `/api/stats/user` | Per-user usage stats |
-| PUT | `/api/user/profile` | Update name/company |
-| GET/PUT | `/api/user/model-overrides` | Per-user model overrides |
-| POST | `/v1/chat/completions` | Chat proxy to LiteLLM |
-| POST | `/v1/completions` | Completions proxy |
-| POST | `/v1/embeddings` | Embeddings proxy |
-| POST | `/v1/audio/transcriptions` | Transcription proxy |
+### How it works
 
-### requireAdmin
+- Path segments become CLI arguments: `/api/stats/global` → `stats global`
+- HTTP method is auto-inferred: GET by default, POST/PUT/PATCH when `-d` or `key=val` is given
+- Action words override the method: `delete` → DELETE, `create` → POST, `update` → PUT
+- `key=value` args become query params (GET) or JSON body (POST)
+- Routes are parsed from `gateway/routes/*.ts` export blocks — always in sync
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/admin/pending` | Pending access requests |
-| POST | `/api/admin/approve` | Approve user |
-| GET | `/api/admin/users` | List all users |
-| POST | `/api/admin/users` | Create/update user |
-| DELETE | `/api/admin/users/*` | Delete user |
-| POST | `/api/admin/reject` | Reject user (set to guest) |
-| POST | `/api/admin/disapprove-all` | Remove all guests |
-| POST | `/api/admin/keys/revoke-all` | Revoke all API keys |
-| GET/PATCH | `/api/admin/litellm-config` | Read/update config.yaml |
-| POST | `/api/admin/litellm-config/reset` | Re-read config from disk |
+### Route groups
 
-### Auth (no auth required)
+| Command prefix | Examples |
+|---------------|----------|
+| `health` | `gateway api health` |
+| `stats` | `gateway api stats global`, `stats user`, `stats requests` |
+| `keys` | `gateway api keys`, `keys delete <id>` |
+| `models` | `gateway api models`, `models extended` |
+| `user` | `gateway api user aliases`, `user model-overrides` |
+| `search` | `gateway api search q=hello` |
+| `admin` | `gateway api admin users`, `admin approve`, `admin litellm-config` |
+| `auth` | `gateway api auth me` |
+| `v1` | `gateway api v1 models`, `v1 chat completions -d '{...}'` |
 
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/auth/request-otp` | Send OTP code via email |
-| POST | `/api/auth/verify-otp` | Verify OTP and create session |
-| GET | `/api/auth/status` | Check session status |
-| GET | `/api/auth/me` | Get current user info |
-| GET/POST | `/api/auth/logout` | Clear session |
+The CLI bypasses all auth gates via a local secret (`.gateway-secret`), generated on each gateway start.
 
 ## Authentication
 

@@ -8,6 +8,7 @@ test_models.py
 # Runtime
 .proxy-port
 .proxy.pid
+.gateway-secret
 
 # Logs
 logs/

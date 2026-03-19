@@ -324,6 +324,243 @@ console.log(JSON.stringify(users));
     console.print()
 
 
+import re
+import urllib.parse
+import urllib.request
+import urllib.error
+
+# ── Route parser (reads gateway/routes/*.ts as source of truth) ──────────────
+
+_EXPORT_RE = re.compile(r'export\s+const\s+\w+Routes\s*=\s*\{(.*?)\};', re.DOTALL)
+_ROUTE_LINE_RE = re.compile(r'"(/[^"]+)":\s*\{([^}]+)\}')
+_METHOD_RE = re.compile(r'\b(GET|POST|PUT|PATCH|DELETE)\b')
+_COMMENT_RE = re.compile(r'//\s*(GET|POST|PUT|PATCH|DELETE)\s+(/\S+)\s*[—–-]+\s*(.*)')
+
+ACTION_METHODS = {"create": "POST", "update": "PUT", "delete": "DELETE", "set": "PUT"}
+METHOD_COLOR = {"GET": "green", "POST": "blue", "PUT": "yellow", "PATCH": "cyan", "DELETE": "red"}
+
+
+def _parse_route_exports() -> list[dict]:
+    """Parse gateway/routes/*.ts to extract all API routes from export blocks."""
+    routes_dir = PROJECT_DIR / "gateway" / "routes"
+    if not routes_dir.is_dir():
+        return []
+
+    descs: dict[tuple[str, str], str] = {}
+    routes: list[dict] = []
+
+    for ts_file in sorted(routes_dir.glob("*.ts")):
+        text = ts_file.read_text()
+        for cm in _COMMENT_RE.finditer(text):
+            descs[(cm.group(1), cm.group(2))] = cm.group(3).strip()
+        for em in _EXPORT_RE.finditer(text):
+            for rm in _ROUTE_LINE_RE.finditer(em.group(1)):
+                path = rm.group(1)
+                for method in _METHOD_RE.findall(rm.group(2)):
+                    routes.append({
+                        "method": method,
+                        "path": path,
+                        "desc": descs.get((method, path), ""),
+                    })
+
+    return routes
+
+
+def _path_to_cmd(path: str) -> list[str]:
+    """Convert API path to command segments: /api/stats/global → ['stats','global']."""
+    parts = path.strip("/").split("/")
+    if parts[0] == "api":
+        parts = parts[1:]
+    return [p for p in parts if p and not p.startswith("_")]
+
+
+def _find_route(routes: list[dict], url_path: str, method: str | None = None) -> dict | None:
+    """Match a URL path against known routes (supports :param and * wildcards)."""
+    path_parts = url_path.strip("/").split("/")
+    for r in routes:
+        r_parts = r["path"].strip("/").split("/")
+        if len(r_parts) != len(path_parts):
+            continue
+        if not all(rp.startswith(":") or rp == "*" or rp == pp for rp, pp in zip(r_parts, path_parts)):
+            continue
+        if method and r["method"] != method:
+            continue
+        return r
+    return None
+
+
+def _completable_segments(prefix: list[str]) -> list[str]:
+    """Return possible next command segments given a prefix (for tab completion)."""
+    routes = _parse_route_exports()
+    suggestions: set[str] = set()
+    for r in routes:
+        parts = _path_to_cmd(r["path"])
+        if len(parts) <= len(prefix):
+            continue
+        if parts[:len(prefix)] == prefix:
+            seg = parts[len(prefix)]
+            if not seg.startswith(":"):
+                suggestions.add(seg)
+    return sorted(suggestions)
+
+
+# ── Gateway HTTP helpers ─────────────────────────────────────────────────────
+
+def _gateway_base_url() -> str:
+    port = int(os.environ.get("GATEWAY_PORT", "14041"))
+    return f"http://localhost:{port}"
+
+
+def _gateway_secret() -> str | None:
+    secret_file = PROJECT_DIR / ".gateway-secret"
+    if secret_file.exists():
+        return secret_file.read_text().strip()
+    return None
+
+
+def _gateway_request(method: str, url: str, body: bytes | None, secret: str) -> None:
+    """Make an authenticated request to the gateway and print the result."""
+    headers: dict[str, str] = {"X-Gateway-Secret": secret, "Accept": "application/json"}
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    elif method in ("POST", "PUT", "PATCH"):
+        headers["Content-Type"] = "application/json"
+        body = b"{}"
+
+    try:
+        req = urllib.request.Request(url, method=method, headers=headers, data=body)
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            raw = resp.read().decode("utf-8")
+            try:
+                console.print_json(json.dumps(json.loads(raw), indent=2))
+            except json.JSONDecodeError:
+                console.print(raw)
+    except urllib.error.HTTPError as e:
+        error(f"HTTP {e.code}: {e.read().decode('utf-8', errors='replace')}")
+    except urllib.error.URLError as e:
+        error(f"Connection failed: {e.reason}")
+
+
+# ── Public commands ──────────────────────────────────────────────────────────
+
+def gateway_api(args: list[str], data: str | None = None) -> None:
+    """Call a gateway endpoint using human-readable commands.
+
+    Examples:
+        gateway api health
+        gateway api stats global
+        gateway api admin users
+        gateway api admin approve email=user@example.com
+        gateway api keys delete abc123
+        gateway api search q=hello
+    """
+    load_env()
+
+    if not args:
+        error("Usage: litellmctl gateway api <command...> [-d json] [key=val...]")
+        info("Run: litellmctl gateway routes")
+        return
+
+    if not gateway_is_running():
+        error("Gateway not running — litellmctl gateway start")
+        return
+
+    secret = _gateway_secret()
+    if not secret:
+        error("CLI secret not found — restart gateway to generate it")
+        return
+
+    routes = _parse_route_exports()
+    if not routes:
+        error("No routes found — is the gateway installed?")
+        return
+
+    # Separate args into: action words, key=value params, path segments
+    method_hint: str | None = None
+    kv: dict[str, str] = {}
+    segments: list[str] = []
+
+    for a in args:
+        lo = a.lower()
+        if lo in ACTION_METHODS and method_hint is None:
+            method_hint = ACTION_METHODS[lo]
+        elif "=" in a and not a.startswith("-"):
+            k, _, v = a.partition("=")
+            kv[k] = v
+        else:
+            segments.append(a)
+
+    if not segments:
+        error("No command specified")
+        return
+
+    # Build URL path from segments
+    if segments[0] == "v1":
+        url_path = "/" + "/".join(segments)
+    else:
+        url_path = "/api/" + "/".join(segments)
+
+    # Determine HTTP method
+    has_body = bool(data or kv)
+    if method_hint:
+        method = method_hint
+    elif has_body:
+        # Find a write method for this path
+        method = "POST"
+        for m in ("POST", "PUT", "PATCH"):
+            if _find_route(routes, url_path, m):
+                method = m
+                break
+    else:
+        method = "GET"
+
+    # Validate route exists
+    route = _find_route(routes, url_path, method) or _find_route(routes, url_path)
+    if not route:
+        error(f"Unknown command: {' '.join(args)}")
+        info("Run: litellmctl gateway routes")
+        return
+
+    # Use the matched route's method if our inferred one has no match
+    if not _find_route(routes, url_path, method):
+        method = route["method"]
+
+    # Build full URL
+    base = _gateway_base_url()
+    full_url = f"{base}{url_path}"
+    if method == "GET" and kv:
+        full_url += "?" + urllib.parse.urlencode(kv)
+
+    # Build body
+    body: bytes | None = None
+    if method in ("POST", "PUT", "PATCH"):
+        if data:
+            body = data.encode("utf-8")
+        elif kv:
+            body = json.dumps(kv).encode("utf-8")
+
+    _gateway_request(method, full_url, body, secret)
+
+
+def gateway_routes() -> None:
+    """List all gateway API routes parsed from TypeScript source files."""
+    routes = _parse_route_exports()
+    if not routes:
+        error("No routes found — is the gateway installed?")
+        return
+
+    console.print(f"\n  {'CMD':<36} {'METHOD':<8} [dim]DESCRIPTION[/]")
+    console.print(f"  {'───':<36} {'──────':<8} [dim]───────────[/]")
+    for r in sorted(routes, key=lambda x: (x["path"], x["method"])):
+        cmd = " ".join(_path_to_cmd(r["path"]))
+        method = r["method"]
+        color = METHOD_COLOR.get(method, "white")
+        desc = r.get("desc", "")
+        console.print(f"  {cmd:<36} [{color}]{method:<8}[/] [dim]{desc}[/]")
+    console.print(f"\n  [dim]{len(routes)} endpoints[/]\n")
+    console.print("  [dim]Usage: litellmctl gateway api <command...> [-d json] [key=val...][/]\n")
+
+
 def cmd_gateway(subcmd: str = "status") -> None:
     load_env()
     if subcmd == "start":
@@ -351,6 +588,8 @@ def cmd_gateway(subcmd: str = "status") -> None:
             subprocess.call(["tail", "-f", str(logfile)])
         except KeyboardInterrupt:
             pass
+    elif subcmd == "routes":
+        gateway_routes()
     else:
         error(f"Unknown gateway subcommand: {subcmd}")
-        console.print("  Usage: litellmctl gateway [start|stop|restart|status|logs]")
+        console.print("  Usage: litellmctl gateway [start|stop|restart|status|logs|routes|api]")

@@ -1,5 +1,5 @@
 import { MongoClient, type MongoClientOptions } from "mongodb";
-import { createHash } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import { verifySession, getSessionCookie, extractApiKey } from "./auth";
 
 // ============================================================================
@@ -105,6 +105,19 @@ export async function validateApiKey(apiKey: string) {
 }
 
 // ============================================================================
+// CLI SECRET (localhost bypass for litellmctl gateway api)
+// ============================================================================
+
+let _cliSecret: string | null = null;
+
+export async function initCliSecret() {
+  const secret = randomBytes(32).toString("hex");
+  const secretFile = new URL("../../.gateway-secret", import.meta.url).pathname;
+  await Bun.write(secretFile, secret);
+  _cliSecret = secret;
+}
+
+// ============================================================================
 // AUTH HELPERS
 // ============================================================================
 
@@ -113,6 +126,12 @@ export async function validateApiKey(apiKey: string) {
  * This is the single entry point for all auth — every role gate below uses it.
  */
 export async function getAuthenticatedUser(req: Request): Promise<{ email: string; role: string } | null> {
+  // CLI secret bypass — localhost-only, reads from .gateway-secret
+  const cliSecret = req.headers.get("x-gateway-secret");
+  if (cliSecret && cliSecret === _cliSecret) {
+    return { email: "cli@localhost", role: "admin" };
+  }
+
   const apiKey = extractApiKey(req);
   if (apiKey) {
     const keyRecord = await validateApiKey(apiKey);
