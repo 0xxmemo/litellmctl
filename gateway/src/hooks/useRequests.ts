@@ -9,8 +9,8 @@ export interface PaginationMeta {
   page: number
   pageSize: number
   totalGroups: number
-  totalPages: number
   hasMore: boolean
+  hasExactTotal: boolean
   totalRequests: number
 }
 

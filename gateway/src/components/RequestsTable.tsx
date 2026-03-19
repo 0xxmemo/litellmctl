@@ -22,6 +22,7 @@ export function RequestsTable({ className, requestsTable }: RequestsTableProps) 
 
   const showingCount = allGroups.length
   const totalGroups = pagination?.totalGroups ?? 0
+  const hasExactTotal = pagination?.hasExactTotal ?? false
 
   return (
     <Card className={className}>
@@ -36,7 +37,7 @@ export function RequestsTable({ className, requestsTable }: RequestsTableProps) 
           <span>Your API calls, grouped by model — click stacked rows to expand</span>
           {pagination && totalGroups > 0 && (
             <span className="text-xs tabular-nums">
-              Showing {showingCount} of {totalGroups} groups
+              Showing {showingCount} of {hasExactTotal ? totalGroups : `${totalGroups}+`} groups
             </span>
           )}
         </CardDescription>
@@ -101,13 +102,13 @@ export function RequestsTable({ className, requestsTable }: RequestsTableProps) 
                     ) : (
                       <>
                         <ChevronDown className="w-3.5 h-3.5" />
-                        Load more ({totalGroups - showingCount} remaining)
+                        Load more
                       </>
                     )}
                   </Button>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    All {totalGroups} groups loaded
+                    All {showingCount} groups loaded
                   </p>
                 )}
               </div>

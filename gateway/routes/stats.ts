@@ -262,15 +262,18 @@ async function groupedRequestsHandler(req: Request) {
     const hasMore = groups.length > (page - 1) * pageSize + pageSize;
     const offset = (page - 1) * pageSize;
     const pageGroups = groups.slice(offset, offset + pageSize).map(({ _gk, ...g }) => g);
+    // knownGroups: how many distinct groups were found in this scan.
+    // When hasMore=true this is a lower bound — the true total is unknown without a full scan.
+    const knownGroups = groups.length - (hasMore ? 1 : 0);
 
     return Response.json({
       groups: pageGroups,
       pagination: {
         page,
         pageSize,
-        totalGroups: groups.length - (hasMore ? 1 : 0),
-        totalPages: Math.ceil((groups.length - (hasMore ? 1 : 0)) / pageSize),
+        totalGroups: knownGroups,
         hasMore,
+        hasExactTotal: !hasMore,
         totalRequests: docsRead,
       },
     });
