@@ -20,37 +20,82 @@ Path aliases (tsconfig.json):
 - `@/*` → `./src/*` (frontend components)
 - `@lib/*` → `./lib/*` (shared server/client modules)
 
-## Data Fetching — ALWAYS use react-query
+## Data Fetching — Hooks + react-query
 
-**All frontend data fetching MUST use `@tanstack/react-query` (`useQuery` / `useMutation`).** Never use manual `useState` + `useEffect` + `fetch` for server data.
+**All frontend data fetching MUST use `@tanstack/react-query` via custom hooks.** Components and pages NEVER contain inline `useQuery`, `useMutation`, `useQueryClient`, or fetch functions.
 
-Rules:
-- **Reads**: Use `useQuery` with a descriptive `queryKey` array. The QueryClient (in `App.tsx`) handles retry, staleTime, and caching globally.
-- **Writes**: Use `useMutation` with `onSuccess` to invalidate related queries via `queryClient.invalidateQueries()`.
-- **Fetch functions**: Define standalone `async function fetchX(): Promise<T>` helpers, then pass them as `queryFn`. Keep fetch logic separate from React hooks.
-- **No manual loading/error state**: `useQuery` provides `isLoading`, `error`, `data` — never create parallel `useState` for these.
-- **Optimistic updates**: For mutations that affect visible lists (e.g. creating/revoking keys), invalidate the query on success so the list refreshes automatically.
+### Architecture (3 layers)
 
-Example pattern:
-```tsx
-// Fetch helper (reusable, testable)
-async function fetchKeys(): Promise<APIKey[]> {
-  const res = await fetch('/api/keys', { credentials: 'include' })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const data = await res.json()
-  return data.keys || []
+```
+src/lib/query-keys.ts     ← All query key constants (single source of truth)
+src/hooks/use*.ts          ← Custom hooks (fetch fns + useQuery/useMutation)
+src/components/*.tsx        ← UI only — imports hooks, never touches react-query directly
+src/pages/*.tsx
+```
+
+### Query Keys — `src/lib/query-keys.ts`
+
+Every `queryKey` MUST be defined in `query-keys.ts` and imported from there. Never use inline string arrays like `['keys']` in hooks or components. This prevents key drift and makes invalidation predictable.
+
+```ts
+import { queryKeys } from '@/lib/query-keys'
+// queryKeys.keys, queryKeys.auth, queryKeys.adminUsers, etc.
+```
+
+### Hook files — `src/hooks/use*.ts`
+
+One hook file per domain. Each file contains:
+1. **Types** — interfaces for API responses (exported)
+2. **Fetch functions** — standalone `async function fetchX()` (NOT exported — internal to the hook file)
+3. **Hooks** — exported `useX()` wrapping `useQuery` / `useMutation`
+
+Existing hooks:
+- `useAuth.ts` — `useAuth()`, `useAuthStatus()`, `useLogout()`
+- `useKeys.ts` — `useKeys()`, `useCreateKey()`, `useRevokeKey()`
+- `useAdmin.ts` — `useAdminUsers()`, `useApproveUser()`, `useRejectUser()`, `useAddUser()`, `useDeleteUser()`, ...
+- `useStats.ts` — `useGlobalStats()`, `useUserStats()`, `useUserStatsAnalytics()`
+- `useSettings.ts` — `useModelOverrides()`, `useSaveModelOverrides()`, `useTierAliases()`, `useSaveProfile()`
+- `useRequests.ts` — `useGroupedRequests()`, `useGroupItems()`
+
+### Rules
+
+- **Components/pages import hooks only** — `import { useKeys, useCreateKey } from '@/hooks/useKeys'`. No `useQuery`/`useMutation`/`useQueryClient` in component files.
+- **Mutations invalidate via queryKeys** — `queryClient.invalidateQueries({ queryKey: queryKeys.keys })` inside the hook's `onSuccess`.
+- **No manual loading/error state** — `useQuery` provides `isLoading`, `error`, `data`. Never create parallel `useState` for these.
+- **UI state stays in components** — form inputs, dialog open/close, copiedId, etc. remain as local `useState`.
+- **`credentials: 'include'`** on all fetch calls.
+
+Example:
+```ts
+// src/hooks/useKeys.ts
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { queryKeys } from '@/lib/query-keys'
+
+async function fetchKeys() { ... }    // NOT exported
+async function createKeyApi(name: string) { ... }
+
+export function useKeys() {
+  return useQuery({ queryKey: queryKeys.keys, queryFn: fetchKeys })
 }
 
-// In component
-const { data: keys = [], isLoading, error } = useQuery({
-  queryKey: ['keys'],
-  queryFn: fetchKeys,
-})
+export function useCreateKey() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: createKeyApi,
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.keys }),
+  })
+}
+```
 
-const createMutation = useMutation({
-  mutationFn: (name: string) => fetch('/api/keys', { method: 'POST', ... }).then(r => r.json()),
-  onSuccess: () => queryClient.invalidateQueries({ queryKey: ['keys'] }),
-})
+```tsx
+// src/components/KeyManager.tsx — NO react-query imports
+import { useKeys, useCreateKey } from '@/hooks/useKeys'
+
+export function KeyManager() {
+  const { data: keys = [], isLoading } = useKeys()
+  const createMutation = useCreateKey()
+  // ... render UI
+}
 ```
 
 ## Auth Gates

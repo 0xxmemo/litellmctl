@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Users } from 'lucide-react'
+import { useAdminUsers, useApproveUser, useRejectUser } from '@/hooks/useAdmin'
 
 interface AdminSectionProps {
   user?: {
@@ -10,86 +11,25 @@ interface AdminSectionProps {
   }
 }
 
-interface UserRecord {
-  email: string
-  role: 'admin' | 'user' | 'guest'
-  createdAt: string
-  approvedAt?: string
-}
-
 export function AdminSection({ user }: AdminSectionProps) {
-  const [users, setUsers] = useState<UserRecord[]>([])
-  const [_loading, setLoading] = useState(true)
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (user?.role !== 'admin') return
-
-    const loadData = async () => {
-      try {
-        // Fetch all users for approval
-        const usersRes = await fetch('/api/admin/users', { 
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' }
-        })
-        if (usersRes.ok) {
-          const usersData = await usersRes.json()
-          setUsers(usersData.users || [])
-        }
-      } catch (error) {
-        console.error('Failed to load admin data:', error)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    loadData()
-  }, [user])
+  const { data: users = [] } = useAdminUsers(user?.role === 'admin')
+  const approveMutation = useApproveUser()
+  const rejectMutation = useRejectUser()
 
   const handleApprove = async (email: string) => {
     setActionInProgress(email)
-    try {
-      const res = await fetch('/api/admin/approve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ email })
-      })
-      
-      if (res.ok) {
-        // Update local state
-        setUsers(users.map(u => 
-          u.email === email 
-            ? { ...u, role: 'user' as const, approvedAt: new Date().toISOString() }
-            : u
-        ))
-      }
-    } catch (error) {
-      console.error('Failed to approve user:', error)
-    } finally {
-      setActionInProgress(null)
-    }
+    approveMutation.mutate(email, {
+      onSettled: () => setActionInProgress(null),
+    })
   }
 
   const handleReject = async (email: string) => {
     setActionInProgress(email)
-    try {
-      const res = await fetch('/api/admin/reject', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ email })
-      })
-      
-      if (res.ok) {
-        // Remove from list
-        setUsers(users.filter(u => u.email !== email))
-      }
-    } catch (error) {
-      console.error('Failed to reject user:', error)
-    } finally {
-      setActionInProgress(null)
-    }
+    rejectMutation.mutate(email, {
+      onSettled: () => setActionInProgress(null),
+    })
   }
 
   if (user?.role !== 'admin') return null
@@ -123,8 +63,8 @@ export function AdminSection({ user }: AdminSectionProps) {
           {pendingUsers.length > 0 ? (
             <div className="space-y-4">
               {pendingUsers.map((userRecord) => (
-                <div 
-                  key={userRecord.email} 
+                <div
+                  key={userRecord.email}
                   className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 border rounded-lg"
                 >
                   <div className="flex-1">
@@ -134,16 +74,16 @@ export function AdminSection({ user }: AdminSectionProps) {
                     </p>
                   </div>
                   <div className="flex gap-2 w-full sm:w-auto">
-                    <Button 
-                      size="sm" 
+                    <Button
+                      size="sm"
                       onClick={() => handleApprove(userRecord.email)}
                       disabled={actionInProgress === userRecord.email}
                       className="flex-1 sm:flex-none"
                     >
                       {actionInProgress === userRecord.email ? '...' : 'Approve'}
                     </Button>
-                    <Button 
-                      size="sm" 
+                    <Button
+                      size="sm"
                       variant="destructive"
                       onClick={() => handleReject(userRecord.email)}
                       disabled={actionInProgress === userRecord.email}

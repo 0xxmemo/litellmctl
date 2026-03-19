@@ -106,31 +106,6 @@ async function verifyOtpHandler(req: Request) {
   return response;
 }
 
-// Session status
-async function sessionStatusHandler(req: Request) {
-  const sessionToken = getSessionCookie(req);
-
-  if (!sessionToken) {
-    return Response.json({ authenticated: false });
-  }
-
-  const session = await verifySession(sessionToken);
-  if (!session) {
-    return Response.json({ authenticated: false });
-  }
-
-  const user = await loadUser(session.email);
-  if (!user) {
-    return Response.json({ authenticated: false });
-  }
-
-  return Response.json({
-    authenticated: true,
-    email: session.email,
-    role: user.role,
-  });
-}
-
 async function sessionMeHandler(req: Request) {
   const sessionToken = getSessionCookie(req);
   if (!sessionToken) return Response.json({ authenticated: false });
@@ -157,7 +132,6 @@ async function logoutHandler() {
 export const authRoutes = {
   "/api/auth/request-otp": { POST: requestOtpHandler },
   "/api/auth/verify-otp":  { POST: verifyOtpHandler },
-  "/api/auth/status":      { GET: sessionStatusHandler },
   "/api/auth/me":          { GET: sessionMeHandler },
   "/api/auth/logout":      { GET: logoutHandler, POST: logoutHandler },
 };

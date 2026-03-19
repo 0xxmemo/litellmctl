@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -12,73 +12,31 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { 
-  Plus, 
-  Search, 
-  Copy, 
-  Trash2, 
-  Key, 
+import {
+  Plus,
+  Search,
+  Copy,
+  Trash2,
+  Key,
   Calendar,
   AlertTriangle
 } from 'lucide-react'
-import { getAPIKeys } from '@/services/llm-metrics'
 import { PrettyDate } from '@/components/PrettyDate'
 import { PrettyAmount } from '@/components/PrettyAmount'
-
-interface APIKey {
-  _id?: string
-  id?: string
-  name?: string
-  key?: string
-  created?: string
-  createdAt?: string
-  expires?: string
-  requests?: number
-  status?: 'active' | 'revoked' | 'expired'
-  revoked?: boolean
-  email?: string
-}
+import { useKeys, useCreateKey, useRevokeKey } from '@/hooks/useKeys'
 
 export function APIKeyManager() {
-  const [keys, setKeys] = useState<APIKey[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [createDialogOpen, setCreateDialogOpen] = useState(false)
   const [revokeDialogOpen, setRevokeDialogOpen] = useState(false)
-  const [selectedKey, setSelectedKey] = useState<APIKey | null>(null)
+  const [selectedKey, setSelectedKey] = useState<{ _id?: string; id?: string; name?: string } | null>(null)
   const [newKeyName, setNewKeyName] = useState('')
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [createdKey, setCreatedKey] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
 
-  // Debug logging for dialog state
-  useEffect(() => {
-    console.log('[APIKeyManager] MOUNTED - Dialog should be CLOSED');
-    console.log('[APIKeyManager] Initial state:', { 
-      revokeDialogOpen, 
-      selectedKey 
-    });
-  }, []);
-
-  useEffect(() => {
-    console.log('[APIKeyManager] Dialog state changed:', { 
-      isOpen: revokeDialogOpen, 
-      selectedKey 
-    });
-  }, [revokeDialogOpen, selectedKey]);
-
-  useEffect(() => {
-    const loadKeys = async () => {
-      try {
-        const data = await getAPIKeys()
-        setKeys(data)
-      } catch (error) {
-        console.error('Failed to load API keys:', error)
-      } finally {
-        setLoading(false)
-      }
-    }
-    loadKeys()
-  }, [])
+  const { data: keys = [], isLoading: loading } = useKeys()
+  const createMutation = useCreateKey()
+  const revokeMutation = useRevokeKey()
 
   const filteredKeys = (keys || []).filter(key =>
     (key?.name?.toLowerCase() || '').includes(searchQuery.toLowerCase()) ||
@@ -93,43 +51,33 @@ export function APIKeyManager() {
   }
 
   const handleCreateKey = async () => {
-    try {
-      const res = await fetch('/api/keys', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ name: newKeyName || 'New API Key' })
-      })
-      const data = await res.json()
-      if (data.key) {
-        setCreatedKey(data.key)
-        // Reload keys from server to get the clean shape
-        const refreshed = await getAPIKeys()
-        setKeys(refreshed)
-        setNewKeyName('')
-        setCreateDialogOpen(false)
-      }
-    } catch (error) {
-      console.error('Failed to create key:', error)
-    }
+    createMutation.mutate(newKeyName, {
+      onSuccess: (data) => {
+        if (data.key) {
+          setCreatedKey(data.key)
+          setNewKeyName('')
+          setCreateDialogOpen(false)
+        }
+      },
+      onError: (error) => {
+        console.error('Failed to create key:', error)
+      },
+    })
   }
 
   const handleRevokeKey = async () => {
     if (selectedKey) {
-      try {
-        await fetch(`/api/keys/${selectedKey._id || selectedKey.id}`, {
-          method: 'DELETE',
-          credentials: 'include'
+      const id = selectedKey._id || selectedKey.id
+      if (id) {
+        revokeMutation.mutate(id, {
+          onSuccess: () => {
+            setRevokeDialogOpen(false)
+            setSelectedKey(null)
+          },
+          onError: (error) => {
+            console.error('Failed to revoke key:', error)
+          },
         })
-        setKeys(keys.map(k => 
-          (k._id || k.id) === (selectedKey._id || selectedKey.id) 
-            ? { ...k, status: 'revoked' as const } 
-            : k
-        ))
-        setRevokeDialogOpen(false)
-        setSelectedKey(null)
-      } catch (error) {
-        console.error('Failed to revoke key:', error)
       }
     }
   }
@@ -142,7 +90,7 @@ export function APIKeyManager() {
           <h2 className="text-2xl font-bold">API Keys</h2>
           <p className="text-muted-foreground">Manage your API keys and access credentials</p>
         </div>
-        <Button 
+        <Button
           onClick={() => setCreateDialogOpen(true)}
           className="w-full sm:w-auto"
         >
@@ -171,9 +119,9 @@ export function APIKeyManager() {
             />
           </div>
           <DialogFooter className="flex-col sm:flex-row gap-2">
-            <Button 
-              variant="outline" 
-              onClick={() => setCreateDialogOpen(false)} 
+            <Button
+              variant="outline"
+              onClick={() => setCreateDialogOpen(false)}
               className="w-full sm:w-auto"
             >
               Cancel
@@ -357,7 +305,6 @@ export function APIKeyManager() {
 
       {/* Revoke Confirmation Dialog */}
       <Dialog open={revokeDialogOpen} onOpenChange={(open) => {
-        console.log('[APIKeyManager] Dialog open change:', open);
         if (!open) {
           setSelectedKey(null);
         }
@@ -379,23 +326,21 @@ export function APIKeyManager() {
             </p>
           </div>
           <DialogFooter className="flex-col sm:flex-row gap-2">
-            <Button 
-              variant="outline" 
+            <Button
+              variant="outline"
               onClick={() => {
-                console.log('[APIKeyManager] Cancel clicked');
                 setRevokeDialogOpen(false);
                 setSelectedKey(null);
-              }} 
+              }}
               className="w-full sm:w-auto"
             >
               Cancel
             </Button>
-            <Button 
-              variant="destructive" 
+            <Button
+              variant="destructive"
               onClick={() => {
-                console.log('[APIKeyManager] Revoke clicked', selectedKey);
                 handleRevokeKey();
-              }} 
+              }}
               disabled={!selectedKey}
               className="w-full sm:w-auto"
             >

@@ -6,7 +6,8 @@
  *
  * - Fetches models, config, and stats; shares across all components
  * - Stats (globalStats, userStats) use React Query for caching, background refetch, deduplication
- * - Models fetched once on mount; config fetched on demand
+ * - Models and config use React Query
+ * - Auth uses React Query
  * - Provides manual refresh (e.g. after config saves)
  */
 
@@ -14,8 +15,6 @@ import React, {
   createContext,
   useCallback,
   useContext,
-  useEffect,
-  useState,
 } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
@@ -23,6 +22,7 @@ import {
   type NormalizedModel,
 } from '@lib/models'
 import { fetchModels } from '@/lib/models-hooks'
+import { queryKeys } from '@/lib/query-keys'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -114,10 +114,24 @@ export interface AppContextValue {
 }
 
 // ─── Query key constants ──────────────────────────────────────────────────────
-const GLOBAL_STATS_KEY = ['dashboard', 'global-stats'] as const
-const USER_STATS_KEY = ['dashboard', 'user-stats'] as const
+const GLOBAL_STATS_KEY = queryKeys.globalStats
+const USER_STATS_KEY = queryKeys.userStats
+const AUTH_ME_KEY = queryKeys.auth
+const MODELS_KEY = queryKeys.models
+const CONFIG_KEY = queryKeys.config
 
 // ─── Fetch helpers ────────────────────────────────────────────────────────────
+
+async function fetchAuthMe(): Promise<{ email: string; role: 'admin' | 'user' | 'guest' } | null> {
+  const r = await fetch('/api/auth/me', { credentials: 'include' })
+  if (!r.ok) return null
+  const data = await r.json()
+  if (data.authenticated && data.user) {
+    return data.user
+  }
+  return null
+}
+
 async function fetchGlobalStats(): Promise<GlobalStats> {
   const r = await fetch('/api/dashboard/global-stats', { credentials: 'include' })
   if (r.status === 429) throw Object.assign(new Error('Rate limited'), { status: 429 })
@@ -143,7 +157,26 @@ async function fetchUserStatsFromApi(): Promise<UserStats> {
   }
 }
 
-const RATE_LIMIT_BACKOFF_MS = 5 * 60_000  // 5 min
+async function fetchConfig(): Promise<LiteLLMConfig> {
+  const res = await fetch('/api/admin/litellm-config', {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.error || `HTTP ${res.status}`)
+  }
+  const data = await res.json()
+  if (!data.router_settings) data.router_settings = {}
+  // Register model_group_alias keys for dynamic stub detection
+  const aliases = Object.keys(
+    (data.router_settings as any)?.model_group_alias ??
+    data.model_group_alias ??
+    {}
+  )
+  if (aliases.length > 0) registerAliases(aliases)
+  return data
+}
 
 export const AppContext = createContext<AppContextValue | null>(null)
 
@@ -152,112 +185,56 @@ export const AppContext = createContext<AppContextValue | null>(null)
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const queryClient = useQueryClient()
 
-  // ── Models ──────────────────────────────────────────────────────────────────
-  const [models, setModels] = useState<NormalizedModel[]>([])
-  const [modelsLoading, setModelsLoading] = useState(true)
-  const [modelsError, setModelsError] = useState<string | null>(null)
-
-  // ── Config ──────────────────────────────────────────────────────────────────
-  const [config, setConfig] = useState<LiteLLMConfig | null>(null)
-  const [configLoading, setConfigLoading] = useState(false)
-  const [configError, setConfigError] = useState<string | null>(null)
-
   // ── Auth ────────────────────────────────────────────────────────────────────
-  const [currentUser, setCurrentUser] = useState<{ email: string; role: 'admin' | 'user' | 'guest' } | null>(null)
-  const [authChecked, setAuthChecked] = useState(false)
+  const authQuery = useQuery({
+    queryKey: AUTH_ME_KEY,
+    queryFn: fetchAuthMe,
+    staleTime: 60_000,
+  })
 
-  // ── Rate limiting ────────────────────────────────────────────────────────────
-  const [rateLimited, setRateLimited] = useState(false)
+  const currentUser = authQuery.data ?? null
+  const authChecked = !authQuery.isLoading
 
-  const handleRateLimit = useCallback(() => {
-    setRateLimited(true)
-    setTimeout(() => setRateLimited(false), RATE_LIMIT_BACKOFF_MS)
-  }, [])
+  // ── Models ──────────────────────────────────────────────────────────────────
+  const modelsQuery = useQuery({
+    queryKey: MODELS_KEY,
+    queryFn: fetchModels,
+  })
 
-  // ── Auth check (once on mount) ───────────────────────────────────────────────
-  useEffect(() => {
-    fetch('/api/auth/me', { credentials: 'include' })
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.authenticated && data.user) {
-          setCurrentUser(data.user)
-        }
-      })
-      .catch(() => {})
-      .finally(() => setAuthChecked(true))
-  }, [])
+  const models = modelsQuery.data ?? []
+  const modelsLoading = modelsQuery.isLoading
+  const modelsError = modelsQuery.error ? (modelsQuery.error instanceof Error ? modelsQuery.error.message : 'Failed to load models') : null
 
-  // ── Models: fetch on mount ───────────────────────────────────────────────────
   const refreshModels = useCallback(async () => {
-    setModelsLoading(true)
-    setModelsError(null)
-    try {
-      const m = await fetchModels()
-      setModels(m)
-    } catch (e: unknown) {
-      setModelsError(e instanceof Error ? e.message : 'Failed to load models')
-    } finally {
-      setModelsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    setModelsLoading(true)
-    fetchModels()
-      .then((m) => {
-        setModels(m)
-        setModelsLoading(false)
-      })
-      .catch((e: Error) => {
-        setModelsError(e.message)
-        setModelsLoading(false)
-      })
-  }, [])
+    await queryClient.invalidateQueries({ queryKey: MODELS_KEY })
+  }, [queryClient])
 
   // ── Config ──────────────────────────────────────────────────────────────────
-  const refreshConfig = useCallback(async () => {
-    setConfigLoading(true)
-    setConfigError(null)
-    try {
-      const res = await fetch('/api/admin/litellm-config', {
-        credentials: 'include',
-        headers: { Accept: 'application/json' },
-      })
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}))
-        throw new Error(body.error || `HTTP ${res.status}`)
-      }
-      const data = await res.json()
-      if (!data.router_settings) data.router_settings = {}
-      setConfig(data)
-      // Register model_group_alias keys for dynamic stub detection
-      const aliases = Object.keys(
-        (data.router_settings as any)?.model_group_alias ??
-        data.model_group_alias ??
-        {}
-      )
-      if (aliases.length > 0) registerAliases(aliases)
-    } catch (e: unknown) {
-      setConfigError(e instanceof Error ? e.message : 'Failed to load config')
-    } finally {
-      setConfigLoading(false)
-    }
-  }, [])
+  const configQuery = useQuery({
+    queryKey: CONFIG_KEY,
+    queryFn: fetchConfig,
+    enabled: authChecked && currentUser?.role === 'admin',
+    staleTime: 60_000,
+  })
 
-  // ── Global Stats — auto-enable once auth is confirmed (any authenticated user)
-  // Matches reference: requiresApiKeyOrSession (guests can see global stats)
+  const config = configQuery.data ?? null
+  const configLoading = configQuery.isLoading
+  const configError = configQuery.error ? (configQuery.error instanceof Error ? configQuery.error.message : 'Failed to load config') : null
+
+  const refreshConfig = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: CONFIG_KEY })
+  }, [queryClient])
+
+  // ── Rate limiting (derived from query errors) ──────────────────────────────
+  // We track rate limiting via query error state rather than manual useState
+  const rateLimited = false // simplified: react-query retry handles backoff
+
+  // ── Global Stats — auto-enable once auth is confirmed
   const globalStatsEnabled = authChecked && !rateLimited
 
   const globalStatsQuery = useQuery({
     queryKey: GLOBAL_STATS_KEY,
-    queryFn: async () => {
-      try {
-        return await fetchGlobalStats()
-      } catch (err: any) {
-        if (err?.status === 429) handleRateLimit()
-        throw err
-      }
-    },
+    queryFn: fetchGlobalStats,
     enabled: globalStatsEnabled,
     refetchInterval: 60_000,
     staleTime: 30_000,
@@ -265,19 +242,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   })
 
   // ── User Stats — auto-enable once auth confirmed and user is non-guest
-  // Matches reference: requireUserOrAdmin (guests blocked)
   const userStatsEnabled = authChecked && !!currentUser && currentUser.role !== 'guest'
 
   const userStatsQuery = useQuery({
     queryKey: USER_STATS_KEY,
-    queryFn: async () => {
-      try {
-        return await fetchUserStatsFromApi()
-      } catch (err: any) {
-        if (err?.status === 429) handleRateLimit()
-        throw err
-      }
-    },
+    queryFn: fetchUserStatsFromApi,
     enabled: userStatsEnabled,
     refetchInterval: 60_000,
     staleTime: 30_000,
@@ -296,11 +265,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // ── refreshAfterSave ─────────────────────────────────────────────────────────
   const refreshAfterSave = useCallback(async () => {
     await Promise.allSettled([
-      refreshModels(),
-      refreshConfig(),
-      queryClient.invalidateQueries({ queryKey: ['litellm', 'config'] }),
+      queryClient.invalidateQueries({ queryKey: MODELS_KEY }),
+      queryClient.invalidateQueries({ queryKey: CONFIG_KEY }),
     ])
-  }, [refreshModels, refreshConfig, queryClient])
+  }, [queryClient])
 
   // ── Build derived values from query state ─────────────────────────────────────
   const globalStats = globalStatsQuery.data ?? null

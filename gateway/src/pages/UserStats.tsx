@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -7,15 +6,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContai
 import { Activity, Key, DollarSign, TrendingUp, RefreshCw } from 'lucide-react'
 import { PrettyAmount } from '@/components/PrettyAmount'
 import { PrettyDate } from '@/components/PrettyDate'
-
-async function fetchUserStats() {
-  const res = await fetch('/api/dashboard/user-stats', {
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-  })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json()
-}
+import { useUserStats } from '@/hooks/useStats'
 
 /** Shows "Updated Xs ago" with spinning icon during background refetch */
 function LastUpdated({ dataUpdatedAt, isFetching }: { dataUpdatedAt: number; isFetching: boolean }) {
@@ -41,10 +32,8 @@ function LastUpdated({ dataUpdatedAt, isFetching }: { dataUpdatedAt: number; isF
 }
 
 export function UserStats() {
-  const { data: user, isLoading, error, dataUpdatedAt, isFetching } = useQuery({
-    queryKey: ['dashboard', 'user-stats'],
-    queryFn: fetchUserStats,
-    refetchInterval: 60_000,        // 60s polling — silent background refresh
+  const { data: user, isLoading, error, dataUpdatedAt, isFetching } = useUserStats({
+    refetchInterval: 60_000,
     staleTime: 30_000,
   })
 

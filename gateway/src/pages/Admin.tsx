@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -8,31 +8,30 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { AlertCircle, AlertTriangle, CheckCircle, XCircle, UserPlus, Trash2, Users, Settings2 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
+import {
+  useAdminUsers,
+  useAdminTopUsers,
+  useApproveUser,
+  useRejectUser,
+  useAddUser,
+  useDeleteUser,
+  useDisapproveAll,
+  useRevokeAllKeys,
+} from '@/hooks/useAdmin'
 import { AdminErrorBoundary } from '@/components/AdminErrorBoundary'
 import { toast } from 'sonner'
 import { PrettyDate } from '@/components/PrettyDate'
 import { PrettyAmount } from '@/components/PrettyAmount'
 import { ConfigEditor } from '@/components/ConfigEditor'
 
-interface UserRecord {
-  email: string
-  role: 'admin' | 'user' | 'guest'
-  createdAt: string
-  approvedAt?: string
-}
-
 export function Admin() {
   const { user: currentUser } = useAuth()
-  const [users, setUsers] = useState<UserRecord[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
 
   // Add user modal state
   const [showAddModal, setShowAddModal] = useState(false)
   const [newUserEmail, setNewUserEmail] = useState('')
   const [newUserRole, setNewUserRole] = useState<'user' | 'admin'>('user')
-  const [addLoading, setAddLoading] = useState(false)
   const [addError, setAddError] = useState<string | null>(null)
   const [addSuccess, setAddSuccess] = useState<string | null>(null)
 
@@ -40,260 +39,96 @@ export function Admin() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
   // Danger Zone state
-  const [disapproveLoading, setDisapproveLoading] = useState(false)
   const [showDisapproveConfirm, setShowDisapproveConfirm] = useState(false)
-
-  // Revoke All Keys state
-  const [revokeAllLoading, setRevokeAllLoading] = useState(false)
   const [showRevokeAllConfirm, setShowRevokeAllConfirm] = useState(false)
-  const [_activeKeyCount, setActiveKeyCount] = useState<number | null>(null)
 
-  // Top Users state
-  const [topUsers, setTopUsers] = useState<Array<{ email: string; role: string; requests: number; tokens: number; spend: number }>>([])
-  const [topUsersLoading, setTopUsersLoading] = useState(true)
+  const { data: users = [], isLoading: loading, error: usersError, refetch: refetchUsers } = useAdminUsers()
+  const { data: topUsers = [], isLoading: topUsersLoading } = useAdminTopUsers()
 
-  useEffect(() => {
-    loadUsers()
-    loadTopUsers()
-  }, [])
-
-  const loadTopUsers = async () => {
-    try {
-      const res = await fetch('/api/dashboard/global-stats', {
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' }
-      })
-      if (!res.ok) return
-      const data = await res.json()
-      setTopUsers(data.topUsers || [])
-    } catch (err) {
-      console.error('Failed to load top users:', err)
-    } finally {
-      setTopUsersLoading(false)
-    }
-  }
+  const error = usersError ? (usersError instanceof Error ? usersError.message : 'Failed to load users') : null
 
   const showOpMessage = (type: 'success' | 'error', text: string) => {
     if (type === 'success') toast.success(text)
     else toast.error(text)
   }
 
-  const loadUsers = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const res = await fetch('/api/admin/users', {
-        credentials: 'include',
-        redirect: 'manual',
-        headers: { 'Accept': 'application/json' }
-      })
+  const approveMutation = useApproveUser()
+  const rejectMutation = useRejectUser()
+  const addUserMutation = useAddUser()
+  const deleteUserMutation = useDeleteUser()
+  const disapproveAllMutation = useDisapproveAll()
+  const revokeAllMutation = useRevokeAllKeys()
 
-      // Auth redirect is handled by route's beforeLoad
-      if (res.status === 302 || res.status === 301 || res.type === 'opaqueredirect') {
-        return
-      }
-
-      if (res.status === 403) {
-        throw new Error('Access denied — admin role required')
-      }
-
-      if (!res.ok) {
-        throw new Error(`Server error: HTTP ${res.status}`)
-      }
-
-      const data = await res.json()
-      setUsers(data.users || [])
-    } catch (err: any) {
-      console.error('Error loading users:', err)
-      setError(err.message || 'Failed to load users. Please try again.')
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const handleApprove = async (email: string) => {
+  const handleApprove = (email: string) => {
     setActionInProgress(email)
-    try {
-      const res = await fetch('/api/admin/approve', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ email })
-      })
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(data.error || `HTTP ${res.status}`)
-      }
-
-      setUsers(prev => prev.map(u => u.email === email ? { ...u, role: 'user', approvedAt: new Date().toISOString() } : u))
-      showOpMessage('success', `${email} approved successfully`)
-    } catch (err: any) {
-      console.error('Failed to approve user:', err)
-      showOpMessage('error', `Failed to approve: ${err.message}`)
-    } finally {
-      setActionInProgress(null)
-    }
+    approveMutation.mutate(email, {
+      onSuccess: (returnedEmail) => {
+        showOpMessage('success', `${returnedEmail} approved successfully`)
+        setActionInProgress(null)
+      },
+      onError: (err: Error) => {
+        showOpMessage('error', `Failed to approve: ${err.message}`)
+        setActionInProgress(null)
+      },
+    })
   }
 
-  const handleReject = async (email: string) => {
-    if (!confirm(`Are you sure you want to reject ${email}?`)) {
-      return
-    }
-
+  const handleReject = (email: string) => {
+    if (!confirm(`Are you sure you want to reject ${email}?`)) return
     setActionInProgress(email)
-    try {
-      const res = await fetch('/api/admin/reject', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ email })
-      })
-
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        throw new Error(data.error || `HTTP ${res.status}`)
-      }
-
-      setUsers(prev => prev.filter(u => u.email !== email))
-      showOpMessage('success', `${email} rejected`)
-    } catch (err: any) {
-      console.error('Failed to reject user:', err)
-      showOpMessage('error', `Failed to reject: ${err.message}`)
-    } finally {
-      setActionInProgress(null)
-    }
+    rejectMutation.mutate(email, {
+      onSuccess: (returnedEmail) => {
+        showOpMessage('success', `${returnedEmail} rejected`)
+        setActionInProgress(null)
+      },
+      onError: (err: Error) => {
+        showOpMessage('error', `Failed to reject: ${err.message}`)
+        setActionInProgress(null)
+      },
+    })
   }
 
-  const handleAddUser = async (e: React.FormEvent) => {
+  const handleAddUser = (e: React.FormEvent) => {
     e.preventDefault()
     setAddError(null)
     setAddSuccess(null)
-
     if (!newUserEmail.trim()) {
       setAddError('Email is required')
       return
     }
-
-    setAddLoading(true)
-    try {
-      const res = await fetch('/api/admin/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify({ email: newUserEmail.trim().toLowerCase(), role: newUserRole })
-      })
-
-      const data = await res.json().catch(() => ({}))
-
-      if (!res.ok) {
-        throw new Error(data.error || `HTTP ${res.status}`)
-      }
-
-      setAddSuccess(`User ${newUserEmail.trim()} added successfully`)
-      setNewUserEmail('')
-      setNewUserRole('user')
-      await loadUsers()
-
-      setTimeout(() => {
-        setShowAddModal(false)
-        setAddSuccess(null)
-      }, 1500)
-    } catch (err: any) {
-      console.error('Failed to add user:', err)
-      setAddError(err.message || 'Failed to add user')
-    } finally {
-      setAddLoading(false)
-    }
+    addUserMutation.mutate({ email: newUserEmail.trim().toLowerCase(), role: newUserRole }, {
+      onSuccess: (returnedEmail) => {
+        setAddSuccess(`User ${returnedEmail} added successfully`)
+        setNewUserEmail('')
+        setNewUserRole('user')
+        setTimeout(() => {
+          setShowAddModal(false)
+          setAddSuccess(null)
+        }, 1500)
+      },
+      onError: (err: Error) => {
+        setAddError(err.message || 'Failed to add user')
+      },
+    })
   }
 
-  const handleDeleteUser = async (email: string) => {
-    // Frontend self-delete prevention
+  const handleDeleteUser = (email: string) => {
     if (email === currentUser?.email) {
       showOpMessage('error', 'Cannot delete your own account')
-      setDeleteTarget(null)
       return
     }
-
     setActionInProgress(email)
     setDeleteTarget(null)
-    try {
-      const res = await fetch(`/api/admin/users/${encodeURIComponent(email)}`, {
-        method: 'DELETE',
-        credentials: 'include',
-        headers: { 'Accept': 'application/json' }
-      })
-
-      const data = await res.json().catch(() => ({}))
-
-      if (!res.ok) {
-        throw new Error(data.error || `HTTP ${res.status}`)
-      }
-
-      setUsers(prev => prev.filter(u => u.email !== email))
-      showOpMessage('success', `${email} removed successfully`)
-    } catch (err: any) {
-      console.error('Failed to delete user:', err)
-      showOpMessage('error', `Failed to remove user: ${err.message}`)
-    } finally {
-      setActionInProgress(null)
-    }
-  }
-
-  const handleDisapproveAll = () => {
-    setShowDisapproveConfirm(true)
-  }
-
-  const confirmDisapproveAll = async () => {
-    try {
-      setDisapproveLoading(true)
-      const response = await fetch('/api/admin/disapprove-all', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-      })
-      if (!response.ok) throw new Error('Failed to disapprove users')
-      const result = await response.json()
-      await loadUsers()
-      showOpMessage('success', `Rejected ${result.count} pending users. Approved users remain unaffected.`)
-    } catch (error: any) {
-      showOpMessage('error', error.message || 'Failed to disapprove users')
-    } finally {
-      setDisapproveLoading(false)
-      setShowDisapproveConfirm(false)
-    }
-  }
-
-  const handleRevokeAll = async () => {
-    // Fetch active key count before showing confirm dialog
-    try {
-      await fetch('/api/admin/users', {
-        credentials: 'include',
-        headers: { 'Accept': 'application/json' }
-      })
-      // We'll get the count from global-stats or just show the dialog
-    } catch {}
-    setShowRevokeAllConfirm(true)
-  }
-
-  const confirmRevokeAll = async () => {
-    try {
-      setRevokeAllLoading(true)
-      const response = await fetch('/api/admin/keys/revoke-all', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-      })
-      if (!response.ok) throw new Error('Failed to revoke all keys')
-      const result = await response.json()
-      setActiveKeyCount(null)
-      showOpMessage('success', `Revoked ${result.count} API keys. Users will need to generate new keys.`)
-    } catch (error: any) {
-      showOpMessage('error', error.message || 'Failed to revoke all keys')
-    } finally {
-      setRevokeAllLoading(false)
-      setShowRevokeAllConfirm(false)
-    }
+    deleteUserMutation.mutate(email, {
+      onSuccess: (returnedEmail) => {
+        showOpMessage('success', `${returnedEmail} removed successfully`)
+        setActionInProgress(null)
+      },
+      onError: (err: Error) => {
+        showOpMessage('error', `Failed to remove user: ${err.message}`)
+        setActionInProgress(null)
+      },
+    })
   }
 
   const pendingUsers = users.filter(u => u.role === 'guest')
@@ -403,12 +238,12 @@ export function Admin() {
                   >
                     Cancel
                   </Button>
-                  <Button 
-                    type="submit" 
-                    disabled={addLoading} 
+                  <Button
+                    type="submit"
+                    disabled={addUserMutation.isPending}
                     className="w-full sm:w-auto"
                   >
-                    {addLoading ? 'Adding...' : 'Add User'}
+                    {addUserMutation.isPending ? 'Adding...' : 'Add User'}
                   </Button>
                 </div>
               </form>
@@ -472,7 +307,7 @@ export function Admin() {
                     variant="outline"
                     size="sm"
                     className="mt-3"
-                    onClick={loadUsers}
+                    onClick={() => refetchUsers()}
                   >
                     Retry
                   </Button>
@@ -644,8 +479,8 @@ export function Admin() {
               </p>
               <Button
                 variant="destructive"
-                onClick={handleDisapproveAll}
-                disabled={disapproveLoading || disapprovableUsers.length === 0}
+                onClick={() => setShowDisapproveConfirm(true)}
+                disabled={disapproveAllMutation.isPending || disapprovableUsers.length === 0}
                 className="w-full sm:w-auto"
               >
                 <AlertTriangle className="w-4 h-4 mr-2" />
@@ -660,12 +495,12 @@ export function Admin() {
               </p>
               <Button
                 variant="destructive"
-                onClick={handleRevokeAll}
-                disabled={revokeAllLoading}
+                onClick={() => setShowRevokeAllConfirm(true)}
+                disabled={revokeAllMutation.isPending}
                 className="w-full sm:w-auto"
               >
                 <AlertTriangle className="w-4 h-4 mr-2" />
-                {revokeAllLoading ? 'Revoking...' : 'Revoke All Keys'}
+                {revokeAllMutation.isPending ? 'Revoking...' : 'Revoke All Keys'}
               </Button>
             </div>
           </div>
@@ -700,11 +535,20 @@ export function Admin() {
                 </Button>
                 <Button
                   variant="destructive"
-                  onClick={confirmDisapproveAll}
-                  disabled={disapproveLoading}
+                  onClick={() => disapproveAllMutation.mutate(undefined, {
+                    onSuccess: (result) => {
+                      showOpMessage('success', `Rejected ${result.count} pending users. Approved users remain unaffected.`)
+                      setShowDisapproveConfirm(false)
+                    },
+                    onError: (err: Error) => {
+                      showOpMessage('error', err.message || 'Failed to disapprove users')
+                      setShowDisapproveConfirm(false)
+                    },
+                  })}
+                  disabled={disapproveAllMutation.isPending}
                   className="flex-1"
                 >
-                  {disapproveLoading ? 'Processing...' : 'Yes, Reject All'}
+                  {disapproveAllMutation.isPending ? 'Processing...' : 'Yes, Reject All'}
                 </Button>
               </div>
             </div>
@@ -738,11 +582,20 @@ export function Admin() {
                 </Button>
                 <Button
                   variant="destructive"
-                  onClick={confirmRevokeAll}
-                  disabled={revokeAllLoading}
+                  onClick={() => revokeAllMutation.mutate(undefined, {
+                    onSuccess: (result) => {
+                      showOpMessage('success', `Revoked ${result.count} API keys. Users will need to generate new keys.`)
+                      setShowRevokeAllConfirm(false)
+                    },
+                    onError: (err: Error) => {
+                      showOpMessage('error', err.message || 'Failed to revoke all keys')
+                      setShowRevokeAllConfirm(false)
+                    },
+                  })}
+                  disabled={revokeAllMutation.isPending}
                   className="flex-1"
                 >
-                  {revokeAllLoading ? 'Revoking...' : 'Yes, Revoke All Keys'}
+                  {revokeAllMutation.isPending ? 'Revoking...' : 'Yes, Revoke All Keys'}
                 </Button>
               </div>
             </div>

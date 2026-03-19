@@ -1,34 +1,12 @@
 'use client'
-import { useQuery } from '@tanstack/react-query'
 import { StatCard } from '@/components/StatCard'
 import { ModelUsagePieChart } from '@/components/ModelUsagePieChart'
 import { Activity, DollarSign, Key, Zap } from 'lucide-react'
 import { PrettyAmount } from '@/components/PrettyAmount'
-
-interface GlobalStats {
-  totalRequests?: number
-  totalTokens?: number
-  totalSpend?: number
-  activeKeys?: number
-  modelUsage?: Array<{
-    name: string
-    value: number
-    percentage: string | number
-  }>
-}
-
-async function fetchGlobalStats(): Promise<GlobalStats> {
-  const r = await fetch('/api/dashboard/global-stats', { credentials: 'include' })
-  if (!r.ok) throw new Error(`HTTP ${r.status}`)
-  return r.json()
-}
+import { useGlobalStats } from '@/hooks/useStats'
 
 export function AdminStats() {
-  const { data: stats, error } = useQuery({
-    queryKey: ['dashboard', 'global-stats'],
-    queryFn: fetchGlobalStats,
-    staleTime: 60_000,
-  })
+  const { data: stats, error } = useGlobalStats()
 
   if (error) return (
     <div className="p-4 border rounded-lg text-muted-foreground text-center">
@@ -64,7 +42,11 @@ export function AdminStats() {
       </div>
 
       {stats.modelUsage && stats.modelUsage.length > 0 && (
-        <ModelUsagePieChart data={stats.modelUsage} />
+        <ModelUsagePieChart data={stats.modelUsage.map(m => ({
+          name: m.model_name || 'unknown',
+          value: m.tokens || 0,
+          percentage: m.percentage || 0,
+        }))} />
       )}
     </div>
   )

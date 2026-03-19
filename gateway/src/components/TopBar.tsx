@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { LogOut, User } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
@@ -8,43 +8,13 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
-
-interface UserProfile {
-  email: string
-  role: 'admin' | 'user' | 'guest'
-}
+import { useAuth, useLogout } from '@/hooks/useAuth'
 
 export function TopBar() {
   const [profileOpen, setProfileOpen] = useState(false)
-  const [user, setUser] = useState<UserProfile | null>(null)
-  const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    fetch('/api/auth/me', { credentials: 'include' })
-      .then(r => r.json())
-      .then(data => {
-        if (data.authenticated && data.user) {
-          setUser(data.user)
-        }
-      })
-      .catch(err => {
-        console.error('Error fetching user profile:', err)
-      })
-      .finally(() => setLoading(false))
-  }, [])
-
-  const handleLogout = async () => {
-    try {
-      await fetch('/api/auth/logout', {
-        method: 'GET',
-        credentials: 'include'
-      })
-      window.location.href = '/auth'
-    } catch (err) {
-      console.error('Logout error:', err)
-      window.location.href = '/auth'
-    }
-  }
+  const { user, loading } = useAuth()
+  const logoutMutation = useLogout()
 
   const getRoleColor = (role: string) => {
     switch (role) {
@@ -82,11 +52,11 @@ export function TopBar() {
               )}
             </div>
             <div className="pt-2 border-t">
-              <Button 
-                variant="ghost" 
-                size="sm" 
+              <Button
+                variant="ghost"
+                size="sm"
                 className="w-full justify-start text-red-500 hover:text-red-600 hover:bg-red-50"
-                onClick={handleLogout}
+                onClick={() => logoutMutation.mutate()}
               >
                 <LogOut className="w-4 h-4 mr-2" />
                 Logout

@@ -1,6 +1,5 @@
 'use client'
 import { useState, useCallback, useEffect, useRef } from 'react'
-import { useQuery } from '@tanstack/react-query'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import {
@@ -12,31 +11,7 @@ import {
 } from '@/components/ui/table'
 import { Activity, Loader2, ChevronDown } from 'lucide-react'
 import { StackedRequestItem, GroupedRequest } from '@/components/StackedRequestItem'
-
-interface PaginationMeta {
-  page: number
-  pageSize: number
-  totalGroups: number
-  totalPages: number
-  hasMore: boolean
-  totalRequests: number
-}
-
-interface GroupedRequestsResponse {
-  groups: GroupedRequest[]
-  pagination: PaginationMeta
-}
-
-const PAGE_SIZE = 20
-
-async function fetchGroupedRequests(page: number): Promise<GroupedRequestsResponse> {
-  const res = await fetch(
-    `/api/overview/requests/grouped?page=${page}&pageSize=${PAGE_SIZE}`,
-    { credentials: 'include' }
-  )
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  return res.json()
-}
+import { useGroupedRequests, type PaginationMeta } from '@/hooks/useRequests'
 
 interface RequestsTableProps {
   className?: string
@@ -49,13 +24,7 @@ export function RequestsTable({ className }: RequestsTableProps) {
   // track which pages we've already merged to avoid double-appending on re-renders
   const mergedPages = useRef<Set<number>>(new Set())
 
-  const { data, isLoading, error, isFetching, refetch } = useQuery({
-    queryKey: ['overview', 'grouped-requests', page],
-    queryFn: () => fetchGroupedRequests(page),
-    // auto-refresh only on page 1, stop on error to avoid loading loop
-    refetchInterval: (query) => query.state.error ? false : (page === 1 ? 10_000 : false),
-    staleTime: 5_000,
-  })
+  const { data, isLoading, error, isFetching, refetch } = useGroupedRequests(page)
 
   // Merge incoming page data into allGroups
   useEffect(() => {

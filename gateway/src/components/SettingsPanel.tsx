@@ -4,13 +4,13 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { useAuth } from '@/hooks/useAuth'
-// import { useNavigate } from '@tanstack/react-router'
 import { cn } from '@/lib/utils'
 import { TierModelSelector } from '@/components/ModelSelector'
 import { useAppContext } from '@/context/AppContext'
-import { 
-  User, 
-  Palette, 
+import { useModelOverrides, useSaveModelOverrides, useTierAliases, useSaveProfile } from '@/hooks/useSettings'
+import {
+  User,
+  Palette,
   Mail,
   LogOut,
   Loader2,
@@ -25,12 +25,10 @@ const ROLE_BADGE_VARIANT: Record<string, 'destructive' | 'default' | 'secondary'
 
 export function SettingsPanel() {
   const { user, loading } = useAuth()
-  // const navigate = useNavigate()
   const { config } = useAppContext()
   const [loggingOut, setLoggingOut] = useState(false)
-  const [tierAliasMap, setTierAliasMap] = useState<Record<string, string> | null>(null)
-  const [savingProfile, setSavingProfile] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
+  const [overridesMessage, setOverridesMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
   // Initialize profile with actual user data
   const [profile, setProfile] = useState({
@@ -38,6 +36,9 @@ export function SettingsPanel() {
     email: '',
     company: '',
   })
+
+  // Local overrides state (editable copy)
+  const [overrides, setOverrides] = useState<Record<string, string>>({})
 
   // Sync profile when user data loads
   useEffect(() => {
@@ -74,10 +75,10 @@ export function SettingsPanel() {
   const applyTheme = (theme: 'light' | 'dark' | 'system') => {
     setSelectedTheme(theme)
     localStorage.setItem('theme', theme)
-    
+
     const root = document.documentElement
     root.classList.remove('light', 'dark')
-    
+
     if (theme === 'system') {
       const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'
       root.classList.add(systemTheme)
@@ -88,13 +89,11 @@ export function SettingsPanel() {
 
   // Sync theme on mount and listen for system changes
   useEffect(() => {
-    // Apply saved theme on mount
     const saved = localStorage.getItem('theme') as 'light' | 'dark' | 'system' | null
     if (saved) {
       applyTheme(saved)
     }
 
-    // Listen for system theme changes
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
     const handleChange = () => {
       if (selectedTheme === 'system') {
@@ -104,86 +103,58 @@ export function SettingsPanel() {
         root.classList.add(systemTheme)
       }
     }
-    
+
     mediaQuery.addEventListener('change', handleChange)
     return () => mediaQuery.removeEventListener('change', handleChange)
   }, [])
 
+  // ── Model Overrides Query ─────────────────────────────────────────────────
+  const { data: fetchedOverrides, isLoading: loadingOverrides } = useModelOverrides()
+
+  // Sync fetched overrides into local editable state
+  useEffect(() => {
+    if (fetchedOverrides) {
+      setOverrides(fetchedOverrides)
+    }
+  }, [fetchedOverrides])
+
+  // ── Tier Aliases Query ────────────────────────────────────────────────────
+  const { data: tierAliasMap, isLoading: aliasesLoading } = useTierAliases()
+
+  // ── Save Overrides Mutation ───────────────────────────────────────────────
+  const saveOverridesMutation = useSaveModelOverrides()
+
+  // ── Save Profile Mutation ─────────────────────────────────────────────────
+  const saveProfileMutation = useSaveProfile()
+
   const handleSaveProfile = async (e: { preventDefault: () => void }) => {
     e.preventDefault()
-    setSavingProfile(true)
     setMessage(null)
-    try {
-      const res = await fetch('/api/user/profile', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(profile),
-      })
-      if (res.ok) {
+    saveProfileMutation.mutate(profile, {
+      onSuccess: () => {
         setMessage({ type: 'success', text: 'Profile updated successfully' })
-      } else {
-        const data = await res.json()
-        setMessage({ type: 'error', text: data.error || 'Failed to update profile' })
-      }
-    } catch (err) {
-      setMessage({ type: 'error', text: 'Failed to update profile' })
-    } finally {
-      setSavingProfile(false)
-      setTimeout(() => setMessage(null), 3000)
-    }
+        setTimeout(() => setMessage(null), 3000)
+      },
+      onError: (err: Error) => {
+        setMessage({ type: 'error', text: err.message || 'Failed to update profile' })
+        setTimeout(() => setMessage(null), 3000)
+      },
+    })
   }
 
-  // ── Model Overrides ─────────────────────────────────────────────────────────
-  const [overrides, setOverrides] = useState<Record<string, string>>({})
-  const [loadingOverrides, setLoadingOverrides] = useState(true)
-  const [savingOverrides, setSavingOverrides] = useState(false)
-  const [overridesMessage, setOverridesMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
-
-  useEffect(() => {
-    fetch('/api/user/model-overrides', { credentials: 'include' })
-      .then(r => r.json())
-      .then(data => setOverrides(data.model_overrides || {}))
-      .catch(() => {})
-      .finally(() => setLoadingOverrides(false))
-  }, [])
-
-  // Load tier aliases from non-admin endpoint (works for all authenticated users)
-  useEffect(() => {
-    fetch('/api/config/aliases', { credentials: 'include' })
-      .then(r => r.json())
-      .then(data => setTierAliasMap(data.model_group_alias || {}))
-      .catch(() => setTierAliasMap({}))
-  }, [])
-
   const handleSaveOverrides = async () => {
-    setSavingOverrides(true)
     setOverridesMessage(null)
-    try {
-      // Strip empty strings (= "use default alias") — only send actual overrides
-      const payload: Record<string, string> = {}
-      for (const [k, v] of Object.entries(overrides)) {
-        if (v && v.trim()) payload[k] = v
-      }
-      const res = await fetch('/api/user/model-overrides', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
-        body: JSON.stringify(payload),
-      })
-      const data = await res.json()
-      if (res.ok) {
-        setOverrides(data.model_overrides || {})
+    saveOverridesMutation.mutate(overrides, {
+      onSuccess: (data) => {
+        setOverrides(data)
         setOverridesMessage({ type: 'success', text: 'Model overrides saved' })
-      } else {
-        setOverridesMessage({ type: 'error', text: data.error || 'Failed to save overrides' })
-      }
-    } catch {
-      setOverridesMessage({ type: 'error', text: 'Failed to save overrides' })
-    } finally {
-      setSavingOverrides(false)
-      setTimeout(() => setOverridesMessage(null), 3000)
-    }
+        setTimeout(() => setOverridesMessage(null), 3000)
+      },
+      onError: (err: Error) => {
+        setOverridesMessage({ type: 'error', text: err.message || 'Failed to save overrides' })
+        setTimeout(() => setOverridesMessage(null), 3000)
+      },
+    })
   }
 
   // Dynamic tier aliases — prefer dedicated non-admin endpoint, fall back to config (admin only)
@@ -191,7 +162,9 @@ export function SettingsPanel() {
   const configAlias: Record<string, string> = rs?.model_group_alias ?? config?.model_group_alias ?? {}
   const modelGroupAlias: Record<string, string> = tierAliasMap ?? configAlias
   const tierAliases = Object.keys(modelGroupAlias)
-  const aliasesLoading = tierAliasMap === null
+
+  const savingProfile = saveProfileMutation.isPending
+  const savingOverrides = saveOverridesMutation.isPending
 
   return (
     <div className="space-y-6">
@@ -238,14 +211,14 @@ export function SettingsPanel() {
         <CardContent className="space-y-4">
           {message && (
             <div className={`p-3 rounded-md text-sm ${
-              message.type === 'success' 
-                ? 'bg-green-500/10 text-green-500 border border-green-500/20' 
+              message.type === 'success'
+                ? 'bg-green-500/10 text-green-500 border border-green-500/20'
                 : 'bg-red-500/10 text-red-500 border border-red-500/20'
             }`}>
               {message.text}
             </div>
           )}
-          
+
           {/* Current email display */}
           {!loading && user?.email && (
             <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-md text-sm">
@@ -408,7 +381,7 @@ export function SettingsPanel() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            <button 
+            <button
               className={cn(
                 "group relative rounded-lg border p-4 hover:bg-accent transition-colors",
                 selectedTheme === 'light' && 'ring-2 ring-blue-500 border-blue-500'
@@ -419,7 +392,7 @@ export function SettingsPanel() {
               <p className="text-sm font-medium">Light</p>
               <p className="text-xs text-muted-foreground">Always light mode</p>
             </button>
-            <button 
+            <button
               className={cn(
                 "group relative rounded-lg border p-4 hover:bg-accent transition-colors",
                 selectedTheme === 'dark' && 'ring-2 ring-blue-500 border-blue-500'
@@ -430,7 +403,7 @@ export function SettingsPanel() {
               <p className="text-sm font-medium">Dark</p>
               <p className="text-xs text-muted-foreground">Always dark mode</p>
             </button>
-            <button 
+            <button
               className={cn(
                 "group relative rounded-lg border p-4 hover:bg-accent transition-colors",
                 selectedTheme === 'system' && 'ring-2 ring-blue-500 border-blue-500'

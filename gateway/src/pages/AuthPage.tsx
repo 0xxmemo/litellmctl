@@ -36,14 +36,15 @@ export function AuthPage({ onAuthSuccess: _onAuthSuccess }: AuthPageProps) {
 
   const checkStatus = async () => {
     try {
-      const res = await fetch('/api/auth/status', { credentials: 'include' })
+      const res = await fetch('/api/auth/me', { credentials: 'include' })
       const data = await res.json()
+      const role = data.user?.role
 
       if (!data.authenticated) {
         setStep('email')
-      } else if (data.role === 'guest') {
+      } else if (role === 'guest') {
         setStep('pending')
-      } else if (data.role === 'user' || data.role === 'admin') {
+      } else if (role === 'user' || role === 'admin') {
         window.location.href = '/dashboard'
       }
     } catch (error) {

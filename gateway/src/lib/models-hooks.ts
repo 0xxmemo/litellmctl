@@ -9,6 +9,7 @@
 import { useQuery } from '@tanstack/react-query'
 import type { RawModel, NormalizedModel, ExtendedModel } from '@lib/models'
 import { dedupeModels, detectIsStub, resolveProviderAuth } from '@lib/models'
+import { queryKeys } from '@/lib/query-keys'
 
 // ─── Fetch helpers (browser only) ─────────────────────────────────────────────
 
@@ -53,7 +54,7 @@ export async function fetchExtendedModels(): Promise<ExtendedModel[]> {
 
 export function useModels() {
   const { data: models = [], isLoading: loading, error: rawError } = useQuery({
-    queryKey: ['models'],
+    queryKey: queryKeys.models,
     queryFn: fetchModels,
   })
   return { models, loading, error: rawError?.message ?? null }
@@ -61,7 +62,7 @@ export function useModels() {
 
 export function useExtendedModels() {
   const { data: models = [], isLoading: loading, error: rawError } = useQuery({
-    queryKey: ['models', 'extended'],
+    queryKey: queryKeys.modelsExtended,
     queryFn: fetchExtendedModels,
   })
   return { models, loading, error: rawError?.message ?? null }

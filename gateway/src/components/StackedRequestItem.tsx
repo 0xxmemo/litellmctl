@@ -17,6 +17,7 @@ import {
   resolveProvider,
 } from '@lib/models'
 import { cn } from '@/lib/utils'
+import { useGroupItems } from '@/hooks/useRequests'
 
 export interface GroupedRequest {
   id: string
@@ -66,56 +67,16 @@ interface StackedRequestItemProps {
   group: GroupedRequest
 }
 
-async function fetchGroupItems(group: GroupedRequest): Promise<ApiRequestItem[]> {
-  if (!group.model || !group.firstTimestamp || !group.lastTimestamp) return []
-
-  // Use the broader timestamp range (from=oldest, to=newest)
-  // firstTimestamp is newest (sorted desc), lastTimestamp is oldest
-  const from = group.lastTimestamp
-  const to = group.firstTimestamp
-
-  const params = new URLSearchParams({
-    model: group.model,
-    from: String(from),
-    to: String(to),
-    ...(group.endpoint ? { endpoint: group.endpoint } : {}),
-  })
-
-  const res = await fetch(`/api/overview/requests/group-items?${params}`, { credentials: 'include' })
-  if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const data = await res.json()
-  return data.items ?? []
-}
-
 export function StackedRequestItem({ group }: StackedRequestItemProps) {
   const [expanded, setExpanded] = useState(false)
-  const [items, setItems] = useState<ApiRequestItem[] | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
   const isSingle = group.count === 1
 
-  async function handleToggle() {
-    if (isSingle) return // single items don't expand
+  const { data: items, isLoading: loading, error, refetch } = useGroupItems(group, expanded && !isSingle)
 
-    if (!expanded) {
-      // Expand: fetch items if not already loaded
-      if (!items) {
-        setLoading(true)
-        setError(null)
-        try {
-          const fetched = await fetchGroupItems(group)
-          setItems(fetched)
-        } catch (e) {
-          setError('Failed to load')
-        } finally {
-          setLoading(false)
-        }
-      }
-      setExpanded(true)
-    } else {
-      setExpanded(false)
-    }
+  function handleToggle() {
+    if (isSingle) return
+    setExpanded(prev => !prev)
   }
 
   const model = group.model
@@ -292,15 +253,14 @@ export function StackedRequestItem({ group }: StackedRequestItemProps) {
       {expanded && error && (
         <TableRow className="bg-destructive/5">
           <TableCell colSpan={7} className="text-center text-xs text-destructive py-2">
-            {error}
+            Failed to load
             <Button
               variant="ghost"
               size="sm"
               className="ml-2 h-5 text-xs"
               onClick={(e) => {
                 e.stopPropagation()
-                setItems(null)
-                handleToggle()
+                refetch()
               }}
             >
               Retry

@@ -1,62 +1,50 @@
-import { useState, useEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { 
-  LineChart, 
-  Line, 
-  BarChart, 
-  Bar, 
-  PieChart, 
-  Pie, 
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
   Cell,
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
   Legend,
-  ResponsiveContainer 
+  ResponsiveContainer
 } from 'recharts'
 import { Calendar, Download } from 'lucide-react'
-import { getUserStats } from '@/services/llm-metrics'
+import { useUserStatsAnalytics } from '@/hooks/useStats'
 
 const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884D8']
 
 export function UsageAnalytics() {
   const [dateRange, setDateRange] = useState('7d')
-  const [analytics, setAnalytics] = useState<{ requests: any[]; models: any[]; endpoints: any[] }>({ requests: [], models: [], endpoints: [] })
-  const [costData, setCostData] = useState<any[]>([])
-  const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        const data = await getUserStats()
-        console.log('[UsageAnalytics] User stats:', data)
-        setAnalytics({
-          requests: [{ date: new Date().toISOString().split('T')[0], requests: data.requests }],
-          models: data.models || [],
-          endpoints: []
-        })
-        
-        // Calculate cost breakdown from real model data
-        if (data.models && data.models.length > 0) {
-          const totalCost = data.models.reduce((sum: number, m: any) => sum + (m.spend || 0), 0)
-          const withPercentage = data.models.map((m: any) => ({
-            category: m.model_name?.split('-')[0] || m.model_name || 'Unknown',
-            amount: m.spend || 0,
-            percentage: totalCost > 0 ? ((m.spend / totalCost) * 100).toFixed(1) : '0'
-          }))
-          setCostData(withPercentage)
-        }
-      } catch (error) {
-        console.error('Failed to load user stats:', error)
-      } finally {
-        setLoading(false)
-      }
+  const { data: rawData, isLoading: loading } = useUserStatsAnalytics()
+
+  const analytics = useMemo(() => {
+    if (!rawData) return { requests: [], models: [], endpoints: [] }
+    return {
+      requests: [{ date: new Date().toISOString().split('T')[0], requests: rawData.requests }],
+      models: rawData.models || [],
+      endpoints: [],
     }
-    loadData()
-  }, [])
+  }, [rawData])
+
+  const costData = useMemo(() => {
+    if (!rawData?.models || rawData.models.length === 0) return []
+    const totalCost = rawData.models.reduce((sum: number, m: any) => sum + (m.spend || 0), 0)
+    return rawData.models.map((m: any) => ({
+      category: m.model_name?.split('-')[0] || m.model_name || 'Unknown',
+      amount: m.spend || 0,
+      percentage: totalCost > 0 ? ((m.spend / totalCost) * 100).toFixed(1) : '0'
+    }))
+  }, [rawData])
 
   return (
     <div className="space-y-6 p-4 sm:p-6">
@@ -195,7 +183,7 @@ export function UsageAnalytics() {
           <CardContent className="h-full">
             <div className="space-y-4">
               {analytics.endpoints && analytics.endpoints.length > 0 ? (
-                analytics.endpoints.map((item) => (
+                analytics.endpoints.map((item: any) => (
                   <div key={item.endpoint} className="space-y-2">
                     <div className="flex items-center justify-between text-sm">
                       <span className="font-medium">{item.endpoint}</span>
@@ -243,7 +231,7 @@ export function UsageAnalytics() {
                     fill="#8884d8"
                     dataKey="amount"
                   >
-                    {costData.map((_entry, index) => (
+                    {costData.map((_entry: any, index: number) => (
                       <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                     ))}
                   </Pie>
@@ -264,7 +252,7 @@ export function UsageAnalytics() {
             </div>
             <div className="mt-4 space-y-2">
               {costData.length > 0 ? (
-                costData.map((item, i) => (
+                costData.map((item: any, i: number) => (
                   <div key={item.category} className="flex items-center justify-between text-sm">
                     <div className="flex items-center gap-2">
                       <div
@@ -293,7 +281,7 @@ export function UsageAnalytics() {
           <CardContent className="h-full">
             <div className="space-y-4">
               {analytics.models.length > 0 ? (
-                analytics.models.map((item, i) => (
+                analytics.models.map((item: any, i: number) => (
                   <div key={item.model} className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
                     <div className="flex items-center gap-3">
                       <div

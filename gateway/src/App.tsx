@@ -11,6 +11,7 @@ import { Admin } from './pages/Admin';
 import { Docs } from './pages/Docs';
 import { AppProvider } from './context/AppContext';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useAuthStatus } from './hooks/useAuth';
 import {
   createRouter,
   createRoute,
@@ -83,22 +84,20 @@ declare module '@tanstack/react-router' {
   }
 }
 
-// ─── App ──────────────────────────────────────────────────────────────────────
+// ─── Inner App (inside QueryClientProvider) ──────────────────────────────────
 
-export function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean | null>(null);
+function AppInner() {
   const [userRole, setUserRole] = useState<string | null>(null);
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('dark');
 
+  const { authenticated: isAuthenticated, role, isLoading, invalidate } = useAuthStatus();
+
+  // Keep userRole in sync
   useEffect(() => {
-    fetch('/api/auth/status', { credentials: 'include' })
-      .then(res => res.json())
-      .then(data => {
-        setIsAuthenticated(data.authenticated);
-        setUserRole(data.role || null);
-      })
-      .catch(() => setIsAuthenticated(false));
-  }, []);
+    if (role) {
+      setUserRole(role);
+    }
+  }, [role]);
 
   useEffect(() => {
     const savedTheme = localStorage.getItem('theme') as 'light' | 'dark' | 'system' | null;
@@ -115,7 +114,7 @@ export function App() {
     }
   }, [theme]);
 
-  if (isAuthenticated === null) {
+  if (isLoading || isAuthenticated === null) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-muted-foreground">Loading...</div>
@@ -128,9 +127,10 @@ export function App() {
       <>
         <Toaster position="bottom-right" richColors theme={theme === 'system' ? 'system' : theme} />
         <AuthPage
-          onAuthSuccess={(role: string) => {
-            setIsAuthenticated(true);
-            setUserRole(role);
+          onAuthSuccess={(authRole: string) => {
+            setUserRole(authRole);
+            // Invalidate auth status so the query re-fetches
+            invalidate();
           }}
         />
       </>
@@ -140,10 +140,18 @@ export function App() {
   void userRole; // used for auth check above; role detail comes from AppContext
 
   return (
+    <AppProvider>
+      <RouterProvider router={router} />
+    </AppProvider>
+  );
+}
+
+// ─── App ──────────────────────────────────────────────────────────────────────
+
+export function App() {
+  return (
     <QueryClientProvider client={queryClient}>
-      <AppProvider>
-        <RouterProvider router={router} />
-      </AppProvider>
+      <AppInner />
     </QueryClientProvider>
   );
 }
