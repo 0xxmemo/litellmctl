@@ -277,14 +277,16 @@ export function SettingsPanel({ auth, modelOverrides, tierAliases, saveModelOver
           </div>
           <CardDescription>
             Map tier aliases (
-            {tierAliasKeys.length > 0
-              ? tierAliasKeys.map((alias, i) => (
-                  <Fragment key={alias}>
-                    {i > 0 && ', '}
-                    <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">{alias}</code>
-                  </Fragment>
-                ))
-              : <span className="text-muted-foreground text-xs">loading…</span>
+            {aliasesLoading
+              ? <span className="text-muted-foreground text-xs">loading…</span>
+              : tierAliasKeys.length > 0
+                ? tierAliasKeys.map((alias, i) => (
+                    <Fragment key={alias}>
+                      {i > 0 && ', '}
+                      <code className="font-mono text-xs bg-muted px-1 py-0.5 rounded">{alias}</code>
+                    </Fragment>
+                  ))
+                : <span className="text-muted-foreground text-xs">none configured</span>
             }) to specific models. Applies to all your API keys.
           </CardDescription>
         </CardHeader>

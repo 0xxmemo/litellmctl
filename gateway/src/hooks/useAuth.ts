@@ -30,18 +30,6 @@ async function fetchAuthMe(): Promise<User | undefined> {
   return undefined
 }
 
-interface AuthStatus {
-  authenticated: boolean
-  role?: string
-}
-
-async function fetchAuthStatus(): Promise<AuthStatus> {
-  const res = await fetch('/api/auth/me', { credentials: 'include' })
-  if (!res.ok) return { authenticated: false }
-  const data = await res.json()
-  return { authenticated: data.authenticated, role: data.user?.role }
-}
-
 async function performLogout(): Promise<void> {
   await fetch('/api/auth/logout', {
     method: 'POST',
@@ -74,23 +62,13 @@ export function useAuth(): UseAuthReturn {
 }
 
 export function useAuthStatus() {
-  const queryClient = useQueryClient()
-
-  const { data: authStatus, isLoading } = useQuery({
-    queryKey: queryKeys.auth,
-    queryFn: fetchAuthStatus,
-    staleTime: 60_000,
-  })
-
-  const invalidate = async () => {
-    await queryClient.invalidateQueries({ queryKey: queryKeys.auth })
-  }
+  const { user, loading, refreshUser } = useAuth()
 
   return {
-    authenticated: authStatus?.authenticated ?? null,
-    role: authStatus?.role ?? null,
-    isLoading,
-    invalidate,
+    authenticated: user ? true : loading ? null : false,
+    role: user?.role ?? null,
+    isLoading: loading,
+    invalidate: refreshUser,
   }
 }
 

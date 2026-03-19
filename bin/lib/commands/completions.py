@@ -8,7 +8,7 @@ from pathlib import Path
 from ..common.formatting import info
 
 
-BASH_COMPLETIONS = r'''_litellmctl_completions() {
+BASH_COMPLETIONS = r"""_litellmctl_completions() {
   local cur prev pprev commands auth_cmds uninstall_cmds
   COMPREPLY=()
   cur="${COMP_WORDS[COMP_CWORD]}"
@@ -67,7 +67,7 @@ print(' '.join(_completable_segments([s for s in '''$segs'''.split() if s])))" 2
       return ;;
   esac
 }
-complete -F _litellmctl_completions litellmctl'''
+complete -F _litellmctl_completions litellmctl"""
 
 ZSH_COMPLETIONS = r'''_litellmctl_completions() {
   local -a commands auth_cmds uninstall_cmds gateway_cmds api_methods

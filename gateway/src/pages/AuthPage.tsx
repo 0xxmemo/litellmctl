@@ -45,7 +45,7 @@ export function AuthPage({ onAuthSuccess: _onAuthSuccess }: AuthPageProps) {
       } else if (role === 'guest') {
         setStep('pending')
       } else if (role === 'user' || role === 'admin') {
-        window.location.href = '/dashboard'
+        window.location.href = '/'
       }
     } catch (error) {
       console.error('Error checking status:', error)

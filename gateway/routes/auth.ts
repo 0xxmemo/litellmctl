@@ -115,7 +115,7 @@ async function sessionMeHandler(req: Request) {
   if (!user) return Response.json({ authenticated: false });
   return Response.json({
     authenticated: true,
-    user: { email: session.email, role: user.role },
+    user: { email: session.email, role: user.role, name: user.name, company: user.company },
   });
 }
 
