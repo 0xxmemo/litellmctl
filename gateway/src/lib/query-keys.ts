@@ -14,7 +14,7 @@ export const queryKeys = {
   modelsExtended: ['models', 'extended'] as const,
 
   // API Keys
-  keys: ['keys'] as const,
+  keys: (page: number) => ['keys', page] as const,
 
   // Dashboard / Stats
   globalStats: ['dashboard', 'global-stats'] as const,

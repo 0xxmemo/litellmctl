@@ -3,11 +3,23 @@ import { createHash, randomBytes } from "crypto";
 import { apiKeys, requireUser } from "../lib/db";
 
 // GET /api/keys — requireUser (not guest)
+// Supports: ?page=1&limit=20 (defaults: page=1, limit=20)
+// Always sorted by createdAt descending (most recent first)
 async function getApiKeysHandler(req: Request) {
   const auth = await requireUser(req);
   if (auth instanceof Response) return auth;
 
-  const keys = await apiKeys.find({ email: auth.email, revoked: false }).toArray();
+  const url = new URL(req.url);
+  const page = Math.max(1, parseInt(url.searchParams.get("page") || "1"));
+  const limit = Math.min(100, Math.max(1, parseInt(url.searchParams.get("limit") || "20")));
+  const skip = (page - 1) * limit;
+
+  const filter = { email: auth.email, revoked: false };
+  const [keys, total] = await Promise.all([
+    apiKeys.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).toArray(),
+    apiKeys.countDocuments(filter),
+  ]);
+
   return Response.json({
     keys: keys.map((k: any) => ({
       id: k._id.toString(),
@@ -16,6 +28,10 @@ async function getApiKeysHandler(req: Request) {
       createdAt: k.createdAt,
       revoked: k.revoked,
     })),
+    page,
+    limit,
+    total,
+    totalPages: Math.ceil(total / limit),
   });
 }
 

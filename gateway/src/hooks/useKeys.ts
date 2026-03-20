@@ -18,6 +18,14 @@ export interface APIKey {
   email?: string
 }
 
+export interface KeysResponse {
+  keys: APIKey[]
+  page: number
+  limit: number
+  total: number
+  totalPages: number
+}
+
 // ── Fetch helpers (internal) ─────────────────────────────────────────────────
 
 async function apiFetch(url: string, options?: RequestInit) {
@@ -32,12 +40,11 @@ async function apiFetch(url: string, options?: RequestInit) {
   return res
 }
 
-async function fetchKeys(): Promise<APIKey[]> {
-  const res = await apiFetch('/api/keys')
-  if (!res) return []
+async function fetchKeys(page: number, limit: number): Promise<KeysResponse> {
+  const res = await apiFetch(`/api/keys?page=${page}&limit=${limit}`)
+  if (!res) return { keys: [], page: 1, limit, total: 0, totalPages: 0 }
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
-  const data = await res.json()
-  return data.keys || []
+  return res.json()
 }
 
 async function createKeyApi(name: string): Promise<{ key?: string; apiKey?: string; keyId?: string }> {
@@ -54,6 +61,19 @@ async function createKeyApi(name: string): Promise<{ key?: string; apiKey?: stri
   return res.json()
 }
 
+async function updateKeyApi({ id, name, alias }: { id: string; name?: string; alias?: string }): Promise<void> {
+  const res = await fetch(`/api/keys/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'include',
+    body: JSON.stringify({ name, alias }),
+  })
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}))
+    throw new Error(errData.error || `HTTP ${res.status}`)
+  }
+}
+
 async function revokeKeyApi(id: string): Promise<void> {
   const res = await fetch(`/api/keys/${id}`, {
     method: 'DELETE',
@@ -67,10 +87,10 @@ async function revokeKeyApi(id: string): Promise<void> {
 
 // ── Hooks ────────────────────────────────────────────────────────────────────
 
-export function useKeys() {
+export function useKeys(page = 1, limit = 20) {
   return useQuery({
-    queryKey: queryKeys.keys,
-    queryFn: fetchKeys,
+    queryKey: queryKeys.keys(page),
+    queryFn: () => fetchKeys(page, limit),
   })
 }
 
@@ -79,7 +99,17 @@ export function useCreateKey() {
   return useMutation({
     mutationFn: (name: string) => createKeyApi(name),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.keys })
+      queryClient.invalidateQueries({ queryKey: ['keys'] })
+    },
+  })
+}
+
+export function useUpdateKey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (params: { id: string; name?: string; alias?: string }) => updateKeyApi(params),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['keys'] })
     },
   })
 }
@@ -89,11 +119,12 @@ export function useRevokeKey() {
   return useMutation({
     mutationFn: (id: string) => revokeKeyApi(id),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.keys })
+      queryClient.invalidateQueries({ queryKey: ['keys'] })
     },
   })
 }
 
 export type UseKeysReturn = ReturnType<typeof useKeys>
 export type UseCreateKeyReturn = ReturnType<typeof useCreateKey>
+export type UseUpdateKeyReturn = ReturnType<typeof useUpdateKey>
 export type UseRevokeKeyReturn = ReturnType<typeof useRevokeKey>

@@ -35,8 +35,7 @@ export async function connectDB(mongoUri: string) {
   sessions = db.collection("sessions");
 
   // Indexes (createIndex is a no-op if already exists)
-  await apiKeys.createIndex({ key: 1 }, { unique: true });
-  await apiKeys.createIndex({ keyHash: 1 }, { sparse: true });
+  await apiKeys.createIndex({ keyHash: 1 }, { unique: true, sparse: true });
   await validatedUsers.createIndex({ email: 1 }, { unique: true });
   await otps.createIndex({ email: 1, expiresAt: 1 });
   await sessions.createIndex({ expires: 1 }, { expireAfterSeconds: 0 });
