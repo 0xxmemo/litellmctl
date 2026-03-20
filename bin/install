@@ -32,90 +32,112 @@ run_with_timeout() {
   fi
 }
 
-# Check for local uncommitted changes or unpushed commits.
-# Does NOT do a git fetch (sync_repo handles that via git pull).
+# Check for local uncommitted changes, untracked files, or unpushed commits.
 has_local_changes() {
   local dir="$1"
   [ -d "$dir/.git" ] || [ -f "$dir/.git" ] || return 1
-  # Uncommitted changes (staged or unstaged)
-  ! git -C "$dir" diff --quiet 2>/dev/null && return 0
+  # Staged changes
   ! git -C "$dir" diff --cached --quiet 2>/dev/null && return 0
-  # Unpushed commits (vs last known remote head)
+  # Unstaged changes
+  ! git -C "$dir" diff --quiet 2>/dev/null && return 0
+  # Untracked files
+  [ -n "$(git -C "$dir" ls-files --others --exclude-standard 2>/dev/null)" ] && return 0
+  # Unpushed commits
   local ahead
   ahead=$(git -C "$dir" rev-list --count @{u}..HEAD 2>/dev/null || echo "0")
   [ "$ahead" -gt 0 ] && return 0
   return 1
 }
 
-prompt_local_changes() {
-  local dir="$1" label="$2"
-  # This function is called inside $() which captures stdout.
-  # Display output goes to stderr; only the result word goes to stdout.
+# Unified sync handler for both parent repo and submodule.
+#   sync_repo <dir> <label> [submodule]
+# Pass "submodule" as $3 to use submodule update instead of git pull.
+sync_repo() {
+  local dir="$1" label="$2" mode="${3:-repo}"
+
+  # ── Helper: pull or submodule-update ──
+  _do_sync() {
+    if [ "$mode" = "submodule" ]; then
+      run_with_timeout 30  git -C "$PROJECT_DIR" submodule sync --recursive
+      run_with_timeout 120 git -C "$PROJECT_DIR" submodule update --init --depth 1 --force litellm
+    else
+      run_with_timeout 60 git -C "$dir" pull --ff-only --no-recurse-submodules
+    fi
+  }
+
+  # ── No changes → just sync ──
+  if ! has_local_changes "$dir"; then
+    info "Syncing $label ..."
+    _do_sync || { error "Sync failed for $label."; exit 1; }
+    return
+  fi
+
+  # ── Show what's dirty ──
   {
     echo ""
     warn "Local changes detected in $label:"
     git -C "$dir" --no-pager diff --stat 2>/dev/null || true
     git -C "$dir" --no-pager diff --cached --stat 2>/dev/null || true
+    local untracked
+    untracked=$(git -C "$dir" ls-files --others --exclude-standard 2>/dev/null | head -20)
+    [ -n "$untracked" ] && info "Untracked files:" && echo "$untracked" | sed 's/^/    /'
     local ahead
     ahead=$(git -C "$dir" rev-list --count @{u}..HEAD 2>/dev/null || echo "0")
     [ "$ahead" -gt 0 ] && info "$ahead unpushed commit(s) ahead of remote"
     echo ""
   } >&2
 
-  if ! is_interactive; then
-    warn "Non-interactive terminal — defaulting to [K]eep local." >&2
-    echo "keep"
-    return
-  fi
-
-  printf "  [K]eep local  [S]tash & sync  [R]ebase  [D]iscard & sync  [K/s/r/d] " >&2
-  read -r answer </dev/tty || answer=""
-  case "$answer" in
-    [sS]*) echo "stash" ;;
-    [rR]*) echo "rebase" ;;
-    [dD]*) echo "discard" ;;
-    *)     echo "keep" ;;
-  esac
-}
-
-sync_repo() {
-  local dir="$1" label="$2"
-  if has_local_changes "$dir"; then
-    local choice
-    choice=$(prompt_local_changes "$dir" "$label")
-    case "$choice" in
-      keep)
-        info "Keeping local $label. Skipping sync."
-        ;;
-      stash)
-        info "Stashing $label changes ..."
-        git -C "$dir" stash --quiet
-        info "Pulling $label ..."
-        run_with_timeout 60 git -C "$dir" pull --ff-only --no-recurse-submodules \
-          || { error "Pull failed for $label."; exit 1; }
-        info "Restoring stashed $label changes ..."
-        git -C "$dir" stash pop --quiet 2>/dev/null || {
-          warn "Could not auto-restore $label changes. Check: git -C $dir stash list"
-        }
-        ;;
-      rebase)
-        info "Rebasing $label onto remote ..."
-        run_with_timeout 60 git -C "$dir" pull --rebase --no-recurse-submodules \
-          || { error "Rebase failed for $label. Resolve conflicts, then re-run."; exit 1; }
-        ;;
-      discard)
-        warn "Discarding local $label changes."
-        git -C "$dir" checkout . 2>/dev/null || true
-        git -C "$dir" clean -fd 2>/dev/null || true
-        run_with_timeout 60 git -C "$dir" pull --ff-only --no-recurse-submodules \
-          || { error "Pull failed for $label."; exit 1; }
-        ;;
+  # ── Pick strategy (default: stash-sync-pop) ──
+  local choice="stash"
+  if is_interactive; then
+    printf "  [L]ocal  [S]tash-sync-pop  [D]iscard  [l/S/d] " >&2
+    read -r answer </dev/tty || answer=""
+    case "$answer" in
+      [lL]*) choice="local" ;;
+      [dD]*) choice="discard" ;;
+      *)     choice="stash" ;;
     esac
   else
-    info "Pulling $label ..."
-    run_with_timeout 60 git -C "$dir" pull --ff-only --no-recurse-submodules \
-      || { error "Pull failed for $label."; exit 1; }
+    warn "Non-interactive — defaulting to stash-sync-pop." >&2
   fi
+
+  case "$choice" in
+    local)
+      info "Using local $label as-is. Skipping sync."
+      ;;
+
+    stash)
+      # Stash everything including untracked files
+      info "Stashing $label changes ..."
+      git -C "$dir" stash push --include-untracked --quiet 2>/dev/null \
+        || git -C "$dir" stash --quiet 2>/dev/null \
+        || { warn "Nothing to stash (unpushed commits only)."; }
+
+      info "Syncing $label ..."
+      _do_sync || { error "Sync failed for $label."; exit 1; }
+
+      # Pop stash if there is one
+      if git -C "$dir" stash list 2>/dev/null | grep -q .; then
+        info "Restoring stashed $label changes ..."
+        if ! git -C "$dir" stash pop --quiet 2>/dev/null; then
+          warn "Stash pop had conflicts in $label."
+          warn "Resolve manually, then run: git -C $dir stash drop"
+        fi
+      fi
+      ;;
+
+    discard)
+      warn "Discarding all local $label changes."
+      # Reset tracked files (staged + unstaged)
+      git -C "$dir" checkout -- . 2>/dev/null || true
+      git -C "$dir" reset --quiet HEAD 2>/dev/null || true
+      # Remove untracked files and directories
+      git -C "$dir" clean -fd 2>/dev/null || true
+
+      info "Syncing $label ..."
+      _do_sync || { error "Sync failed for $label."; exit 1; }
+      ;;
+  esac
 }
 
 detect_python() {
@@ -193,40 +215,9 @@ fi
 if [ ! -f "$SUBMODULE_DIR/pyproject.toml" ]; then
   info "Initializing litellm submodule ..."
   run_with_timeout 120 git -C "$PROJECT_DIR" submodule update --init --depth 1 litellm
-elif has_local_changes "$SUBMODULE_DIR"; then
-  choice=$(prompt_local_changes "$SUBMODULE_DIR" "litellm/ submodule")
-  case "$choice" in
-    keep)
-      info "Keeping local submodule files. Skipping sync."
-      ;;
-    stash)
-      info "Stashing submodule changes ..."
-      git -C "$SUBMODULE_DIR" stash --quiet
-      info "Syncing litellm submodule ..."
-      run_with_timeout 30 git -C "$PROJECT_DIR" submodule sync --recursive
-      run_with_timeout 120 git -C "$PROJECT_DIR" submodule update --init --depth 1 --force litellm
-      info "Restoring stashed submodule changes ..."
-      git -C "$SUBMODULE_DIR" stash pop --quiet 2>/dev/null || {
-        warn "Could not auto-restore submodule changes. Check: git -C $SUBMODULE_DIR stash list"
-      }
-      ;;
-    rebase)
-      info "Rebasing submodule onto updated HEAD ..."
-      run_with_timeout 30 git -C "$PROJECT_DIR" submodule sync --recursive
-      run_with_timeout 120 git -C "$PROJECT_DIR" submodule update --init --depth 1 --rebase litellm \
-        || { error "Submodule rebase failed. Resolve conflicts in $SUBMODULE_DIR, then re-run."; exit 1; }
-      ;;
-    discard)
-      warn "Discarding local submodule changes."
-      info "Syncing litellm submodule ..."
-      run_with_timeout 30 git -C "$PROJECT_DIR" submodule sync --recursive
-      run_with_timeout 120 git -C "$PROJECT_DIR" submodule update --init --depth 1 --force litellm
-      ;;
-  esac
 else
-  info "Syncing litellm submodule ..."
-  run_with_timeout 30 git -C "$PROJECT_DIR" submodule sync --recursive
-  run_with_timeout 120 git -C "$PROJECT_DIR" submodule update --init --depth 1 --force litellm
+  info "Checking litellm submodule ..."
+  sync_repo "$SUBMODULE_DIR" "litellm submodule" submodule
 fi
 
 # ── Virtualenv ──
