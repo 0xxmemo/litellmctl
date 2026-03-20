@@ -18,7 +18,7 @@ from .providers import (
 )
 from .models import collect_models, collect_task_models, build_aliases, build_fallbacks
 from .config_gen import generate_yaml
-from .prompts import ask, confirm, pick_one, pick_many
+from ..common.prompts import ask, confirm, pick_one, pick_many
 
 
 def run_wizard() -> None:

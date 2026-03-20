@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sys
 from typing import Optional
 
 import typer
@@ -23,33 +22,136 @@ app.add_typer(protonmail_app, name="protonmail")
 
 @app.command()
 def start(
-    port: int = typer.Option(4040, "--port", help="Port to listen on"),
-    config: Optional[str] = typer.Option(None, "--config", help="Config file path"),
+    features: Optional[list[str]] = typer.Argument(None, help="Features to start (omit for multi-select)"),
+    port: int = typer.Option(4040, "--port", help="Port to listen on (proxy only)"),
+    config: Optional[str] = typer.Option(None, "--config", help="Config file path (proxy only)"),
 ) -> None:
-    """Start proxy as background service."""
-    from .commands.service import cmd_start
-    cmd_start(port=port, config=config)
+    """Start features (proxy, gateway, searxng, protonmail, embedding, transcription)."""
+    from .common.features import (
+        FEATURE_MAP, get_stopped_features, feature_start, multi_select_features,
+    )
+    from .common.platform import is_interactive
+    from .common.env import load_env
+    load_env()
+
+    if features:
+        for name in features:
+            feat = FEATURE_MAP.get(name)
+            if not feat:
+                from .common.formatting import error
+                error(f"Unknown feature: {name}")
+                continue
+            if name == "proxy":
+                from .commands.service import cmd_start as proxy_start
+                proxy_start(port=port, config=config)
+            else:
+                feature_start(feat)
+        return
+
+    if is_interactive():
+        stopped = get_stopped_features()
+        if not stopped:
+            from .common.formatting import info
+            info("All installed features are already running.")
+            return
+        selected = multi_select_features(stopped, "start")
+        for feat in selected:
+            if feat.key == "proxy":
+                from .commands.service import cmd_start as proxy_start
+                proxy_start(port=port, config=config)
+            else:
+                feature_start(feat)
+    else:
+        from .commands.service import cmd_start as proxy_start
+        proxy_start(port=port, config=config)
 
 
 @app.command()
-def stop() -> None:
-    """Stop the proxy service."""
-    from .commands.service import cmd_stop
-    cmd_stop()
+def stop(
+    features: Optional[list[str]] = typer.Argument(None, help="Features to stop (omit for multi-select)"),
+) -> None:
+    """Stop features (proxy, gateway, searxng, protonmail, embedding, transcription)."""
+    from .common.features import (
+        FEATURE_MAP, get_running_features, feature_stop, multi_select_features,
+    )
+    from .common.platform import is_interactive
+    from .common.env import load_env
+    load_env()
+
+    if features:
+        for name in features:
+            feat = FEATURE_MAP.get(name)
+            if not feat:
+                from .common.formatting import error
+                error(f"Unknown feature: {name}")
+                continue
+            feature_stop(feat)
+        return
+
+    if is_interactive():
+        running = get_running_features()
+        if not running:
+            from .common.formatting import info
+            info("No features are currently running.")
+            return
+        selected = multi_select_features(running, "stop")
+        for feat in selected:
+            feature_stop(feat)
+    else:
+        from .commands.service import cmd_stop
+        cmd_stop()
 
 
 @app.command()
-def restart() -> None:
-    """Restart the proxy service."""
-    from .commands.service import cmd_restart
-    cmd_restart()
+def restart(
+    features: Optional[list[str]] = typer.Argument(None, help="Features to restart (omit for multi-select)"),
+    port: int = typer.Option(4040, "--port", help="Port to listen on (proxy only)"),
+    config: Optional[str] = typer.Option(None, "--config", help="Config file path (proxy only)"),
+) -> None:
+    """Restart features (proxy, gateway, searxng, protonmail, embedding, transcription)."""
+    from .common.features import (
+        FEATURE_MAP, get_running_features, feature_restart, multi_select_features,
+    )
+    from .common.platform import is_interactive
+    from .common.env import load_env
+    load_env()
+
+    if features:
+        for name in features:
+            feat = FEATURE_MAP.get(name)
+            if not feat:
+                from .common.formatting import error
+                error(f"Unknown feature: {name}")
+                continue
+            if feat.key == "proxy":
+                from .commands.service import cmd_restart as proxy_restart
+                proxy_restart()
+            else:
+                feature_restart(feat)
+        return
+
+    if is_interactive():
+        running = get_running_features()
+        if not running:
+            from .common.formatting import info
+            info("No features are currently running.")
+            return
+        selected = multi_select_features(running, "restart")
+        for feat in selected:
+            if feat.key == "proxy":
+                from .commands.service import cmd_restart as proxy_restart
+                proxy_restart()
+            else:
+                feature_restart(feat)
+    else:
+        from .commands.service import cmd_restart as proxy_restart
+        proxy_restart()
 
 
 @app.command("r", hidden=True)
 def restart_alias() -> None:
     """Alias for restart."""
-    from .commands.service import cmd_restart
-    cmd_restart()
+    restart()
 
 
 @app.command()
@@ -350,9 +452,10 @@ def _show_help() -> None:
   auth export [p...]   Copy credentials as a paste-able transfer script
   auth import          Read credentials from stdin
   auth status          Show auth token status
-  start [--port N]     Start proxy as background service (auto-start on boot)
-  stop                 Stop the proxy service
-  restart | r          Restart the proxy service
+  start [features...]  Start features (multi-select if omitted)
+  stop [features...]   Stop features (multi-select if omitted)
+  restart [features..] Restart features (multi-select if omitted)
+                       Features: proxy, gateway, searxng, protonmail, embedding, transcription
   logs                 Tail proxy logs
   proxy [--port N]     Start proxy in foreground (for debugging)
   status               Show auth + proxy + local server status

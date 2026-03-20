@@ -57,7 +57,13 @@ print(' '.join(_completable_segments([s for s in '''$segs'''.split() if s])))" 2
     refresh|export)
       COMPREPLY=( $(compgen -W "chatgpt gemini qwen kimi" -- "$cur") )
       return ;;
-    start|proxy)
+    start)
+      COMPREPLY=( $(compgen -W "proxy gateway searxng protonmail embedding transcription --port --config" -- "$cur") )
+      return ;;
+    stop|restart|r)
+      COMPREPLY=( $(compgen -W "proxy gateway searxng protonmail embedding transcription" -- "$cur") )
+      return ;;
+    proxy)
       COMPREPLY=( $(compgen -W "--port --config" -- "$cur") )
       return ;;
     install)
@@ -80,9 +86,9 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
     'wizard:Interactive config.yaml generator'
     'install:Install / rebuild LiteLLM (prompts for DB + local server setup)'
     'init-env:Detect auth files and update .env paths'
-    'start:Start proxy as background service'
-    'stop:Stop the proxy service'
-    'restart:Restart the proxy service'
+    'start:Start features (proxy, gateway, searxng, ...)'
+    'stop:Stop features (proxy, gateway, searxng, ...)'
+    'restart:Restart features (proxy, gateway, searxng, ...)'
     'r:Alias for restart'
     'logs:Tail proxy logs'
     'proxy:Start proxy in foreground (debug)'
@@ -141,7 +147,9 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
       auth)      _describe 'auth command' auth_cmds ;;
       uninstall) _describe 'uninstall target' uninstall_cmds ;;
       refresh|export) compadd chatgpt gemini qwen kimi ;;
-      start|proxy) compadd -- --port --config ;;
+      start) compadd proxy gateway searxng protonmail embedding transcription -- --port --config ;;
+      stop|restart|r) compadd proxy gateway searxng protonmail embedding transcription ;;
+      proxy) compadd -- --port --config ;;
       install) compadd -- --with-db --without-db --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription --with-searxng --without-searxng --with-gateway --without-gateway --with-protonmail --without-protonmail ;;
       gateway) _describe 'gateway command' gateway_cmds ;;
       protonmail) _describe 'protonmail command' protonmail_cmds ;;

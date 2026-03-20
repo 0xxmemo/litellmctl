@@ -2,44 +2,28 @@
 
 from __future__ import annotations
 
-from .common.deps import require_questionary
 from .common.formatting import console, info, warn
+from .common.prompts import select, choice, separator
 
 
-def _menu_style():
-    q = require_questionary()
-    return q.Style([
-        ("qmark",       "fg:ansicyan bold"),
-        ("question",    "bold"),
-        ("answer",      "fg:ansigreen bold"),
-        ("pointer",     "fg:ansicyan bold"),
-        ("highlighted", "fg:ansicyan bold"),
-        ("selected",    "fg:ansigreen"),
-        ("separator",   "fg:ansiblue"),
-        ("disabled",    "fg:ansidarkgray italic"),
-        ("instruction", "fg:ansidarkgray"),
-    ])
-
-
-def _build_choices(running: bool, port: int) -> list:
-    q = require_questionary()
-    on  = lambda label: q.Choice(label)
-    off = lambda label, reason: q.Choice(label, disabled=reason)
+def _build_choices(running: bool, any_running: bool, any_stopped: bool) -> list:
+    on  = lambda label: choice(label)
+    off = lambda label, reason: choice(label, disabled=reason)
 
     return [
-        q.Separator("  ─ service ─────────────────────────"),
-        on("start")    if not running else off("start",   "already running"),
-        on("stop")     if running     else off("stop",    "not running"),
-        on("restart")  if running     else off("restart", "not running"),
+        separator("  ─ service ─────────────────────────"),
+        on("start")    if any_stopped  else off("start",   "all running"),
+        on("stop")     if any_running  else off("stop",    "none running"),
+        on("restart")  if any_running  else off("restart", "none running"),
         on("status"),
-        on("logs")     if running     else off("logs",    "not running"),
-        q.Separator("  ─ setup ──────────────────────────"),
+        on("logs")     if running      else off("logs",    "proxy not running"),
+        separator("  ─ setup ──────────────────────────"),
         on("install"),
         on("auth"),
         on("wizard"),
         on("gateway"),
         on("uninstall"),
-        q.Separator("  ─────────────────────────────────"),
+        separator("  ─────────────────────────────────"),
         on("help"),
         on("quit"),
     ]
@@ -47,42 +31,67 @@ def _build_choices(running: bool, port: int) -> list:
 
 def interactive_menu() -> None:
     """Main interactive menu loop."""
-    q = require_questionary()
-    style = _menu_style()
     while True:
         from .common.process import get_proxy_port, find_proxy_pid
+        from .common.features import get_running_features, get_stopped_features
         port    = get_proxy_port()
         running = find_proxy_pid() is not None
+        running_feats = get_running_features()
+        stopped_feats = get_stopped_features()
+        any_running = len(running_feats) > 0
+        any_stopped = len(stopped_feats) > 0
         state   = f"[green]running :{port}[/]" if running else "[yellow]stopped[/]"
+        feat_summary = ", ".join(f.label for f in running_feats) if running_feats else ""
         console.print(f"\n[bold]litellmctl[/]  [dim]proxy[/] {state}")
+        if feat_summary:
+            console.print(f"  [dim]Active: {feat_summary}[/]")
 
         try:
-            choice = q.select(
-                "›",
-                choices=_build_choices(running, port),
-                style=style,
-                instruction="(↑↓ arrows, enter to select)",
-            ).ask()
+            cmd = select("›", _build_choices(running, any_running, any_stopped))
         except KeyboardInterrupt:
             info("Goodbye.")
             return
 
-        if choice is None:
+        if cmd is None:
             info("Goodbye.")
             return
 
-        cmd = choice.strip()
+        cmd = cmd.strip()
 
         try:
             if cmd == "start":
-                from .commands.service import cmd_start
-                cmd_start()
+                from .common.features import (
+                    feature_start, multi_select_features,
+                )
+                stopped = get_stopped_features()
+                if not stopped:
+                    info("All installed features are already running.")
+                else:
+                    selected = multi_select_features(stopped, "start")
+                    for feat in selected:
+                        feature_start(feat)
             elif cmd == "stop":
-                from .commands.service import cmd_stop
-                cmd_stop()
+                from .common.features import (
+                    feature_stop, multi_select_features,
+                )
+                feats = get_running_features()
+                if not feats:
+                    info("No features are currently running.")
+                else:
+                    selected = multi_select_features(feats, "stop")
+                    for feat in selected:
+                        feature_stop(feat)
             elif cmd == "restart":
-                from .commands.service import cmd_restart
-                cmd_restart()
+                from .common.features import (
+                    feature_restart, multi_select_features,
+                )
+                feats = get_running_features()
+                if not feats:
+                    info("No features are currently running.")
+                else:
+                    selected = multi_select_features(feats, "restart")
+                    for feat in selected:
+                        feature_restart(feat)
             elif cmd == "status":
                 from .commands.status import cmd_status
                 cmd_status()
@@ -120,29 +129,22 @@ def interactive_menu() -> None:
 
 def auth_interactive() -> None:
     """Interactive auth provider selection using questionary."""
-    q = require_questionary()
-    style = _menu_style()
     from .auth.transfer import AUTH_PROVIDERS
 
-    choices: list = [q.Separator("  ─ login ──────────────────────────")]
+    choices: list = [separator("  ─ login ──────────────────────────")]
     for key, label, _ in AUTH_PROVIDERS:
-        choices.append(q.Choice(f"{key}  ({label})"))
+        choices.append(choice(f"{key}  ({label})"))
     choices += [
-        q.Separator("  ─ manage ─────────────────────────"),
-        q.Choice("status"),
-        q.Choice("refresh"),
-        q.Choice("export"),
-        q.Separator("  ───────────────────────────────────"),
-        q.Choice("back"),
+        separator("  ─ manage ─────────────────────────"),
+        choice("status"),
+        choice("refresh"),
+        choice("export"),
+        separator("  ───────────────────────────────────"),
+        choice("back"),
     ]
 
     try:
-        result = q.select(
-            "› auth",
-            choices=choices,
-            style=style,
-            instruction="(↑↓ arrows, enter to select)",
-        ).ask()
+        result = select("› auth", choices)
     except KeyboardInterrupt:
         return
 
@@ -157,11 +159,10 @@ def auth_interactive() -> None:
     elif cmd == "status":
         auth_dispatch(["status"])
     elif cmd == "refresh":
-        provider = q.select(
+        provider = select(
             "› refresh",
-            choices=["chatgpt", "gemini", "qwen", "kimi"],
-            style=style,
-        ).ask()
+            ["chatgpt", "gemini", "qwen", "kimi"],
+        )
         if provider:
             auth_dispatch(["refresh", provider])
     elif cmd == "export":
