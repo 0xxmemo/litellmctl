@@ -11,6 +11,7 @@ from ..common.paths import PROJECT_DIR, CONFIG_FILE, ENV_FILE, ENV_EXAMPLE
 from ..common.env import parse_env
 from ..common.formatting import console, info, warn, header, step, dim, TICK, CROSS, WARN_SYM, ARROW
 from ..common.platform import detect_os
+from ..common.prompts import pick_ordered
 
 from .providers import (
     load_defaults, load_providers, check_provider_ready,
@@ -200,7 +201,7 @@ def run_wizard() -> None:
             m = providers[pid]["tiers"][tier][0]
             fb_choices.append(f"{m['model_name']:<40} ({providers[pid]['name']})")
 
-        selected_fb = pick_many(f"Fallback order for {tier}:", fb_choices)
+        selected_fb = pick_ordered(f"Fallback order for {tier}:", fb_choices)
         fallback_map[tier] = [candidates[i] for i in selected_fb] if selected_fb else candidates
 
     # Step 5: Generate
