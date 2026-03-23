@@ -87,32 +87,85 @@ def pick_many(prompt: str, choices: list[str]) -> list[int]:
 
 
 def pick_ordered(prompt: str, choices: list[str]) -> list[int]:
-    """Pick multiple items in order. Returns list of 0-based indices.
+    """Pick multiple items in order using checkboxes. Returns list of 0-based indices.
 
-    Users select items one-by-one in their desired priority order.
-    After each selection, the item is removed from the list.
-    Press Enter on empty selection to finish.
+    Users select/deselect with spacebar. Order is determined by selection sequence.
+    Deselecting removes the item from order. Press Enter when done.
     """
+    from prompt_toolkit import Application
+    from prompt_toolkit.key_binding import KeyBindings
+    from prompt_toolkit.layout.containers import Window
+    from prompt_toolkit.layout.controls import CheckboxList
+    from prompt_toolkit.layout.layout import Layout
+
     q = require_questionary()
-    remaining = list(choices)
-    selected_indices = []
 
-    while remaining:
-        # Add "Done" option
-        options = remaining + ["[Done]"]
-        result = q.select(f"{prompt} (select next, then Done):", choices=options, style=style()).ask()
-        if result is None:
-            raise KeyboardInterrupt
-        if result == "[Done]":
-            break
-        # Find index in original choices
-        idx = remaining.index(result)
-        selected_indices.append(choices.index(result))
-        remaining.pop(idx)
+    # Track selection order: list of indices in order they were selected
+    selection_order: list[int] = []
+    # Track which indices are currently selected
+    selected_set: set[int] = set()
 
-    if not selected_indices:
+    def make_choices() -> list:
+        """Build choices with order prefix for selected items."""
+        result = []
+        for i, choice in enumerate(choices):
+            if i in selected_set:
+                # Show order number for selected items
+                order_num = selection_order.index(i) + 1
+                result.append(q.Choice(f"[{order_num}] {choice}", value=i, checked=True))
+            else:
+                result.append(q.Choice(f"    {choice}", value=i, checked=False))
+        return result
+
+    kb = KeyBindings()
+
+    @kb.add("enter")
+    def _done(event):
+        event.app.exit(result=selection_order.copy())
+
+    @kb.add("space")
+    def _toggle(event):
+        layout = event.app.layout
+        container = layout.current_window
+        if container:
+            children = container.get_children()
+            if children:
+                widget = children[0]
+                if hasattr(widget, 'current_index'):
+                    idx = widget.current_index
+                    if idx in selected_set:
+                        # Deselect - remove from order
+                        selected_set.discard(idx)
+                        if idx in selection_order:
+                            selection_order.remove(idx)
+                    else:
+                        # Select - add to end of order
+                        selected_set.add(idx)
+                        selection_order.append(idx)
+                    # Update choices
+                    widget.options = make_choices()
+
+    container = Window(content=CheckboxList(choices=make_choices()), height=None)
+    layout = Layout(container)
+
+    application = Application(
+        layout=layout,
+        key_bindings=kb,
+        full_screen=False,
+        mouse_support=True,
+        style=q.Style([
+            ("checkbox", "fg:cyan"),
+            ("checkbox-selected", "fg:green bold"),
+            ("pointer", "bg:cyan fg:white"),
+        ]),
+    )
+
+    result = application.run()
+    if result is None:
+        raise KeyboardInterrupt
+    if not result:
         return list(range(len(choices)))  # default: all
-    return selected_indices
+    return result
 
 
 def choice(label: str, **kwargs):
