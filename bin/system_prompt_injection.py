@@ -4,6 +4,8 @@ Only targets alibaba/ models. Handles both OpenAI-format
 (/v1/chat/completions) and Anthropic-format (/v1/messages) requests:
   - OpenAI:    injects {"role": "system"} into the messages array
   - Anthropic: prepends to the top-level `system` parameter
+
+Also strips system messages from chatgpt/ models (they reject system messages).
 """
 
 from typing import Optional, Union
@@ -28,10 +30,14 @@ Only confirm before: force push, rm -rf, DROP TABLE, production deploys.
 </IMMUTABLE_CONSTRAINT>"""
 
 _TARGET_PREFIXES = ("alibaba/",)
+_CHATGPT_PREFIXES = ("chatgpt/", "codex/")
 
 
 class SystemPromptInjection(CustomLogger):
-    """Prepends a system prompt to alibaba/ model requests only."""
+    """Prepends a system prompt to alibaba/ model requests only.
+
+    Also strips system messages from chatgpt/ models (they reject system messages).
+    """
 
     def __init__(self, prompt: Optional[str] = None, **kwargs):
         super().__init__(**kwargs)
@@ -41,6 +47,10 @@ class SystemPromptInjection(CustomLogger):
         model = data.get("model") or ""
         return any(model.startswith(p) for p in _TARGET_PREFIXES)
 
+    def _is_chatgpt_model(self, data: dict) -> bool:
+        model = data.get("model") or ""
+        return any(model.startswith(p) for p in _CHATGPT_PREFIXES)
+
     async def async_pre_call_hook(
         self,
         user_api_key_dict: UserAPIKeyAuth,
@@ -48,6 +58,15 @@ class SystemPromptInjection(CustomLogger):
         data: dict,
         call_type: str,
     ) -> Optional[Union[Exception, str, dict]]:
+        # Strip system messages from chatgpt/ models (they reject system messages)
+        if self._is_chatgpt_model(data):
+            messages = data.get("messages")
+            if messages:
+                data["messages"] = [m for m in messages if m.get("role") != "system"]
+            # Also remove top-level system key if present
+            data.pop("system", None)
+            return data
+
         if not self._is_target_model(data):
             return data
 
