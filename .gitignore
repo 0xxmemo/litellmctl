@@ -4,6 +4,7 @@ auth.chatgpt.json
 auth.gemini_cli.json
 auth.*.json
 test_models.py
+config.yaml
 
 # Runtime
 .proxy-port

@@ -13,8 +13,8 @@ from ..common.paths import (
 )
 from ..common.env import load_env
 from ..common.formatting import info, warn, error
-from ..common.platform import is_macos, is_linux, has_systemd_user, is_interactive
-from ..common.process import get_proxy_port, find_proxy_pid, kill_stale, pids_on_port
+from ..common.platform import is_macos, is_linux, has_systemd_user
+from ..common.process import get_proxy_port, find_proxy_pid, kill_stale
 from ..common.network import wait_for_ready
 
 
@@ -311,6 +311,25 @@ def nohup_is_running() -> bool:
 def cmd_start(port: int = 4040, config: str | None = None) -> None:
     load_env()
     cfg = config or str(CONFIG_FILE)
+
+    # Check if config file exists, prompt for wizard if missing
+    cfg_path = PROJECT_DIR / cfg if not cfg.startswith("/") else None
+    if cfg_path and not cfg_path.exists():
+        from ..common.formatting import warn
+        from ..common.platform import is_interactive
+        warn(f"Config file not found: {cfg_path}")
+        if is_interactive():
+            from ..common.deps import require_questionary
+            if require_questionary().confirm("Run the wizard to create config.yaml now?").ask():
+                from ...wizard.core import run_wizard
+                run_wizard()
+            else:
+                error("Cannot start proxy without config.yaml. Run 'litellmctl wizard' to create one.")
+                sys.exit(1)
+        else:
+            error("Cannot start proxy without config.yaml. Run 'litellmctl wizard' to create one.")
+            sys.exit(1)
+
     _activate_venv()
     load_env()
     kill_stale(port)
@@ -340,6 +359,23 @@ def cmd_restart() -> None:
     info("Restarting proxy ...")
     port = get_proxy_port()
     config = str(CONFIG_FILE)
+
+    # Check if config file exists
+    if not CONFIG_FILE.exists():
+        from ..common.formatting import warn
+        from ..common.platform import is_interactive
+        warn(f"Config file not found: {CONFIG_FILE}")
+        if is_interactive():
+            from ..common.deps import require_questionary
+            if require_questionary().confirm("Run the wizard to create config.yaml now?").ask():
+                from ...wizard.core import run_wizard
+                run_wizard()
+            else:
+                error("Cannot restart proxy without config.yaml. Run 'litellmctl wizard' to create one.")
+                sys.exit(1)
+        else:
+            error("Cannot restart proxy without config.yaml. Run 'litellmctl wizard' to create one.")
+            sys.exit(1)
 
     if is_macos() and launchd_is_running():
         launchd_stop()
