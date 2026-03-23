@@ -109,7 +109,8 @@ def interactive_menu() -> None:
                 auth_interactive()
             elif cmd == "wizard":
                 from .wizard.core import run_wizard
-                run_wizard()
+                if not run_wizard():
+                    warn("Wizard did not create a config file.")
             elif cmd == "uninstall":
                 from .commands.uninstall import cmd_uninstall
                 cmd_uninstall()

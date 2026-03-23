@@ -191,7 +191,9 @@ def wizard() -> None:
     """Interactive config.yaml generator."""
     from .wizard.core import run_wizard
     try:
-        run_wizard()
+        success = run_wizard()
+        if not success:
+            raise typer.Exit(1)
     except KeyboardInterrupt:
         from .common.formatting import console
         console.print("\n[yellow]  Aborted.[/]")

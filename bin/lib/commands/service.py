@@ -6,6 +6,7 @@ import os
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 from ..common.paths import (
     PROJECT_DIR, VENV_DIR, PORT_FILE, LOG_DIR, CONFIG_FILE, PIDFILE,
@@ -313,16 +314,21 @@ def cmd_start(port: int = 4040, config: str | None = None) -> None:
     cfg = config or str(CONFIG_FILE)
 
     # Check if config file exists, prompt for wizard if missing
-    cfg_path = PROJECT_DIR / cfg if not cfg.startswith("/") else None
-    if cfg_path and not cfg_path.exists():
+    cfg_path = Path(cfg) if cfg.startswith("/") else PROJECT_DIR / cfg
+    if not cfg_path.exists():
         from ..common.formatting import warn
         from ..common.platform import is_interactive
         from ..common.prompts import confirm
         warn(f"Config file not found: {cfg_path}")
         if is_interactive():
             if confirm("Run the wizard to create config.yaml now?"):
-                from ...wizard.core import run_wizard
-                run_wizard()
+                from ..wizard.core import run_wizard
+                success = run_wizard()
+                # Re-check config file exists after wizard completes
+                if not success or not cfg_path.exists():
+                    error("Config file still not found. Wizard may have been cancelled.")
+                    error("Run 'litellmctl wizard' to create one.")
+                    sys.exit(1)
             else:
                 error("Cannot start proxy without config.yaml. Run 'litellmctl wizard' to create one.")
                 sys.exit(1)
@@ -356,7 +362,6 @@ def cmd_stop() -> None:
 
 def cmd_restart() -> None:
     load_env()
-    info("Restarting proxy ...")
     port = get_proxy_port()
     config = str(CONFIG_FILE)
 
@@ -368,8 +373,13 @@ def cmd_restart() -> None:
         warn(f"Config file not found: {CONFIG_FILE}")
         if is_interactive():
             if confirm("Run the wizard to create config.yaml now?"):
-                from ...wizard.core import run_wizard
-                run_wizard()
+                from ..wizard.core import run_wizard
+                success = run_wizard()
+                # Re-check config file exists after wizard completes
+                if not success or not CONFIG_FILE.exists():
+                    error("Config file still not found. Wizard may have been cancelled.")
+                    error("Run 'litellmctl wizard' to create one.")
+                    sys.exit(1)
             else:
                 error("Cannot restart proxy without config.yaml. Run 'litellmctl wizard' to create one.")
                 sys.exit(1)
@@ -377,6 +387,7 @@ def cmd_restart() -> None:
             error("Cannot restart proxy without config.yaml. Run 'litellmctl wizard' to create one.")
             sys.exit(1)
 
+    info("Restarting proxy ...")
     if is_macos() and launchd_is_running():
         launchd_stop()
     elif is_linux() and systemd_is_running():

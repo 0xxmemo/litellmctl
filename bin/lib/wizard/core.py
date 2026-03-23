@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import shutil
 import subprocess
-import sys
-from pathlib import Path
 
 from ..common.paths import PROJECT_DIR, CONFIG_FILE, ENV_FILE, ENV_EXAMPLE
 from ..common.env import parse_env
-from ..common.formatting import console, info, warn, header, step, dim, TICK, CROSS, WARN_SYM, ARROW
+from ..common.formatting import console, header, step, dim, TICK, CROSS, WARN_SYM, ARROW
 from ..common.platform import detect_os
 from ..common.prompts import pick_ordered
 
@@ -19,10 +17,11 @@ from .providers import (
 )
 from .models import collect_models, collect_task_models, build_aliases, build_fallbacks
 from .config_gen import generate_yaml
-from ..common.prompts import ask, confirm, pick_one, pick_many
+from ..common.prompts import confirm, pick_one, pick_many
 
 
-def run_wizard() -> None:
+def run_wizard() -> bool:
+    """Run the wizard. Returns True on success, False on failure/cancel."""
     defaults = load_defaults()
     tiers = defaults.get("tiers", ["ultra", "plus", "lite"])
     load_order = defaults.get("load_order", [])
@@ -33,7 +32,7 @@ def run_wizard() -> None:
     providers = load_providers(load_order)
     if not providers:
         console.print("[red]No provider templates found in templates/[/]")
-        sys.exit(1)
+        return False
 
     env = parse_env()
 
@@ -93,7 +92,7 @@ def run_wizard() -> None:
     if not ready_pids:
         console.print(f"\n  [red]No providers are ready.[/] Set up API keys in .env or run auth commands first.")
         console.print("  See .env.example for guidance, or run: litellmctl auth status")
-        sys.exit(1)
+        return False
 
     if not_ready_pids:
         console.print(f"\n  {dim(f'{len(not_ready_pids)} provider(s) need setup.')}")
@@ -114,7 +113,7 @@ def run_wizard() -> None:
         if len(ready_pids) == 0:
             console.print(f"\n  [red]No providers are ready.[/] Set up API keys in .env or run auth commands first.")
             console.print("  See .env.example for guidance, or run: litellmctl auth status")
-            sys.exit(1)
+            return False
         else:
             console.print(f"\n  {dim(f'Proceeding with {len(ready_pids)} ready provider(s).')}")
 
@@ -273,7 +272,7 @@ def run_wizard() -> None:
 
     if not confirm("  Write config.yaml?"):
         console.print("  [yellow]Aborted.[/]")
-        return
+        return False
 
     if CONFIG_FILE.exists():
         backup = CONFIG_FILE.with_suffix(".yaml.bak")
@@ -308,3 +307,4 @@ def run_wizard() -> None:
         console.print(f"  {dim('Start the proxy with: litellmctl start')}")
 
     console.print()
+    return True
