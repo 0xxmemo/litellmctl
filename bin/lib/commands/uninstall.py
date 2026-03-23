@@ -136,13 +136,10 @@ def cmd_uninstall(target: str | None = None) -> None:
     load_env()
 
     if target is None and is_interactive():
-        from ..common.deps import require_questionary
+        from ..common.prompts import select
         choices = [f"{name:<16} {desc}" for name, desc in UNINSTALL_TARGETS]
         choices.append("all              All of the above")
-        result = require_questionary().select(
-            "Uninstall — select component:",
-            choices=choices,
-        ).ask()
+        result = select("Uninstall — select component:", choices)
         if result is None:
             return
         target = result.split()[0]

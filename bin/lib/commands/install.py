@@ -19,12 +19,7 @@ from .gateway import install_gateway, gateway_is_running
 from .searxng import install_searxng
 from .protonmail import install_protonmail
 from ..common.process import find_proxy_pid
-
-
-def _confirm(prompt: str, default: bool = True) -> bool:
-    """Interactive confirm — lazy-loads questionary."""
-    from ..common.deps import require_questionary
-    return require_questionary().confirm(prompt, default=default).ask()
+from ..common.prompts import confirm as _confirm
 
 
 def cmd_install(

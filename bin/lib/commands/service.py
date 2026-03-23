@@ -317,10 +317,10 @@ def cmd_start(port: int = 4040, config: str | None = None) -> None:
     if cfg_path and not cfg_path.exists():
         from ..common.formatting import warn
         from ..common.platform import is_interactive
+        from ..common.prompts import confirm
         warn(f"Config file not found: {cfg_path}")
         if is_interactive():
-            from ..common.deps import require_questionary
-            if require_questionary().confirm("Run the wizard to create config.yaml now?").ask():
+            if confirm("Run the wizard to create config.yaml now?"):
                 from ...wizard.core import run_wizard
                 run_wizard()
             else:
@@ -364,10 +364,10 @@ def cmd_restart() -> None:
     if not CONFIG_FILE.exists():
         from ..common.formatting import warn
         from ..common.platform import is_interactive
+        from ..common.prompts import confirm
         warn(f"Config file not found: {CONFIG_FILE}")
         if is_interactive():
-            from ..common.deps import require_questionary
-            if require_questionary().confirm("Run the wizard to create config.yaml now?").ask():
+            if confirm("Run the wizard to create config.yaml now?"):
                 from ...wizard.core import run_wizard
                 run_wizard()
             else:
