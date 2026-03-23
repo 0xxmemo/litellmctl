@@ -74,7 +74,16 @@ def export_creds(selected: list[str] | None = None):
                 console.print("[red]No valid selection.[/]"); sys.exit(1)
             chosen = [available[i] for i in indices]
 
-    # Build self-contained bash transfer script
+    # Build a single self-contained bash script with one base64 blob
+    # All credentials are bundled into one JSON object, base64-encoded once
+    bundle = {}
+    for key, label, f, data in chosen:
+        bundle[f.name] = data
+
+    # Single base64-encoded blob containing all credentials
+    bundle_json = json.dumps(bundle, indent=2)
+    bundle_b64 = base64.b64encode(bundle_json.encode()).decode()
+
     lines = [
         "#!/usr/bin/env bash",
         "# litellmctl credential transfer",
@@ -86,27 +95,24 @@ def export_creds(selected: list[str] | None = None):
         'D="${LITELLM_DIR:-$HOME/.litellm}"',
         'mkdir -p "$D"',
         "",
+        "# Decode and install all credentials",
+        'read -r -d "" BUNDLE << \'BUNDLE_EOF\' || true',
+        bundle_b64,
+        "BUNDLE_EOF",
+        "",
+        'echo "$BUNDLE" | base64 -d | python3 -c "',
+        "import sys, json, os",
+        "D = os.environ.get('LITELLM_DIR', os.path.expanduser('~/.litellm'))",
+        "for fname, data in json.load(sys.stdin).items():",
+        "    p = os.path.join(D, fname)",
+        "    with open(p, 'w') as f: json.dump(data, f, indent=2)",
+        "    os.chmod(p, 0o600)",
+        "    print(f'  ✓ {fname}')",
+        '"',
+        'echo ""',
+        'echo "Done! Imported to $D"',
+        '[ -x "$D/bin/litellmctl" ] && "$D/bin/litellmctl" init-env 2>/dev/null && echo "  ✓ .env paths synced" || echo "  Run: litellmctl init-env"',
     ]
-
-    for key, label, f, data in chosen:
-        encoded = base64.b64encode(json.dumps(data, indent=2).encode()).decode()
-        fname = f.name
-        lines.append(f"# {label}")
-        # Use line-by-line echo to avoid heredoc buffer issues in dtach/screen/tmux
-        # Each base64 line is echoed separately, then decoded at the end
-        lines.append(f'tmp="$D/.{fname}.b64.tmp"; : > "$tmp"')
-        # Wrap base64 at 76 chars and echo each line
-        wrapped = "\n".join(encoded[i:i+76] for i in range(0, len(encoded), 76))
-        for b64_line in wrapped.split("\n"):
-            lines.append(f'echo "{b64_line}" >> "$tmp"')
-        lines.append(f'base64 -d < "$tmp" > "$D/{fname}" && rm -f "$tmp"')
-        lines.append(f'chmod 600 "$D/{fname}"')
-        lines.append(f'echo "  ✓ {fname}  ({label})"')
-        lines.append("")
-
-    lines.append('echo ""')
-    lines.append('echo "Done! Imported to $D"')
-    lines.append('[ -x "$D/bin/litellmctl" ] && "$D/bin/litellmctl" init-env 2>/dev/null && echo "  ✓ .env paths synced" || echo "  Run: litellmctl init-env"')
 
     script = "\n".join(lines) + "\n"
 
@@ -139,12 +145,8 @@ def _import_write(fname: str, b64data: str) -> bool:
     return True
 
 
-_EXPORT_LINE_RE = re.compile(
-    r"printf\s+'%s'\s+'([A-Za-z0-9+/=]+)'\s*\|\s*base64\s+-d\s*>\s*\"\$D/(auth\.[^\"]+)\""
-)
-_HEREDOC_LINE_RE = re.compile(
-    r"base64\s+-d\s*>\s*\"\$D/(auth\.[^\"]+)\"\s*<<\s*'B64EOF'"
-)
+# Regex for new single-blob format: captures the base64 between BUNDLE_EOF markers
+_BUNDLE_RE = re.compile(r"read -r -d \"\" BUNDLE << 'BUNDLE_EOF'.*?\n([A-Za-z0-9+/=]+)\nBUNDLE_EOF", re.DOTALL)
 
 
 def _read_paste() -> list[str]:
@@ -187,39 +189,24 @@ def import_creds():
         console.print()
         return
 
+    raw = "\n".join(raw_lines)
     imported = 0
 
-    # Detect export script format (printf or heredoc)
-    is_printf_script = any(_EXPORT_LINE_RE.search(l) for l in raw_lines)
-    is_heredoc_script = any(_HEREDOC_LINE_RE.search(l) for l in raw_lines)
+    # Try new single-blob format first
+    m = _BUNDLE_RE.search(raw)
+    if m:
+        bundle_b64 = m.group(1)
+        try:
+            bundle = json.loads(base64.b64decode(bundle_b64))
+            for fname, data in bundle.items():
+                if _import_write(fname, base64.b64encode(json.dumps(data).encode()).decode()):
+                    imported += 1
+        except Exception as e:
+            console.print(f"[red]Invalid bundle format: {e}[/]")
 
-    if is_printf_script:
-        # Legacy printf format: printf '%s' 'base64' | base64 -d > "$D/auth.xxx.json"
-        for line in raw_lines:
-            m = _EXPORT_LINE_RE.search(line)
-            if m:
-                b64data, fname = m.group(1), m.group(2)
-                if _import_write(fname, b64data):
-                    imported += 1
-    elif is_heredoc_script:
-        # Heredoc format: base64 -d > "$D/auth.xxx.json" << 'B64EOF'
-        i = 0
-        while i < len(raw_lines):
-            m = _HEREDOC_LINE_RE.search(raw_lines[i])
-            if m:
-                fname = m.group(1)
-                # Collect base64 lines until B64EOF
-                b64_lines = []
-                i += 1
-                while i < len(raw_lines) and raw_lines[i] != "B64EOF":
-                    b64_lines.append(raw_lines[i])
-                    i += 1
-                b64data = "".join(b64_lines)
-                if _import_write(fname, b64data):
-                    imported += 1
-            i += 1
-    else:
-        # Simple format: <filename> <base64>
+    if imported == 0:
+        # Fallback: try legacy line-by-line parsing
+        console.print("[dim]Note: Legacy format detected, use new export for cleaner transfers[/]\n")
         for line in raw_lines:
             if not line or line.startswith("#"):
                 continue
