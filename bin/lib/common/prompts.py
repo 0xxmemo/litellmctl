@@ -13,10 +13,10 @@ def style():
     return q.Style([
         ("qmark", "fg:cyan bold"),
         ("question", "bold"),
-        ("answer", "fg:green bold"),
+        ("answer", "fg:cyan bold"),
         ("pointer", "fg:cyan bold"),
         ("highlighted", "fg:cyan bold"),
-        ("selected", "fg:green noreverse"),
+        ("selected", "fg:cyan noreverse"),
     ])
 
 
@@ -24,17 +24,17 @@ def _checkbox_style():
     """Checkbox style where checked state is clear without background highlight.
 
     prompt_toolkit's built-in default applies 'reverse' to class:selected,
-    which causes a green background bar on checked rows. Adding 'noreverse'
+    which causes a background bar on checked rows. Adding 'noreverse'
     cancels that so only the text color changes.
     """
     q = require_questionary()
     return q.Style([
         ("qmark", "fg:cyan bold"),
         ("question", "bold"),
-        ("answer", "fg:green bold"),
+        ("answer", "fg:cyan bold"),
         ("pointer", "fg:cyan bold"),
         ("highlighted", ""),
-        ("selected", "fg:green noreverse"),
+        ("selected", "fg:cyan noreverse"),
     ])
 
 
@@ -181,7 +181,7 @@ def pick_ordered(prompt: str, choices: list[str]) -> list[int]:
         mouse_support=True,
         style=q.Style([
             ("checkbox", "fg:cyan"),
-            ("checkbox-selected", "fg:green bold"),
+            ("checkbox-selected", "fg:cyan bold"),
             ("pointer", "bg:cyan fg:white"),
         ]),
     )
