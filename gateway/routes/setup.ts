@@ -4,8 +4,11 @@ import { PORT } from "../lib/config";
 function claudeCodeSetup(req: Request) {
   const url = new URL(req.url);
   const host = url.hostname;
-  // Use the gateway's own origin so the script works from any network address
-  const gatewayOrigin = `http://${host}:${PORT}`;
+  // Detect protocol from X-Forwarded-Proto header (for reverse proxy/SSL setups)
+  // or from the request URL itself; default to http for local hosting
+  const forwardedProto = req.headers.get('x-forwarded-proto');
+  const protocol = forwardedProto || (url.protocol === 'https:' ? 'https' : 'http');
+  const gatewayOrigin = `${protocol}://${host}${protocol === 'http' && PORT ? ':' + PORT : ''}`;
 
   const script = `#!/usr/bin/env bash
 # Configure Claude Code to use LLM Gateway as your API provider.
@@ -35,9 +38,15 @@ if [ -f "\$SETTINGS_FILE" ]; then
   # Check if jq is available for safe JSON merging
   if command -v jq &>/dev/null; then
     tmp=\$(mktemp)
-    jq --arg key "\$API_KEY" --arg url "${gatewayOrigin}/v1" '
+    jq --arg key "\$API_KEY" --arg url "${gatewayOrigin}/v1" \
+       --arg opus "ultra" \
+       --arg sonnet "plus" \
+       --arg haiku "lite" '
       .env.ANTHROPIC_API_KEY = \$key |
-      .env.ANTHROPIC_BASE_URL = \$url
+      .env.ANTHROPIC_BASE_URL = \$url |
+      .env.ANTHROPIC_DEFAULT_OPUS_MODEL = \$opus |
+      .env.ANTHROPIC_DEFAULT_SONNET_MODEL = \$sonnet |
+      .env.ANTHROPIC_DEFAULT_HAIKU_MODEL = \$haiku
     ' "\$SETTINGS_FILE" > "\$tmp" && mv "\$tmp" "\$SETTINGS_FILE"
   else
     echo "Warning: jq not found. Overwriting settings.json." >&2
@@ -45,7 +54,10 @@ if [ -f "\$SETTINGS_FILE" ]; then
 {
   "env": {
     "ANTHROPIC_BASE_URL": "${gatewayOrigin}/v1",
-    "ANTHROPIC_API_KEY": "\$API_KEY"
+    "ANTHROPIC_API_KEY": "\$API_KEY",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "ultra",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "plus",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "lite"
   }
 }
 JSONEOF
@@ -55,7 +67,10 @@ else
 {
   "env": {
     "ANTHROPIC_BASE_URL": "${gatewayOrigin}/v1",
-    "ANTHROPIC_API_KEY": "\$API_KEY"
+    "ANTHROPIC_API_KEY": "\$API_KEY",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "ultra",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "plus",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "lite"
   }
 }
 JSONEOF
