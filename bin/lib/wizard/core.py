@@ -110,11 +110,13 @@ def run_wizard() -> None:
                 console.print(f"    {ARROW} {prov['name']}: start local inference servers")
                 console.print(f"         run  [bold]litellmctl local setup[/]")
 
-        if confirm("\n  Include only ready providers?"):
-            pass
+        # Only prompt if ALL providers are unready; otherwise proceed with ready ones
+        if len(ready_pids) == 0:
+            console.print(f"\n  [red]No providers are ready.[/] Set up API keys in .env or run auth commands first.")
+            console.print("  See .env.example for guidance, or run: litellmctl auth status")
+            sys.exit(1)
         else:
-            console.print(f"  {dim('Including all providers (unready ones may fail at runtime)')}")
-            ready_pids = list(providers.keys())
+            console.print(f"\n  {dim(f'Proceeding with {len(ready_pids)} ready provider(s).')}")
 
     # Step 2: Select providers
     step(2, "Select providers to include")
