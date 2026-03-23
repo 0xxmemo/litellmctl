@@ -1,25 +1,38 @@
 import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
 import { extractApiKey } from "../lib/auth";
-import { validateApiKey, requireUser, trackUsage, validatedUsers } from "../lib/db";
+import {
+  validateApiKey,
+  requireUser,
+  trackUsage,
+  validatedUsers,
+} from "../lib/db";
 
 /**
  * In-memory cache for user model overrides.
  * Key: email, Value: { overrides, timestamp }
  * TTL: 5 minutes
  */
-const modelOverridesCache = new Map<string, { overrides: Record<string, string>; timestamp: number }>();
+const modelOverridesCache = new Map<
+  string,
+  { overrides: Record<string, string>; timestamp: number }
+>();
 const OVERRIDE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 /**
  * Get user model overrides with caching.
  */
-async function getUserModelOverrides(email: string): Promise<Record<string, string>> {
+async function getUserModelOverrides(
+  email: string,
+): Promise<Record<string, string>> {
   const cached = modelOverridesCache.get(email);
   if (cached && Date.now() - cached.timestamp < OVERRIDE_CACHE_TTL) {
     return cached.overrides;
   }
 
-  const userRecord = await validatedUsers.findOne({ email }, { projection: { model_overrides: 1 } });
+  const userRecord = await validatedUsers.findOne(
+    { email },
+    { projection: { model_overrides: 1 } },
+  );
   const overrides = userRecord?.model_overrides || {};
   modelOverridesCache.set(email, { overrides, timestamp: Date.now() });
   return overrides;
@@ -65,24 +78,27 @@ function trackFromJson(
   endpoint: string,
   litellmModelId: string | null,
 ) {
-  clone.json().then(async (data) => {
-    const usage = data.usage;
-    if (!usage) return;
-    let actualModel = data.model || requestedModel || "unknown";
-    if (litellmModelId) {
-      const resolved = await resolveModelById(litellmModelId);
-      if (resolved) actualModel = resolved;
-    }
-    trackUsage(
-      email,
-      actualModel,
-      usage.prompt_tokens ?? usage.input_tokens ?? 0,
-      usage.completion_tokens ?? usage.output_tokens ?? 0,
-      keyHash,
-      requestedModel || undefined,
-      endpoint,
-    );
-  }).catch(() => {});
+  clone
+    .json()
+    .then(async (data) => {
+      const usage = data.usage;
+      if (!usage) return;
+      let actualModel = data.model || requestedModel || "unknown";
+      if (litellmModelId) {
+        const resolved = await resolveModelById(litellmModelId);
+        if (resolved) actualModel = resolved;
+      }
+      trackUsage(
+        email,
+        actualModel,
+        usage.prompt_tokens ?? usage.input_tokens ?? 0,
+        usage.completion_tokens ?? usage.output_tokens ?? 0,
+        keyHash,
+        requestedModel || undefined,
+        endpoint,
+      );
+    })
+    .catch(() => {});
 }
 
 /**
@@ -97,35 +113,47 @@ function trackFromSSE(
   endpoint: string,
   litellmModelId: string | null,
 ) {
-  clone.text().then(async (text) => {
-    let usage: any = null;
-    let model: string | null = null;
-    // Scan backwards — usage is in one of the last events
-    for (const line of text.split("\n").reverse()) {
-      if (!line.startsWith("data: ")) continue;
-      try {
-        const evt = JSON.parse(line.slice(6));
-        if (evt.usage) { usage = evt.usage; model = model || evt.model; break; }
-        if (evt.type === "message_delta" && evt.usage) { usage = evt.usage; break; }
-        if (evt.type === "message_start" && evt.message) { model = evt.message.model; }
-      } catch {}
-    }
-    if (!usage) return;
-    let actualModel = model || requestedModel || "unknown";
-    if (litellmModelId) {
-      const resolved = await resolveModelById(litellmModelId);
-      if (resolved) actualModel = resolved;
-    }
-    trackUsage(
-      email,
-      actualModel,
-      usage.prompt_tokens ?? usage.input_tokens ?? 0,
-      usage.completion_tokens ?? usage.output_tokens ?? 0,
-      keyHash,
-      requestedModel || undefined,
-      endpoint,
-    );
-  }).catch(() => {});
+  clone
+    .text()
+    .then(async (text) => {
+      let usage: any = null;
+      let model: string | null = null;
+      // Scan backwards — usage is in one of the last events
+      for (const line of text.split("\n").reverse()) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const evt = JSON.parse(line.slice(6));
+          if (evt.usage) {
+            usage = evt.usage;
+            model = model || evt.model;
+            break;
+          }
+          if (evt.type === "message_delta" && evt.usage) {
+            usage = evt.usage;
+            break;
+          }
+          if (evt.type === "message_start" && evt.message) {
+            model = evt.message.model;
+          }
+        } catch {}
+      }
+      if (!usage) return;
+      let actualModel = model || requestedModel || "unknown";
+      if (litellmModelId) {
+        const resolved = await resolveModelById(litellmModelId);
+        if (resolved) actualModel = resolved;
+      }
+      trackUsage(
+        email,
+        actualModel,
+        usage.prompt_tokens ?? usage.input_tokens ?? 0,
+        usage.completion_tokens ?? usage.output_tokens ?? 0,
+        keyHash,
+        requestedModel || undefined,
+        endpoint,
+      );
+    })
+    .catch(() => {});
 }
 
 // LiteLLM Proxy — requireUser (not guest), with fire-and-forget usage tracking
@@ -134,7 +162,16 @@ async function proxyHandler(req: Request) {
   if (auth instanceof Response) return auth;
 
   const url = new URL(req.url);
-  const endpoint = url.pathname.replace(/^\/v1/, "");
+  // Strip /v1 prefix (handle both /v1/... and /v1/v1/... gracefully)
+  let endpoint = url.pathname.replace(/^\/v1/, "");
+  // Handle double /v1/v1 prefix if client sends redundant /v1
+  if (endpoint.startsWith("/v1")) {
+    endpoint = endpoint.replace(/^\/v1/, "");
+  }
+  // Ensure endpoint starts with /
+  if (!endpoint.startsWith("/")) {
+    endpoint = "/" + endpoint;
+  }
   const targetUrl = `${LITELLM_URL}/v1${endpoint}${url.search}`;
 
   // Resolve keyHash for usage tracking (if authenticated via API key)
@@ -182,9 +219,23 @@ async function proxyHandler(req: Request) {
     const clone = proxyRes.clone();
 
     if (isSSE) {
-      trackFromSSE(clone, auth.email, requestedModel, keyHash, endpoint, litellmModelId);
+      trackFromSSE(
+        clone,
+        auth.email,
+        requestedModel,
+        keyHash,
+        endpoint,
+        litellmModelId,
+      );
     } else {
-      trackFromJson(clone, auth.email, requestedModel, keyHash, endpoint, litellmModelId);
+      trackFromJson(
+        clone,
+        auth.email,
+        requestedModel,
+        keyHash,
+        endpoint,
+        litellmModelId,
+      );
     }
   }
 
@@ -192,12 +243,13 @@ async function proxyHandler(req: Request) {
 }
 
 export const proxyRoutes = {
-  "/v1/chat/completions":     { POST: proxyHandler },
-  "/v1/messages":             { POST: proxyHandler },
-  "/v1/responses":            { POST: proxyHandler },
-  "/v1/embeddings":           { POST: proxyHandler },
-  "/v1/completions":          { POST: proxyHandler },
-  "/v1/images/generations":   { POST: proxyHandler },
-  "/v1/audio/speech":         { POST: proxyHandler },
+  "/v1/chat/completions": { POST: proxyHandler },
+  "/v1/messages": { POST: proxyHandler },
+  "/v1/responses": { POST: proxyHandler },
+  "/v1/embeddings": { POST: proxyHandler },
+  "/v1/completions": { POST: proxyHandler },
+  "/v1/images/generations": { POST: proxyHandler },
+  "/v1/audio/speech": { POST: proxyHandler },
   "/v1/audio/transcriptions": { POST: proxyHandler },
+  "/v1/*": { POST: proxyHandler, GET: proxyHandler },
 };
