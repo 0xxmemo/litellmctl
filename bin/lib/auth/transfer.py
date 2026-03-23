@@ -92,7 +92,14 @@ def export_creds(selected: list[str] | None = None):
         encoded = base64.b64encode(json.dumps(data, indent=2).encode()).decode()
         fname = f.name
         lines.append(f"# {label}")
-        lines.append(f"printf '%s' '{encoded}' | base64 -d > \"$D/{fname}\"")
+        # Use line-by-line echo to avoid heredoc buffer issues in dtach/screen/tmux
+        # Each base64 line is echoed separately, then decoded at the end
+        lines.append(f'tmp="$D/.{fname}.b64.tmp"; : > "$tmp"')
+        # Wrap base64 at 76 chars and echo each line
+        wrapped = "\n".join(encoded[i:i+76] for i in range(0, len(encoded), 76))
+        for b64_line in wrapped.split("\n"):
+            lines.append(f'echo "{b64_line}" >> "$tmp"')
+        lines.append(f'base64 -d < "$tmp" > "$D/{fname}" && rm -f "$tmp"')
         lines.append(f'chmod 600 "$D/{fname}"')
         lines.append(f'echo "  ✓ {fname}  ({label})"')
         lines.append("")
@@ -135,17 +142,18 @@ def _import_write(fname: str, b64data: str) -> bool:
 _EXPORT_LINE_RE = re.compile(
     r"printf\s+'%s'\s+'([A-Za-z0-9+/=]+)'\s*\|\s*base64\s+-d\s*>\s*\"\$D/(auth\.[^\"]+)\""
 )
+_HEREDOC_LINE_RE = re.compile(
+    r"base64\s+-d\s*>\s*\"\$D/(auth\.[^\"]+)\"\s*<<\s*'B64EOF'"
+)
 
 
 def _read_paste() -> list[str]:
     """Read pasted content from stdin, auto-detecting end of paste."""
-    lines = []
     if not sys.stdin.isatty():
         return [l.strip() for l in sys.stdin.readlines()]
 
     # Interactive: pasted text arrives in rapid bursts.
     # Wait for a short idle gap after content to detect end of paste.
-    import io
     fd = sys.stdin.fileno()
     buf = ""
     got_content = False
@@ -181,16 +189,35 @@ def import_creds():
 
     imported = 0
 
-    # Detect export script format by scanning for the printf/base64 pattern
-    is_export_script = any(_EXPORT_LINE_RE.search(l) for l in raw_lines)
+    # Detect export script format (printf or heredoc)
+    is_printf_script = any(_EXPORT_LINE_RE.search(l) for l in raw_lines)
+    is_heredoc_script = any(_HEREDOC_LINE_RE.search(l) for l in raw_lines)
 
-    if is_export_script:
+    if is_printf_script:
+        # Legacy printf format: printf '%s' 'base64' | base64 -d > "$D/auth.xxx.json"
         for line in raw_lines:
             m = _EXPORT_LINE_RE.search(line)
             if m:
                 b64data, fname = m.group(1), m.group(2)
                 if _import_write(fname, b64data):
                     imported += 1
+    elif is_heredoc_script:
+        # Heredoc format: base64 -d > "$D/auth.xxx.json" << 'B64EOF'
+        i = 0
+        while i < len(raw_lines):
+            m = _HEREDOC_LINE_RE.search(raw_lines[i])
+            if m:
+                fname = m.group(1)
+                # Collect base64 lines until B64EOF
+                b64_lines = []
+                i += 1
+                while i < len(raw_lines) and raw_lines[i] != "B64EOF":
+                    b64_lines.append(raw_lines[i])
+                    i += 1
+                b64data = "".join(b64_lines)
+                if _import_write(fname, b64data):
+                    imported += 1
+            i += 1
     else:
         # Simple format: <filename> <base64>
         for line in raw_lines:

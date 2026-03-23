@@ -60,7 +60,9 @@ def auth_dispatch(args: list[str]) -> None:
             for key, label, _ in AUTH_PROVIDERS:
                 print(f"{key}|{label}")
         elif cmd == "export":
-            export_creds(args[1:] if len(args) > 1 else None)
+            # Export selected providers (or all) to clipboard
+            providers = args[1:] if len(args) > 1 else None
+            export_creds(providers)
         elif cmd == "import":
             import_creds()
         elif cmd == "status":
