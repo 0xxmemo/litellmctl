@@ -94,7 +94,7 @@ def pick_ordered(prompt: str, choices: list[str]) -> list[int]:
     """
     from prompt_toolkit import Application
     from prompt_toolkit.key_binding import KeyBindings
-    from prompt_toolkit.layout.containers import Window
+    from prompt_toolkit.layout.containers import HSplit
     from prompt_toolkit.layout.layout import Layout
     from prompt_toolkit.widgets import CheckboxList
 
@@ -102,50 +102,76 @@ def pick_ordered(prompt: str, choices: list[str]) -> list[int]:
 
     # Track selection order: list of indices in order they were selected
     selection_order: list[int] = []
-    # Track which indices are currently selected
-    selected_set: set[int] = set()
+    # Track previous selection state to detect changes
+    _prev_values: list = []
 
     def make_values() -> list:
         """Build (value, label) tuples with order prefix for selected items."""
         result = []
         for i, choice in enumerate(choices):
-            if i in selected_set:
-                # Show order number for selected items
+            # Check if this index is in the current selection_order
+            if i in selection_order:
                 order_num = selection_order.index(i) + 1
                 result.append((i, f"[{order_num}] {choice}"))
             else:
                 result.append((i, f"    {choice}"))
         return result
 
+    def update_order(cl: CheckboxList) -> None:
+        """Update selection_order based on current_values changes."""
+        nonlocal _prev_values
+        current_vals = cl.current_values.copy()
+
+        # Detect what changed
+        prev_set = set(_prev_values)
+        curr_set = set(current_vals)
+
+        added = curr_set - prev_set
+        removed = prev_set - curr_set
+
+        # Update order: remove deselected, add newly selected at end
+        for idx in removed:
+            if idx in selection_order:
+                selection_order.remove(idx)
+        for idx in added:
+            selection_order.append(idx)
+
+        _prev_values = current_vals
+        # Update display with order numbers
+        cl.values = make_values()
+
+    # Initial values - use indices as both value and track in current_values
+    initial_values = [(i, f"    {c}") for i, c in enumerate(choices)]
+    checkbox_list = CheckboxList(values=initial_values)
+    _prev_values = []  # Start with nothing selected
+
+    # Patch _handle_enter to update display after toggle
+    _original_handle_enter = checkbox_list._handle_enter
+
+    def _patched_handle_enter() -> None:
+        _original_handle_enter()
+        update_order(checkbox_list)
+
+    checkbox_list._handle_enter = _patched_handle_enter
+
+    # Remove Enter key binding from widget so it doesn't toggle
+    from prompt_toolkit.keys import Keys
+    widget_kb = checkbox_list.control.key_bindings
+    widget_kb.remove(Keys.Enter)
+
     kb = KeyBindings()
 
     @kb.add("enter")
     def _done(event):
+        """Exit and return the selection order."""
         event.app.exit(result=selection_order.copy())
 
-    @kb.add("space")
-    def _toggle(event):
-        layout = event.app.layout
-        container = layout.current_window
-        if container:
-            children = container.get_children()
-            if children:
-                widget = children[0]
-                if hasattr(widget, 'current_index'):
-                    idx = widget.current_index
-                    if idx in selected_set:
-                        # Deselect - remove from order
-                        selected_set.discard(idx)
-                        if idx in selection_order:
-                            selection_order.remove(idx)
-                    else:
-                        # Select - add to end of order
-                        selected_set.add(idx)
-                        selection_order.append(idx)
-                    # Update values
-                    widget.values = make_values()
+    @kb.add("c-c")
+    def _interrupt(event):
+        """Handle Ctrl+C gracefully."""
+        event.app.exit(exception=KeyboardInterrupt())
 
-    container = Window(content=CheckboxList(values=make_values()), height=None)
+    container = HSplit([checkbox_list])
     layout = Layout(container)
 
     application = Application(
