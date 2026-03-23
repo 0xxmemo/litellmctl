@@ -690,30 +690,39 @@ export function ConfigEditor({ configEditor, models }: ConfigEditorProps) {
   const loading = isLoading
   const allModels = models.models
 
-  // Editable local state — seeded from query data
-  const [aliases, setAliases] = useState<ModelGroupAlias>({})
-  const [fallbacks, setFallbacks] = useState<FallbackChain[]>([])
-  const [routerSettings, setRouterSettings] = useState<RouterSettings>(DEFAULT_ROUTER_SETTINGS)
-  const [modelList, setModelList] = useState<ModelEntry[]>([])
+  // Editable local state — initialized from query data
+  const [aliases, setAliases] = useState<ModelGroupAlias>(
+    config ? ((config.router_settings as any)?.model_group_alias || config.model_group_alias || {}) : {}
+  )
+  const [fallbacks, setFallbacks] = useState<FallbackChain[]>(
+    config ? ((config.router_settings as any)?.fallbacks || config.fallbacks || []) : []
+  )
+  const [routerSettings, setRouterSettings] = useState<RouterSettings>(() => {
+    if (!config) return DEFAULT_ROUTER_SETTINGS
+    const rs = (config.router_settings as any) || {}
+    const { model_group_alias: _mga, fallbacks: _fb, ...routerOnly } = rs
+    return { ...DEFAULT_ROUTER_SETTINGS, ...routerOnly } as RouterSettings
+  })
+  const [modelList, setModelList] = useState<ModelEntry[]>(
+    config ? ((config.model_list as ModelEntry[]) || []) : []
+  )
   const [dirty, setDirty] = useState(false)
-  const [seeded, setSeeded] = useState(false)
   const [showResetConfirm, setShowResetConfirm] = useState(false)
 
-  // Seed local editors when config loads (only once, or on explicit refresh)
-  if (config && !seeded) {
-    const rs = (config.router_settings as any) || {}
-    setAliases(rs.model_group_alias || config.model_group_alias || {})
-    const fb = (rs.fallbacks || config.fallbacks || []) as FallbackChain[]
-    setFallbacks(fb)
+  // Sync local state from refetched data
+  const syncFromRefetch = async () => {
+    const { data } = await refetch()
+    if (!data) return
+    const rs = (data.router_settings as any) || {}
+    setAliases(rs.model_group_alias || data.model_group_alias || {})
+    setFallbacks(rs.fallbacks || data.fallbacks || [])
     const { model_group_alias: _mga, fallbacks: _fb, ...routerOnly } = rs
     setRouterSettings({ ...DEFAULT_ROUTER_SETTINGS, ...routerOnly } as RouterSettings)
-    setModelList((config.model_list as ModelEntry[]) || [])
+    setModelList((data.model_list as ModelEntry[]) || [])
     setDirty(false)
-    setSeeded(true)
   }
 
   const handleRefresh = () => {
-    setSeeded(false) // allow re-seed after refresh
     refetch()
   }
 
@@ -728,7 +737,15 @@ export function ConfigEditor({ configEditor, models }: ConfigEditorProps) {
     // Strip model_info from each entry — LiteLLM's /config rejects
     // computed metadata fields like mode="responses" or mode="audio_transcription"
     // that it populates itself from model/info but won't accept back via the API.
-    const sanitizedModelList = modelList.map(({ model_info: _mi, ...rest }) => rest)
+    // Also sanitize api_base values to remove any stray quotes.
+    const sanitizedModelList = modelList.map(({ model_info: _mi, litellm_params, ...rest }) => {
+      const sanitizedParams = { ...litellm_params }
+      if (sanitizedParams.api_base && typeof sanitizedParams.api_base === 'string') {
+        // Remove leading/trailing quotes that may have been introduced by YAML parsing
+        sanitizedParams.api_base = sanitizedParams.api_base.replace(/^["']|["']$/g, '')
+      }
+      return { ...rest, litellm_params: sanitizedParams }
+    })
     const configBody = {
       router_settings: {
         ...routerSettings,
@@ -745,10 +762,8 @@ export function ConfigEditor({ configEditor, models }: ConfigEditorProps) {
       update_router: true,
     }
     saveMutation.mutate(patch, {
-      onSuccess: () => {
-        setDirty(false)
-        setSeeded(false) // allow re-seed on next query result
-        refetch() // explicit refetch to immediately pull saved state into UI
+      onSuccess: async () => {
+        await syncFromRefetch()
         toast.success('Config saved ✓')
       },
       onError: (err: any) => {
@@ -762,11 +777,9 @@ export function ConfigEditor({ configEditor, models }: ConfigEditorProps) {
 
   const handleReset = () => {
     resetMutation.mutate(undefined, {
-      onSuccess: () => {
-        setSeeded(false) // re-seed from fresh query result
-        setDirty(false)
+      onSuccess: async () => {
+        await syncFromRefetch()
         setShowResetConfirm(false)
-        refetch() // explicit refetch to immediately pull reset defaults into UI
         toast.success('Config reset to YAML defaults ✓')
       },
       onError: (err: any) => {
