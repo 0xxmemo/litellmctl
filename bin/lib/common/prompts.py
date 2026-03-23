@@ -89,21 +89,30 @@ def pick_many(prompt: str, choices: list[str]) -> list[int]:
 def pick_ordered(prompt: str, choices: list[str]) -> list[int]:
     """Pick multiple items in order. Returns list of 0-based indices.
 
-    Displays choices with numbered prefix (1. 2. 3. ...) for clarity
-    when the selection order matters (e.g., fallback priority).
+    Users select items one-by-one in their desired priority order.
+    After each selection, the item is removed from the list.
+    Press Enter on empty selection to finish.
     """
-    # Prepend numbers to choices for display
-    numbered_choices = [f"{i + 1}. {choice}" for i, choice in enumerate(choices)]
-    result = checkbox(prompt, choices=numbered_choices)
-    if not result:
+    q = require_questionary()
+    remaining = list(choices)
+    selected_indices = []
+
+    while remaining:
+        # Add "Done" option
+        options = remaining + ["[Done]"]
+        result = q.select(f"{prompt} (select next, then Done):", choices=options, style=style()).ask()
+        if result is None:
+            raise KeyboardInterrupt
+        if result == "[Done]":
+            break
+        # Find index in original choices
+        idx = remaining.index(result)
+        selected_indices.append(choices.index(result))
+        remaining.pop(idx)
+
+    if not selected_indices:
         return list(range(len(choices)))  # default: all
-    # Extract original index from numbered choice
-    indices = []
-    for r in result:
-        # Parse "1. choice text" -> index 0
-        num_str = r.split(". ")[0]
-        indices.append(int(num_str) - 1)
-    return indices
+    return selected_indices
 
 
 def choice(label: str, **kwargs):
