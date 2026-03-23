@@ -11,6 +11,6 @@ tiers:
       model: qwen_portal/qwen3-coder-plus
   lite:
     - model_name: qwen-cli/qwen3-vl-plus
-      model: qwen_portal/vision-model
+      model: qwen_portal/qwen3-vl-plus
 
 extra_models: []
