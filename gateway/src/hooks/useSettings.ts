@@ -170,9 +170,9 @@ async function fetchEditorConfig(): Promise<LiteLLMConfig> {
 }
 
 async function patchEditorConfig(
-  patch: Partial<LiteLLMConfig> & { update_router?: boolean; save_to_file?: boolean },
+  patch: { config: LiteLLMConfig; update_router?: boolean; save_to_file?: boolean },
 ): Promise<LiteLLMConfig> {
-  console.log('[ConfigEditor] PATCH /api/admin/litellm-config body:', JSON.stringify(patch, null, 2))
+  console.log('[ConfigEditor] PUT /api/admin/litellm-config body:', JSON.stringify(patch, null, 2))
   const res = await fetch('/api/admin/litellm-config', {
     method: 'PATCH',
     credentials: 'include',
@@ -181,7 +181,7 @@ async function patchEditorConfig(
   })
   if (!res.ok) {
     const body = await res.json().catch(() => ({}))
-    console.error('[ConfigEditor] PATCH error response:', body)
+    console.error('[ConfigEditor] PUT error response:', body)
     let errorMsg = body.error || body.detail
     if (Array.isArray(errorMsg)) {
       errorMsg = errorMsg.map((e: any) => e.msg || JSON.stringify(e)).join('; ')

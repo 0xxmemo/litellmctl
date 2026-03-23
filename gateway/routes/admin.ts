@@ -1,4 +1,4 @@
-import { CONFIG_PATH } from "../lib/config";
+import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
 import { accessRequests, apiKeys, validatedUsers, userProfileCache, apiKeyCache, requireAdmin } from "../lib/db";
 
 // Admin: pending requests
@@ -96,47 +96,70 @@ async function adminRevokeAllKeysHandler(req: Request) {
   return Response.json({ success: true, count: result.modifiedCount });
 }
 
-// GET /api/admin/litellm-config — read config.yaml
+// GET /api/admin/litellm-config — read config from LiteLLM
 async function adminGetConfigHandler(req: Request) {
   const auth = await requireAdmin(req);
   if (auth instanceof Response) return auth;
   try {
-    const yaml = await import("js-yaml");
-    const file = Bun.file(CONFIG_PATH);
-    if (!(await file.exists())) return Response.json({ error: "config.yaml not found" }, { status: 404 });
-    const text = await file.text();
-    const parsed = yaml.load(text) as any;
-    return Response.json(parsed || {});
+    const res = await fetch(`${LITELLM_URL}/config`, {
+      headers: { Authorization: LITELLM_AUTH },
+    });
+    if (!res.ok) {
+      const errorBody = await res.text().catch(() => '');
+      return Response.json({ error: `LiteLLM API error: ${res.status} ${errorBody}` }, { status: res.status });
+    }
+    const config = await res.json();
+    return Response.json(config);
   } catch (err) {
     return Response.json({ error: (err as Error).message }, { status: 500 });
   }
 }
 
-// PATCH /api/admin/litellm-config — update config.yaml
+// PATCH /api/admin/litellm-config — update config via LiteLLM
 async function adminUpdateConfigHandler(req: Request) {
   const auth = await requireAdmin(req);
   if (auth instanceof Response) return auth;
   try {
-    const yaml = await import("js-yaml");
     const patch = await req.json();
-    const file = Bun.file(CONFIG_PATH);
-    let current: any = {};
-    if (await file.exists()) {
-      current = yaml.load(await file.text()) as any || {};
+    // Use PUT /config which accepts full config with save_to_file and update_router flags
+    const res = await fetch(`${LITELLM_URL}/config`, {
+      method: 'PUT',
+      headers: {
+        Authorization: LITELLM_AUTH,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) {
+      const errorBody = await res.text().catch(() => '');
+      return Response.json({ error: `LiteLLM API error: ${res.status} ${errorBody}` }, { status: res.status });
     }
-    const merged = { ...current, ...patch };
-    await Bun.write(CONFIG_PATH, yaml.dump(merged, { lineWidth: 120, quotingType: '"' }));
-    return Response.json({ success: true });
+    const config = await res.json();
+    return Response.json(config);
   } catch (err) {
     return Response.json({ error: (err as Error).message }, { status: 500 });
   }
 }
 
-// POST /api/admin/litellm-config/reset — re-read config from disk
+// POST /api/admin/litellm-config/reset — reset config via LiteLLM
 async function adminResetConfigHandler(req: Request) {
   const auth = await requireAdmin(req);
   if (auth instanceof Response) return auth;
-  return adminGetConfigHandler(req);
+  try {
+    // LiteLLM's /config/reset deletes DB overrides and reloads from YAML file
+    const resetRes = await fetch(`${LITELLM_URL}/config/reset`, {
+      method: 'POST',
+      headers: { Authorization: LITELLM_AUTH },
+    });
+    if (!resetRes.ok) {
+      const errorBody = await resetRes.text().catch(() => '');
+      return Response.json({ error: `LiteLLM API error: ${resetRes.status} ${errorBody}` }, { status: resetRes.status });
+    }
+    // Return fresh config after reset
+    return adminGetConfigHandler(req);
+  } catch (err) {
+    return Response.json({ error: (err as Error).message }, { status: 500 });
+  }
 }
 
 export const adminRoutes = {

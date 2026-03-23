@@ -725,21 +725,25 @@ export function ConfigEditor({ configEditor, models }: ConfigEditorProps) {
     }
 
   const handleSave = () => {
-    // Strip model_info from each entry — LiteLLM's /config/update rejects
+    // Strip model_info from each entry — LiteLLM's /config rejects
     // computed metadata fields like mode="responses" or mode="audio_transcription"
     // that it populates itself from model/info but won't accept back via the API.
     const sanitizedModelList = modelList.map(({ model_info: _mi, ...rest }) => rest)
-    const patch = {
+    const configBody = {
       router_settings: {
         ...routerSettings,
         model_group_alias: aliases,
         fallbacks,
       } as unknown as LiteLLMConfig['router_settings'],
       model_list: sanitizedModelList.length > 0 ? sanitizedModelList : undefined,
-      update_router: true,
-      save_to_file: true,
     }
-    if (!patch.model_list) delete patch.model_list
+    if (!configBody.model_list) delete configBody.model_list
+    // PUT /config expects { config, save_to_file, update_router }
+    const patch = {
+      config: configBody,
+      save_to_file: true,
+      update_router: true,
+    }
     saveMutation.mutate(patch, {
       onSuccess: () => {
         setDirty(false)
