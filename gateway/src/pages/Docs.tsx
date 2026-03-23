@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Key, Server, Layers, Terminal, Check, Copy } from "lucide-react";
+import { Key, Server, Layers, Terminal, Check, Copy, Bot } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -404,6 +404,103 @@ function ClaudeCodeSection({
   );
 }
 
+// ─── OpenClaw Section ─────────────────────────────────────────────────────────
+
+function getOpenClawSetupCmd(baseUrl: string): string {
+  return `curl -fsSL ${baseUrl}/setup/openclaw.sh | LITELLM_API_KEY="${KEY_PLACEHOLDER}" bash`;
+}
+
+function OpenClawSection({
+  apiKey,
+  setupCmd,
+}: {
+  apiKey: string;
+  setupCmd: string;
+}) {
+  const [effectiveKey, setEffectiveKey] = useState("");
+
+  useEffect(() => {
+    const stored =
+      typeof window !== "undefined"
+        ? localStorage.getItem("llm-gateway-api-key")
+        : "";
+    setEffectiveKey(apiKey || stored || "");
+  }, [apiKey]);
+
+  return (
+    <Card className="mb-8 border-l-4 border-l-emerald-500">
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2">
+          <Bot className="h-5 w-5 text-emerald-500" />
+          Configure OpenClaw
+        </CardTitle>
+        <CardDescription>
+          One command sets up OpenClaw to use LLM Gateway as your API provider.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {/* One-liner command */}
+        <div className="rounded-md border bg-muted/40 p-4">
+          <div className="flex items-center justify-between gap-4">
+            <code className="text-xs break-all font-mono text-muted-foreground select-all">
+              {setupCmd}
+            </code>
+            <div className="shrink-0">
+              <CopyButton
+                text={setupCmd}
+                substitutions={
+                  effectiveKey ? { [KEY_PLACEHOLDER]: effectiveKey } : undefined
+                }
+                label="Copy"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* API key status */}
+        {effectiveKey ? (
+          <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+            <Check className="h-3.5 w-3.5" />
+            API key auto-filled — will be injected on copy
+          </p>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            Enter your API key above — it will be substituted automatically when
+            you copy.
+          </p>
+        )}
+
+        {/* What the script does */}
+        <ul className="text-xs text-muted-foreground space-y-1 list-none pl-1">
+          <li>
+            • Updates <code className="text-xs">~/.openclaw/openclaw.json</code>{" "}
+            — adds LLM Gateway provider
+          </li>
+          <li>
+            • Sets <code className="text-xs">LITELLM_API_KEY</code> in{" "}
+            <code className="text-xs">~/.openclaw/.env</code>
+          </li>
+          <li>
+            • Configures model aliases:{" "}
+            <code className="text-xs">litellm/ultra</code> /{" "}
+            <code className="text-xs">litellm/plus</code> /{" "}
+            <code className="text-xs">litellm/lite</code>
+          </li>
+          <li>
+            • Sets up fallback chain: ultra → plus → lite
+          </li>
+        </ul>
+
+        <p className="text-xs text-muted-foreground">
+          Works on <strong>macOS</strong> and <strong>Linux</strong>. Requires{" "}
+          <code className="text-xs">jq</code> (auto-installed if missing).
+          OpenClaw must be installed and initialized first.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ─── Page ─────────────────────────────────────────────────────────────────────
 
 export function Docs() {
@@ -413,6 +510,7 @@ export function Docs() {
   const baseUrl = getBaseUrl();
   const endpoints = buildEndpoints(baseUrl);
   const setupCmd = getSetupCmd(baseUrl);
+  const openClawSetupCmd = getOpenClawSetupCmd(baseUrl);
 
   return (
     <div className="prose dark:prose-invert max-w-4xl mx-auto p-4 sm:p-6">
@@ -448,6 +546,9 @@ export function Docs() {
 
       {/* ── Configure Claude Code ── */}
       <ClaudeCodeSection apiKey={apiKey} setupCmd={setupCmd} />
+
+      {/* ── Configure OpenClaw ── */}
+      <OpenClawSection apiKey={apiKey} setupCmd={openClawSetupCmd} />
 
       {/* ── Available Models ── */}
       <Card className="mb-6">
