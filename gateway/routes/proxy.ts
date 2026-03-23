@@ -1,6 +1,6 @@
 import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
 import { extractApiKey } from "../lib/auth";
-import { validateApiKey, requireUser, trackUsage } from "../lib/db";
+import { validateApiKey, requireUser, trackUsage, validatedUsers } from "../lib/db";
 
 /**
  * Resolve x-litellm-model-id to the actual underlying model by querying
@@ -114,11 +114,22 @@ async function proxyHandler(req: Request) {
     if (keyRecord) keyHash = keyRecord.keyHash;
   }
 
-  // Read body once to extract requested model
-  const body = await req.arrayBuffer();
+  // Read body once to extract requested model and apply overrides
+  let body: ArrayBuffer = await req.arrayBuffer();
   let requestedModel: string | null = null;
   try {
-    requestedModel = JSON.parse(new TextDecoder().decode(body)).model || null;
+    const text = new TextDecoder().decode(body);
+    const json = JSON.parse(text);
+    requestedModel = json.model || null;
+
+    if (requestedModel) {
+      const userRecord = await validatedUsers.findOne({ email: auth.email }, { projection: { model_overrides: 1 } });
+      const overrides = userRecord?.model_overrides || {};
+      if (overrides[requestedModel]) {
+        json.model = overrides[requestedModel];
+        body = new TextEncoder().encode(JSON.stringify(json)).buffer;
+      }
+    }
   } catch {}
 
   // Forward to LiteLLM — let Bun handle the proxy pipeline natively
