@@ -14,7 +14,7 @@ from .service import launchd_uninstall, systemd_uninstall, nohup_stop
 from .gateway import uninstall_gateway, gateway_is_running
 from .searxng import uninstall_searxng
 from .protonmail import uninstall_protonmail
-from ..common.paths import PROJECT_DIR, PIDFILE, PORT_FILE, SYSTEMD_FILE
+from ..common.paths import PROJECT_DIR, PIDFILE, PORT_FILE, SYSTEMD_FILE, ENV_FILE
 
 
 def _uninstall_service() -> None:
@@ -31,11 +31,10 @@ def _uninstall_service() -> None:
 
 def _uninstall_db() -> None:
     from .db import db_name_from_url
-    env_file = PROJECT_DIR / ".env"
-    if not env_file.exists():
+    if not ENV_FILE.exists():
         info("No database configuration found in .env.")
         return
-    text = env_file.read_text()
+    text = ENV_FILE.read_text()
     if "DATABASE_URL=" not in text:
         info("No database configuration found in .env.")
         return

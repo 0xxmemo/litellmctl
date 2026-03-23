@@ -6,12 +6,11 @@ import os
 import shutil
 import subprocess
 import time
-from pathlib import Path
 
 from ..common.formatting import console, info, warn
 from ..common.network import http_check
+from ..common.paths import PROJECT_DIR
 
-PROJECT_DIR = Path(__file__).resolve().parents[3]
 SETTINGS_FILE = PROJECT_DIR / "searxng" / "settings.yml"
 
 
