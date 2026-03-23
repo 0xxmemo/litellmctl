@@ -3,6 +3,37 @@ import { extractApiKey } from "../lib/auth";
 import { validateApiKey, requireUser, trackUsage, validatedUsers } from "../lib/db";
 
 /**
+ * In-memory cache for user model overrides.
+ * Key: email, Value: { overrides, timestamp }
+ * TTL: 5 minutes
+ */
+const modelOverridesCache = new Map<string, { overrides: Record<string, string>; timestamp: number }>();
+const OVERRIDE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * Get user model overrides with caching.
+ */
+async function getUserModelOverrides(email: string): Promise<Record<string, string>> {
+  const cached = modelOverridesCache.get(email);
+  if (cached && Date.now() - cached.timestamp < OVERRIDE_CACHE_TTL) {
+    return cached.overrides;
+  }
+
+  const userRecord = await validatedUsers.findOne({ email }, { projection: { model_overrides: 1 } });
+  const overrides = userRecord?.model_overrides || {};
+  modelOverridesCache.set(email, { overrides, timestamp: Date.now() });
+  return overrides;
+}
+
+/**
+ * Invalidate cached model overrides for a user.
+ * Called when user updates their overrides via the API.
+ */
+export function invalidateModelOverridesCache(email: string): void {
+  modelOverridesCache.delete(email);
+}
+
+/**
  * Resolve x-litellm-model-id to the actual underlying model by querying
  * LiteLLM /model/info. Runs in the background tracking path only.
  */
@@ -123,8 +154,7 @@ async function proxyHandler(req: Request) {
     requestedModel = json.model || null;
 
     if (requestedModel) {
-      const userRecord = await validatedUsers.findOne({ email: auth.email }, { projection: { model_overrides: 1 } });
-      const overrides = userRecord?.model_overrides || {};
+      const overrides = await getUserModelOverrides(auth.email);
       if (overrides[requestedModel]) {
         json.model = overrides[requestedModel];
         body = new TextEncoder().encode(JSON.stringify(json)).buffer;

@@ -1,5 +1,6 @@
 import { CONFIG_PATH } from "../lib/config";
 import { validatedUsers, userProfileCache, requireUser } from "../lib/db";
+import { invalidateModelOverridesCache } from "./proxy";
 
 // PUT /api/user/profile — requireUser (not guest)
 async function userProfileHandler(req: Request) {
@@ -53,6 +54,7 @@ async function putUserModelOverridesHandler(req: Request) {
     }
     await validatedUsers.updateOne({ email: auth.email }, { $set: { model_overrides: overrides } });
     userProfileCache.delete(auth.email);
+    invalidateModelOverridesCache(auth.email);
     return Response.json({ success: true, model_overrides: overrides });
   } catch (err) {
     console.error("PUT /api/user/model-overrides error:", (err as Error).message);
