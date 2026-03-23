@@ -199,7 +199,7 @@ def run_wizard() -> None:
         fb_choices = []
         for pid in candidates:
             m = providers[pid]["tiers"][tier][0]
-            fb_choices.append(f"{m['model_name']:<40} ({providers[pid]['name']})")
+            fb_choices.append(f"{providers[pid]['name']:<24} {ARROW} {m['model_name']}")
 
         selected_fb = pick_ordered(f"Fallback order for {tier}:", fb_choices)
         fallback_map[tier] = [candidates[i] for i in selected_fb] if selected_fb else candidates

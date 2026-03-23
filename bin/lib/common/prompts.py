@@ -95,8 +95,8 @@ def pick_ordered(prompt: str, choices: list[str]) -> list[int]:
     from prompt_toolkit import Application
     from prompt_toolkit.key_binding import KeyBindings
     from prompt_toolkit.layout.containers import Window
-    from prompt_toolkit.layout.controls import CheckboxList
     from prompt_toolkit.layout.layout import Layout
+    from prompt_toolkit.widgets import CheckboxList
 
     q = require_questionary()
 
@@ -105,16 +105,16 @@ def pick_ordered(prompt: str, choices: list[str]) -> list[int]:
     # Track which indices are currently selected
     selected_set: set[int] = set()
 
-    def make_choices() -> list:
-        """Build choices with order prefix for selected items."""
+    def make_values() -> list:
+        """Build (value, label) tuples with order prefix for selected items."""
         result = []
         for i, choice in enumerate(choices):
             if i in selected_set:
                 # Show order number for selected items
                 order_num = selection_order.index(i) + 1
-                result.append(q.Choice(f"[{order_num}] {choice}", value=i, checked=True))
+                result.append((i, f"[{order_num}] {choice}"))
             else:
-                result.append(q.Choice(f"    {choice}", value=i, checked=False))
+                result.append((i, f"    {choice}"))
         return result
 
     kb = KeyBindings()
@@ -142,10 +142,10 @@ def pick_ordered(prompt: str, choices: list[str]) -> list[int]:
                         # Select - add to end of order
                         selected_set.add(idx)
                         selection_order.append(idx)
-                    # Update choices
-                    widget.options = make_choices()
+                    # Update values
+                    widget.values = make_values()
 
-    container = Window(content=CheckboxList(choices=make_choices()), height=None)
+    container = Window(content=CheckboxList(values=make_values()), height=None)
     layout = Layout(container)
 
     application = Application(
