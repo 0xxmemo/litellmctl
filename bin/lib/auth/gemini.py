@@ -231,9 +231,13 @@ def gemini_login() -> dict:
         pass
 
     record = {
-        "access_token": at, "refresh_token": rt,
+        "access_token": at,
+        "refresh_token": rt,
         "expires_at": int(time.time() + data.get("expires_in", 3600)),
-        "project_id": pid, "email": email,
+        "project_id": pid,
+        "email": email,
+        "oauth_client_id": cid,
+        "oauth_client_secret": csec,
     }
     f = _gemini_auth_file()
     f.parent.mkdir(parents=True, exist_ok=True)
@@ -252,7 +256,10 @@ def gemini_refresh() -> dict:
     if not rt:
         raise RuntimeError("No refresh_token. Run 'auth gemini' to re-login.")
 
-    cid, csec = _gemini_creds()
+    cid = auth.get("oauth_client_id") or os.getenv("GEMINI_CLI_OAUTH_CLIENT_ID")
+    csec = auth.get("oauth_client_secret") or os.getenv("GEMINI_CLI_OAUTH_CLIENT_SECRET")
+    if not (cid and csec):
+        cid, csec = _gemini_creds()
     console.print("[dim]Refreshing Gemini CLI token...[/]")
     data = _http_post(GEMINI_TOKEN_URL, data={
         "grant_type": "refresh_token", "refresh_token": rt,
@@ -263,6 +270,8 @@ def gemini_refresh() -> dict:
     auth["access_token"] = at
     auth["refresh_token"] = data.get("refresh_token", rt)
     auth["expires_at"] = int(time.time() + data.get("expires_in", 3600))
+    auth["oauth_client_id"] = cid
+    auth["oauth_client_secret"] = csec
 
     if not auth.get("project_id"):
         console.print("[dim]  Discovering project...[/]")
