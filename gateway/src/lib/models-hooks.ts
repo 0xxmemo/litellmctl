@@ -7,52 +7,39 @@
  */
 
 import { useQuery } from '@tanstack/react-query'
-import type { RawModel, NormalizedModel, ExtendedModel } from '@lib/models'
-import { dedupeModels, detectIsStub, resolveProviderAuth } from '@lib/models'
+import type { NormalizedModel, ExtendedModel } from '@lib/models'
 import { queryKeys } from '@/lib/query-keys'
 
 // ─── Fetch helpers (browser only) ─────────────────────────────────────────────
 
-export async function fetchModels(): Promise<NormalizedModel[]> {
-  const r = await fetch('/v1/models')
+export async function fetchExtendedModels(): Promise<ExtendedModel[]> {
+  const r = await fetch('/api/models/extended')
   if (!r.ok) throw new Error(`HTTP ${r.status}`)
-  const data: { data: RawModel[] } = await r.json()
-  return dedupeModels(data.data ?? [])
+  const data: { models: ExtendedModel[] } = await r.json()
+  return data.models ?? []
 }
 
-export async function fetchExtendedModels(): Promise<ExtendedModel[]> {
-  try {
-    const r = await fetch('/api/models/extended')
-    if (!r.ok) throw new Error(`HTTP ${r.status}`)
-    const data: { models: ExtendedModel[] } = await r.json()
-    return data.models ?? []
-  } catch {
-    const basic = await fetchModels()
-    return basic.map((m) => ({
-      ...m,
-      underlyingModel: m.id,
-      apiBase: null,
-      litellmProvider: m.provider,
-      isAlias: false,
-      isStub: detectIsStub(m.id),
-      ...resolveProviderAuth(m.provider),
-      supportsStreaming: true,
-      mode: 'chat' as const,
-      maxTokens: null, maxInputTokens: null, maxOutputTokens: null,
-      supportsVision: false, supportsFunctionCalling: false, supportsReasoning: false,
-      supportsSystemMessages: null, supportsToolChoice: null,
-      supportsPromptCaching: null, supportsResponseSchema: null,
-      rpm: null, tpm: null,
-    }))
-  }
+export function toNormalizedModels(models: ExtendedModel[]): NormalizedModel[] {
+  return models.map(({ id, object, owned_by, displayName, provider }) => ({
+    id,
+    object,
+    owned_by,
+    displayName,
+    provider,
+  }))
+}
+
+export async function fetchModels(): Promise<NormalizedModel[]> {
+  return toNormalizedModels(await fetchExtendedModels())
 }
 
 // ─── React Query hooks ────────────────────────────────────────────────────────
 
 export function useModels() {
   const { data: models = [], isLoading: loading, error: rawError } = useQuery({
-    queryKey: queryKeys.models,
-    queryFn: fetchModels,
+    queryKey: queryKeys.modelsExtended,
+    queryFn: fetchExtendedModels,
+    select: toNormalizedModels,
   })
   return { models, loading, error: rawError?.message ?? null }
 }

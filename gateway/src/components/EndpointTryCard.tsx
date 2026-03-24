@@ -140,6 +140,7 @@ interface EndpointTryCardProps {
   requiresAuth?: boolean
   /** If set, show a model selector in the Try tab with this as the default */
   defaultModel?: string
+  allowedModes?: string[]
 }
 
 export function EndpointTryCard({
@@ -152,6 +153,7 @@ export function EndpointTryCard({
   apiKey,
   requiresAuth = true,
   defaultModel,
+  allowedModes,
 }: EndpointTryCardProps) {
   // Try panel state
   const [body, setBody] = useState(defaultBody ?? '')
@@ -280,7 +282,8 @@ export function EndpointTryCard({
               <ModelSelector
                 endpointPath={path}
                 defaultModel={defaultModel}
-                onModelChange={handleModelChange}
+                onChange={handleModelChange}
+                allowedModes={allowedModes}
               />
             )}
 

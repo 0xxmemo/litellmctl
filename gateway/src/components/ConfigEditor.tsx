@@ -10,7 +10,7 @@ import {
   GitBranch, AlertCircle, Loader2, ArrowRight, GripVertical, RotateCcw
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { ConfigModelSelector } from './ModelSelector'
+import { ModelSelector } from '@/components/ModelSelector'
 import type { NormalizedModel } from '@lib/models'
 import type { UseConfigEditorReturn, ModelGroupAlias, FallbackChain, RouterSettings, ModelEntry, LiteLLMConfig } from '@/hooks/useSettings'
 import type { UseModelsReturn } from '@/lib/models-hooks'
@@ -99,7 +99,6 @@ interface SortableSlotRowProps {
   slotIndex: number   // 0 = Primary
   totalSlots: number
   allModels: NormalizedModel[]
-  primaryProvider: string | undefined
   onChangeModel: (value: string) => void
   onRemove: () => void
 }
@@ -109,7 +108,6 @@ function SortableSlotRow({
   slotIndex,
   totalSlots,
   allModels,
-  primaryProvider,
   onChangeModel,
   onRemove,
 }: SortableSlotRowProps) {
@@ -156,12 +154,16 @@ function SortableSlotRow({
       }
 
       <div className="flex-1 min-w-0">
-        <ConfigModelSelector
+        <ModelSelector
           value={slot.model}
           onChange={onChangeModel}
           placeholder={isPrimary ? 'primary model…' : 'fallback model…'}
           models={allModels}
-          providerFilter={isPrimary ? undefined : primaryProvider}
+          clearable
+          triggerClassName="flex items-center gap-2 w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm text-left hover:border-slate-500 focus:outline-none focus:ring-1 focus:ring-ring transition-colors h-8"
+          dropdownClassName="fixed z-[9999] min-w-[280px] max-w-[480px] rounded-md border border-slate-700 bg-slate-950 shadow-lg"
+          searchInputClassName="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          optionTextClassName="font-mono text-foreground flex-1 truncate"
         />
       </div>
 
@@ -214,12 +216,6 @@ function ChainCard({
 
   const slots = buildSlots(chain, chainIdx)
   const slotIds = slots.map(s => s.id)
-
-  // Provider of whatever sits in slot 0 (Primary position) — used to filter fallback selector
-  const primarySlotModel = allModels.find(
-    m => m.id === slots[0]?.model || m.displayName === slots[0]?.model
-  )
-  const primaryProvider = primarySlotModel?.provider
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
@@ -306,7 +302,6 @@ function ChainCard({
                   slotIndex={slotIdx}
                   totalSlots={slots.length}
                   allModels={allModels}
-                  primaryProvider={primaryProvider}
                   onChangeModel={v => updateModel(slotIdx, v)}
                   onRemove={() => removeSlot(slotIdx)}
                 />

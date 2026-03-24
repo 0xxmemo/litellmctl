@@ -111,6 +111,7 @@ function buildEndpoints(baseUrl: string) {
       description: 'Chat completions — OpenAI format (supports "stream": true)',
       requiresAuth: true,
       defaultModel: "anthropic/claude-sonnet-4-6",
+      allowedModes: ['chat', 'responses'],
       curlExample: `curl ${baseUrl}/v1/chat/completions \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -133,6 +134,7 @@ function buildEndpoints(baseUrl: string) {
       description: "Chat completions — Anthropic format (Claude's native API)",
       requiresAuth: true,
       defaultModel: "anthropic/claude-sonnet-4-6",
+      allowedModes: ['chat', 'responses'],
       curlExample: `curl ${baseUrl}/v1/messages \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -158,6 +160,7 @@ function buildEndpoints(baseUrl: string) {
         "Text embeddings — local Ollama embedding models running on your machine",
       requiresAuth: true,
       defaultModel: "local/nomic-embed-text",
+      allowedModes: ['embedding'],
       curlExample: `curl ${baseUrl}/v1/embeddings \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -180,6 +183,7 @@ function buildEndpoints(baseUrl: string) {
         "Image generation — requires an image model configured in /v1/models",
       requiresAuth: true,
       defaultModel: "anthropic/claude-opus-4-6",
+      allowedModes: ['image_generation'],
       curlExample: `curl ${baseUrl}/v1/images/generations \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
@@ -209,6 +213,7 @@ function buildEndpoints(baseUrl: string) {
         "Speech-to-text — local faster-whisper models (free, runs on-device)",
       requiresAuth: true,
       defaultModel: "local/whisper",
+      allowedModes: ['audio_transcription'],
       curlExample: `# Multipart form-data (standard)
 curl ${baseUrl}/v1/audio/transcriptions \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
@@ -593,6 +598,7 @@ export function Docs() {
               apiKey={apiKey}
               requiresAuth={ep.requiresAuth}
               defaultModel={"defaultModel" in ep ? ep.defaultModel : undefined}
+              allowedModes={"allowedModes" in ep ? ep.allowedModes : undefined}
             />
           ))}
         </CardContent>
