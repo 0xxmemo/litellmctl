@@ -72,7 +72,6 @@ export function RequestsTable({ className, requestsTable }: RequestsTableProps) 
                   <TableHead className="text-right">In</TableHead>
                   <TableHead className="text-right">Out</TableHead>
                   <TableHead className="text-right">Tokens</TableHead>
-                  <TableHead className="text-right">Cost</TableHead>
                   <TableHead className="text-right pr-6">Time</TableHead>
                 </TableRow>
               </TableHeader>

@@ -3,13 +3,6 @@ import { Loader2, Cpu, Eye, Zap, Brain, Key } from 'lucide-react'
 import { formatProviderName, getProviderColor } from '@lib/models'
 import type { UseExtendedModelsReturn } from '@/lib/models-hooks'
 
-/** Format cost per token to a readable string (e.g. $3.00/M) */
-function formatCost(costPerToken: number | null): string | null {
-  if (!costPerToken) return null
-  const perMillion = costPerToken * 1_000_000
-  return `$${perMillion.toFixed(2)}/M`
-}
-
 export interface ModelsListProps {
   extendedModels: UseExtendedModelsReturn
 }
@@ -46,8 +39,6 @@ export function ModelsList({ extendedModels }: ModelsListProps) {
       <div className="p-2 space-y-1">
         {models.map((model) => {
           const colorClass = getProviderColor(model.provider)
-          const inputCost = formatCost(model.inputCostPerToken)
-          const outputCost = formatCost(model.outputCostPerToken)
           return (
             <div
               key={model.id}
@@ -93,15 +84,6 @@ export function ModelsList({ extendedModels }: ModelsListProps) {
                 )}
               </div>
 
-              {/* Pricing */}
-              {(inputCost || outputCost) && (
-                <span
-                  className="text-xs text-muted-foreground font-mono shrink-0 hidden lg:block"
-                  title={`Input: ${inputCost ?? '?'} · Output: ${outputCost ?? '?'}`}
-                >
-                  {inputCost} / {outputCost}
-                </span>
-              )}
             </div>
           )
         })}

@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
 import { StatCard } from '@/components/StatCard'
-import { Activity, Key, DollarSign, Zap, Users, Globe, TrendingUp, RefreshCw } from 'lucide-react'
+import { Activity, Key, Zap, Users, Globe, TrendingUp, RefreshCw } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { PrettyAmount } from '@/components/PrettyAmount'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -193,7 +193,7 @@ export function Overview() {
           </div>
 
           {/* Global stat cards */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <StatCard
               title="Total Users"
               value={<PrettyAmount amountFormatted={globalStatsLoading ? '...' : (globalStats?.totalUsers ?? 0)} size="2xl" normalPrecision={0} />}
@@ -209,11 +209,6 @@ export function Overview() {
               value={<PrettyAmount amountFormatted={globalStatsLoading ? '...' : (globalStats?.totalTokens ?? 0)} size="2xl" />}
               icon={Zap}
             />
-            <StatCard
-              title="Total Spend"
-              value={<PrettyAmount amountFormatted={globalStatsLoading ? '...' : (globalStats?.totalSpend ?? 0)} size="2xl" usd={String(globalStats?.totalSpend ?? 0)} usdInline />}
-              icon={DollarSign}
-            />
           </div>
 
           {/* Model Usage */}
@@ -223,7 +218,7 @@ export function Overview() {
                 const provider = extractProvider(m.model_name) || resolveProvider(m.model_name, m.provider || '')
                 return {
                   name: getDisplayName(m.model_name),
-                  value: m.requests ?? m.spend ?? 0,
+                  value: m.tokens ?? m.requests ?? 0,
                   percentage: m.percentage || '0',
                   provider,
                   colorClass: getProviderColor(provider),
@@ -259,7 +254,7 @@ export function Overview() {
             </div>
 
             {/* Personal stat cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <StatCard
                 title="Your Keys"
                 value={<PrettyAmount amountFormatted={userStatsLoading ? '...' : (userStats?.keys ?? 0)} size="2xl" normalPrecision={0} />}
@@ -274,11 +269,6 @@ export function Overview() {
                 title="Your Tokens"
                 value={<PrettyAmount amountFormatted={userStatsLoading ? '...' : (userStats?.tokens ?? 0)} size="2xl" />}
                 icon={Zap}
-              />
-              <StatCard
-                title="Your Spend"
-                value={<PrettyAmount amountFormatted={userStatsLoading ? '...' : (userStats?.spend ?? 0)} size="2xl" usd={String(userStats?.spend ?? 0)} usdInline />}
-                icon={DollarSign}
               />
             </div>
 

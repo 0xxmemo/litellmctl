@@ -226,58 +226,6 @@ export async function flushUsageQueue() {
   }
 }
 
-// ── Pricing cache — populated from LiteLLM /model/info, refreshed every 5 min ──
-
-let _pricingCache: Record<string, { input: number; output: number }> = {};
-let _pricingCacheTs = 0;
-const PRICING_CACHE_TTL_MS = 5 * 60 * 1000;
-
-export async function refreshPricingCache() {
-  const { LITELLM_URL, LITELLM_AUTH } = await import("./config");
-  _pricingCacheTs = Date.now();
-  try {
-    const res = await fetch(`${LITELLM_URL}/model/info`, {
-      headers: { Authorization: LITELLM_AUTH },
-      signal: AbortSignal.timeout(5000),
-    });
-    if (!res.ok) return;
-    const data = await res.json();
-    const fresh: Record<string, { input: number; output: number }> = {};
-    for (const m of data.data || []) {
-      const alias = m.model_name?.toLowerCase();
-      if (!alias) continue;
-      const mi = m.model_info || {};
-      const lp = m.litellm_params || {};
-      const inputPer = mi.input_cost_per_token ?? null;
-      const outputPer = mi.output_cost_per_token ?? null;
-      if (inputPer !== null && outputPer !== null) {
-        fresh[alias] = { input: inputPer, output: outputPer };
-        // Also index by underlying model name
-        const underlying = (lp.model || "").toLowerCase();
-        if (underlying && underlying !== alias) fresh[underlying] = fresh[alias];
-      }
-    }
-    _pricingCache = fresh;
-    console.log(`✅ Pricing cache refreshed: ${Object.keys(fresh).length} models`);
-  } catch { /* silent fallback */ }
-}
-
-function getPricingRates(model: string): { input: number; output: number } | null {
-  if (!model) return null;
-  // Lazy refresh
-  if (Date.now() - _pricingCacheTs > PRICING_CACHE_TTL_MS) {
-    refreshPricingCache().catch(() => {});
-  }
-  const normalized = model.toLowerCase().replace(/-\d{8}$/, "");
-  return _pricingCache[normalized] || _pricingCache[model.toLowerCase()] || null;
-}
-
-export function calcCost(model: string, promptTokens: number, completionTokens: number): number {
-  const rates = getPricingRates(model);
-  if (!rates) return 0;
-  return promptTokens * rates.input + completionTokens * rates.output;
-}
-
 export function trackUsage(
   email: string,
   model: string,
@@ -287,7 +235,6 @@ export function trackUsage(
   requestedModel?: string,
   endpoint?: string,
 ) {
-  const cost = calcCost(model, promptTokens, completionTokens);
   _usageQueue.push({
     email,
     model,           // actual model (matches reference schema)
@@ -297,7 +244,6 @@ export function trackUsage(
     promptTokens,
     completionTokens,
     tokens: promptTokens + completionTokens,  // 'tokens' matches reference schema
-    cost,
     apiKeyHash,
     timestamp: new Date(),
   });

@@ -1,5 +1,4 @@
-import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
-import { apiKeys, validatedUsers, usageLogs, requireAuth, requireUser, calcCost } from "../lib/db";
+import { apiKeys, validatedUsers, usageLogs, requireAuth, requireUser } from "../lib/db";
 import { extractProvider } from "../lib/models";
 
 // GET /api/stats/global — requireAuth (any authenticated user incl. guests)
@@ -10,14 +9,9 @@ async function globalStatsHandler(req: Request) {
   try {
     const tokensExpr = { $add: [{ $ifNull: ["$tokens", 0] }, { $ifNull: ["$totalTokens", 0] }] };
 
-    // All queries in parallel — DB, LiteLLM spend, and both aggregations
-    const [users, keys, spendResult, modelAgg, usageByEmail] = await Promise.all([
+    const [users, keys, modelAgg, usageByEmail] = await Promise.all([
       validatedUsers.find({}, { projection: { email: 1, role: 1 } }).toArray(),
       apiKeys.find({ revoked: false }, { projection: { email: 1, keyHash: 1 } }).toArray(),
-      fetch(`${LITELLM_URL}/global/spend`, {
-        headers: { Authorization: LITELLM_AUTH },
-        signal: AbortSignal.timeout(3000),
-      }).then(r => r.ok ? r.json() : null).catch(() => null),
       usageLogs.aggregate([
         { $group: {
           _id: "$model",
@@ -41,21 +35,15 @@ async function globalStatsHandler(req: Request) {
     const totalTokensAgg = modelAgg.reduce((s: number, r: any) => s + Number(r.tokens || 0), 0);
     const totalRequests = modelAgg.reduce((s: number, r: any) => s + Number(r.requests || 0), 0);
 
-    let calculatedSpend = 0;
     const modelUsage = modelAgg.map((r: any) => {
       const tok = Number(r.tokens || 0);
-      const modelSpend = calcCost(r._id, Number(r.promptTokens || 0), Number(r.completionTokens || 0));
-      calculatedSpend += modelSpend;
       return {
         model_name: r._id || "unknown",
         requests: Number(r.requests || 0),
         tokens: tok,
-        spend: modelSpend,
         percentage: totalTokensAgg > 0 ? ((tok / totalTokensAgg) * 100).toFixed(1) : "0.0",
       };
     });
-
-    const totalSpend = spendResult?.spend || spendResult?.total_spend || calculatedSpend;
 
     // Build top users
     const userKeyMap: Record<string, number> = {};
@@ -70,12 +58,12 @@ async function globalStatsHandler(req: Request) {
       .filter((u: any) => u.email)
       .map((u: any) => {
         const usage = emailUsageMap[u.email] || { requests: 0, tokens: 0 };
-        return { email: u.email, role: u.role || "user", requests: usage.requests, tokens: usage.tokens, spend: 0, keys: userKeyMap[u.email] || 0 };
+        return { email: u.email, role: u.role || "user", requests: usage.requests, tokens: usage.tokens, keys: userKeyMap[u.email] || 0 };
       })
       .filter((u: any) => u.keys > 0 || u.requests > 0)
       .sort((a: any, b: any) => (b.requests - a.requests) || (b.keys - a.keys));
 
-    return Response.json({ totalUsers: users.length, activeKeys: keys.length, totalSpend, totalRequests, totalTokens: totalTokensAgg, modelUsage, topUsers });
+    return Response.json({ totalUsers: users.length, activeKeys: keys.length, totalRequests, totalTokens: totalTokensAgg, modelUsage, topUsers });
   } catch (err) {
     console.error("global-stats error:", (err as Error).message);
     return Response.json({ error: "Failed to fetch global stats" }, { status: 500 });
@@ -120,8 +108,6 @@ async function userStatsHandler(req: Request) {
       { $sort: { tokens: -1 } },
     ]).toArray();
 
-    const spend = modelBreakdown.reduce((sum: number, m: any) =>
-      sum + calcCost(m._id, m.promptTokens || 0, m.completionTokens || 0), 0);
     const totalModelTokens = modelBreakdown.reduce((s: number, m: any) => s + m.tokens, 0);
 
     // Daily requests last 30 days
@@ -158,19 +144,15 @@ async function userStatsHandler(req: Request) {
       tokens: totals?.tokens || 0,
       promptTokens: totals?.promptTokens || 0,
       completionTokens: totals?.completionTokens || 0,
-      spend,
       keys: userKeys.length,
       dailyRequests,
       modelUsage: modelBreakdown.map((m: any) => {
-        const modelSpend = calcCost(m._id, m.promptTokens || 0, m.completionTokens || 0);
         const aliases = (m.requestedAliases || []).filter((a: string) => a && a !== m._id);
         return {
           model_name: m._id || "unknown",
           requested_aliases: aliases,
           requests: m.requests,
           tokens: m.tokens,
-          cost: modelSpend,
-          spend: modelSpend,
           percentage: totalModelTokens > 0 ? ((m.tokens / totalModelTokens) * 100).toFixed(1) : "0.0",
         };
       }),
@@ -233,13 +215,11 @@ async function groupedRequestsHandler(req: Request) {
       const provider = extractProvider(model) || model;
       const groupKey = `${provider}|${model}|${ep}`;
       const tokens = r.tokens || 0;
-      const cost = calcCost(model, r.promptTokens, r.completionTokens);
       const last = groups.length > 0 ? groups[groups.length - 1] : null;
 
       if (last && last._gk === groupKey) {
         last.count++;
         last.totalTokens += tokens;
-        last.totalSpend += cost;
         last.lastTimestamp = r.timestamp;
       } else {
         // New group — check if we already have enough
@@ -250,7 +230,6 @@ async function groupedRequestsHandler(req: Request) {
           provider, model, endpoint: ep,
           count: 1,
           totalTokens: tokens,
-          totalSpend: cost,
           firstTimestamp: r.timestamp,
           lastTimestamp: r.timestamp,
           items: null,
@@ -333,7 +312,6 @@ async function groupItemsHandler(req: Request) {
       items: items.map((r: any) => ({
         ...r,
         _id: r._id.toString(),
-        cost: calcCost(r.actualModel, r.promptTokens, r.completionTokens),
       })),
     });
   } catch (err) {

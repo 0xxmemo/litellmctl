@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
-import { Activity, Key, DollarSign, TrendingUp, RefreshCw } from 'lucide-react'
+import { Activity, Key, TrendingUp, RefreshCw } from 'lucide-react'
 import { PrettyAmount } from '@/components/PrettyAmount'
 import { useUserStats } from '@/hooks/useStats'
 
@@ -66,13 +66,6 @@ export function UserStats() {
       color: 'text-green-500',
     },
     {
-      title: 'Your Spend',
-      value: <PrettyAmount amountFormatted={user?.spend ?? 0} size="2xl" usd={String(user?.spend ?? 0)} usdInline />,
-      change: user?.spendChange || '+0%',
-      icon: DollarSign,
-      color: 'text-amber-500',
-    },
-    {
       title: 'Active Keys',
       value: <PrettyAmount amountFormatted={user?.keys ?? 0} size="2xl" normalPrecision={0} />,
       change: user?.keysChange || '0',
@@ -94,7 +87,7 @@ export function UserStats() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
         {statsData.map((stat, i) => (
           <Card key={i}>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
@@ -167,13 +160,12 @@ export function UserStats() {
                   <TableHead>Model</TableHead>
                   <TableHead>Requests</TableHead>
                   <TableHead>Tokens</TableHead>
-                  <TableHead>Cost</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    <TableCell colSpan={3} className="text-center text-muted-foreground">
                       Loading...
                     </TableCell>
                   </TableRow>
@@ -193,13 +185,12 @@ export function UserStats() {
                         </TableCell>
                         <TableCell><PrettyAmount amountFormatted={model.requests ?? 0} size="sm" /></TableCell>
                         <TableCell><PrettyAmount amountFormatted={model.tokens ?? 0} size="sm" /></TableCell>
-                        <TableCell><PrettyAmount amountFormatted={model.cost ?? 0} size="sm" usd={String(model.cost ?? 0)} /></TableCell>
                       </TableRow>
                     )
                   })
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    <TableCell colSpan={3} className="text-center text-muted-foreground">
                       No model usage data available
                     </TableCell>
                   </TableRow>
@@ -230,13 +221,13 @@ export function UserStats() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    <TableCell colSpan={3} className="text-center text-muted-foreground">
                       Loading...
                     </TableCell>
                   </TableRow>
                 ) : (
                   <TableRow>
-                    <TableCell colSpan={4} className="text-center text-muted-foreground">
+                    <TableCell colSpan={3} className="text-center text-muted-foreground">
                       No API keys found
                     </TableCell>
                   </TableRow>

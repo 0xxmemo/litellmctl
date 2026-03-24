@@ -27,7 +27,6 @@ export interface ApiRequestItem {
   promptTokens: number
   completionTokens: number
   totalTokens: number
-  cost: number
   timestamp: string | Date
 }
 

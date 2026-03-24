@@ -389,7 +389,6 @@ export function Admin() {
                       <TableHead>Role</TableHead>
                       <TableHead>Requests</TableHead>
                       <TableHead>Tokens</TableHead>
-                      <TableHead>Spend</TableHead>
                       <TableHead>Approved</TableHead>
                       <TableHead></TableHead>
                     </TableRow>
@@ -427,13 +426,6 @@ export function Admin() {
                               <span className="text-muted-foreground text-xs">...</span>
                             ) : (
                               <PrettyAmount amountFormatted={usage?.tokens ?? 0} size="sm" normalPrecision={0} />
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {topUsersLoading ? (
-                              <span className="text-muted-foreground text-xs">...</span>
-                            ) : (
-                              <PrettyAmount amountFormatted={usage?.spend ?? 0} size="sm" usd={String(usage?.spend ?? 0)} />
                             )}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground whitespace-nowrap">

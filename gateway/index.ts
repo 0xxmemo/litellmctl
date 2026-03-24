@@ -6,7 +6,7 @@
  */
 
 import { initConfig, PORT } from "./lib/config";
-import { connectDB, initCliSecret, flushUsageQueue, rateLimitMap, otpRateLimitMap, refreshPricingCache } from "./lib/db";
+import { connectDB, initCliSecret, flushUsageQueue, rateLimitMap, otpRateLimitMap } from "./lib/db";
 import { authRoutes } from "./routes/auth";
 import { keysRoutes, handleKeyById } from "./routes/keys";
 import { modelsRoutes } from "./routes/models";
@@ -81,9 +81,6 @@ const routeManifest = buildRouteManifest();
 setInterval(() => {
   flushUsageQueue().catch(() => {});
 }, 2000).unref();
-
-// Warm up pricing cache from LiteLLM /model/info (non-blocking)
-refreshPricingCache().catch(() => {});
 
 // Cleanup rate limit maps periodically
 setInterval(() => {

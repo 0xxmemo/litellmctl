@@ -43,9 +43,6 @@ export async function fetchExtendedModels(): Promise<ExtendedModel[]> {
       supportsSystemMessages: null, supportsToolChoice: null,
       supportsPromptCaching: null, supportsResponseSchema: null,
       rpm: null, tpm: null,
-      inputCostPerToken: null, outputCostPerToken: null,
-      inputCostPerTokenAbove128kTokens: null, outputCostPerTokenAbove128kTokens: null,
-      inputCostPerImage: null, tieredPricing: null,
     }))
   }
 }

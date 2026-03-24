@@ -155,7 +155,7 @@ function buildEndpoints(baseUrl: string) {
       method: "POST",
       path: "/v1/embeddings",
       description:
-        "Text embeddings — local Ollama embedding models (free, no token cost)",
+        "Text embeddings — local Ollama embedding models running on your machine",
       requiresAuth: true,
       defaultModel: "local/nomic-embed-text",
       curlExample: `curl ${baseUrl}/v1/embeddings \\
@@ -171,7 +171,7 @@ function buildEndpoints(baseUrl: string) {
         2,
       ),
       bodyNote:
-        "Uses local Ollama embedding models (zero cost). Available: local/nomic-embed-text, local/mxbai-embed-large, local/bge-m3, local/all-minilm.",
+        "Uses local Ollama embedding models. Available: local/nomic-embed-text, local/mxbai-embed-large, local/bge-m3, local/all-minilm.",
     },
     {
       method: "POST",
@@ -269,7 +269,7 @@ curl ${baseUrl}/v1/audio/transcriptions \\
       curlExample: `curl ${baseUrl}/v1/usage \\
   -H "Authorization: Bearer YOUR_API_KEY"`,
       bodyNote:
-        "GET request — no body needed. Returns token usage and cost breakdown.",
+        "GET request — no body needed. Returns request and token usage details.",
     },
     {
       method: "GET",

@@ -26,7 +26,6 @@ export interface GroupedRequest {
   endpoint: string | null
   count: number
   totalTokens: number
-  totalSpend: number
   firstTimestamp: string | Date
   lastTimestamp: string | Date
   items: ApiRequestItem[] | null
@@ -40,27 +39,12 @@ export interface ApiRequestItem {
   promptTokens: number
   completionTokens: number
   totalTokens: number
-  cost: number
   timestamp: string | Date
 }
 
 function cleanEndpoint(endpoint: string | null): string {
   if (!endpoint) return '—'
   return endpoint.replace(/^\/v1\//, '').replace(/^\//, '')
-}
-
-function CostCell({ cost }: { cost: number }) {
-  if (cost === 0 || !cost) {
-    return <span className="text-muted-foreground text-xs">—</span>
-  }
-  return (
-    <PrettyAmount
-      amountFormatted={cost}
-      size="sm"
-      usd={String(cost)}
-      usdInline
-    />
-  )
 }
 
 interface StackedRequestItemProps {
@@ -165,11 +149,6 @@ export function StackedRequestItem({ group }: StackedRequestItemProps) {
           />
         </TableCell>
 
-        {/* Cost */}
-        <TableCell className="text-right">
-          <CostCell cost={group.totalSpend} />
-        </TableCell>
-
         {/* Time — show range for stacked */}
         <TableCell className="text-right pr-6">
           {!isSingle ? (
@@ -235,9 +214,6 @@ export function StackedRequestItem({ group }: StackedRequestItemProps) {
               normalPrecision={0}
             />
           </TableCell>
-          <TableCell className="text-right">
-            <CostCell cost={item.cost} />
-          </TableCell>
           <TableCell className="text-right pr-6">
             <PrettyDate
               date={item.timestamp}
@@ -252,7 +228,7 @@ export function StackedRequestItem({ group }: StackedRequestItemProps) {
       {/* Error row */}
       {expanded && error && (
         <TableRow className="bg-destructive/5">
-          <TableCell colSpan={7} className="text-center text-xs text-destructive py-2">
+          <TableCell colSpan={6} className="text-center text-xs text-destructive py-2">
             Failed to load
             <Button
               variant="ghost"

@@ -7,7 +7,6 @@ export interface GlobalStats {
   totalRequests: number | null
   totalTokens: number | null
   totalUsers: number
-  totalSpend: number
   activeKeys: number
   modelUsage: Array<{
     model_name: string
@@ -16,27 +15,24 @@ export interface GlobalStats {
     mode?: string
     requests: number | null
     tokens: number | null
-    spend: number
     percentage: string | null
   }>
-  topUsers: Array<{ email: string; role: string; requests: number; spend: number; keys: number }>
+  topUsers: Array<{ email: string; role: string; requests: number; tokens: number; keys: number }>
 }
 
 export interface UserStats {
   requests: number
   tokens: number
-  spend: number
   keys: number
   requestsChange?: string
   tokensChange?: string
-  spendChange?: string
   keysChange?: string
   dailyRequests?: Array<{ date: string; requests: number }>
   modelUsage?: Array<{
     model_name: string
+    requested_aliases?: string[]
     requests: number
     tokens: number
-    spend: number
     percentage: string
   }>
 }
@@ -64,7 +60,6 @@ async function fetchUserStats(): Promise<UserStats> {
   return {
     requests: data.requests ?? 0,
     tokens: data.tokens ?? 0,
-    spend: data.spend ?? 0,
     keys: data.keys ?? 0,
     modelUsage: data.modelUsage,
     dailyRequests: data.dailyRequests,

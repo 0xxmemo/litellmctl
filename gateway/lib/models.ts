@@ -48,12 +48,6 @@ export interface ExtendedModel extends NormalizedModel {
   supportsResponseSchema: boolean | null
   rpm: number | null
   tpm: number | null
-  inputCostPerToken: number | null
-  outputCostPerToken: number | null
-  inputCostPerTokenAbove128kTokens: number | null
-  outputCostPerTokenAbove128kTokens: number | null
-  inputCostPerImage: number | null
-  tieredPricing: Record<string, unknown> | null
 }
 
 // ─── Provider auth mapping ────────────────────────────────────────────────────
@@ -226,10 +220,6 @@ interface LiteLLMModelInfo {
   tiered_pricing?: Record<string, unknown>
 }
 
-function nullIfZero(v: number | undefined | null): number | null {
-  return v != null && v > 0 ? v : null
-}
-
 function nullIfMissing<T>(v: T | undefined | null): T | null {
   return v != null ? v : null
 }
@@ -276,12 +266,6 @@ export function buildExtendedModel(raw: {
     supportsResponseSchema: nullIfMissing(mi.supports_response_schema),
     rpm: nullIfMissing(mi.rpm),
     tpm: nullIfMissing(mi.tpm),
-    inputCostPerToken: nullIfZero(mi.input_cost_per_token),
-    outputCostPerToken: nullIfZero(mi.output_cost_per_token),
-    inputCostPerTokenAbove128kTokens: nullIfZero(mi.input_cost_per_token_above_128k_tokens),
-    outputCostPerTokenAbove128kTokens: nullIfZero(mi.output_cost_per_token_above_128k_tokens),
-    inputCostPerImage: nullIfZero(mi.input_cost_per_image),
-    tieredPricing: nullIfMissing(mi.tiered_pricing),
   }
 }
 

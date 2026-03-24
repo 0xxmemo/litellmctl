@@ -15,7 +15,6 @@ export interface TopUser {
   role: string
   requests: number
   tokens: number
-  spend: number
   keys: number
 }
 
