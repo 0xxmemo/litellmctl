@@ -7,17 +7,10 @@ role: fallback
 
 tiers:
   ultra:
-    - model_name: qwen-cli/qwen3.5-plus
-      model: qwen_portal/qwen3.5-plus
+    - model_name: qwen-cli/vision-model
+      model: qwen_portal/vision-model
   plus:
-    - model_name: qwen-cli/qwen3-coder-plus
-      model: qwen_portal/qwen3-coder-plus
-    - model_name: qwen-cli/qwen-max-latest
-      model: qwen_portal/qwen-max-latest
-  lite:
-    - model_name: qwen-cli/qwen3.5-flash
-      model: qwen_portal/qwen3.5-flash
-    - model_name: qwen-cli/qwen-plus-2025-07-28
-      model: qwen_portal/qwen-plus-2025-07-28
+    - model_name: qwen-cli/coder-model
+      model: qwen_portal/coder-model
 
 extra_models: []
