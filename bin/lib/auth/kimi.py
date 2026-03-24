@@ -27,7 +27,8 @@ KIMI_OAUTH_HOST = "https://auth.kimi.com"
 KIMI_DEVICE_AUTH_URL = f"{KIMI_OAUTH_HOST}/api/oauth/device_authorization"
 KIMI_TOKEN_URL = f"{KIMI_OAUTH_HOST}/api/oauth/token"
 KIMI_CLIENT_ID = "17e5f671-d194-4dfb-9706-5516cb48c098"
-KIMI_USER_AGENT = "KimiCLI/1.12.0"
+KIMI_VERSION = "1.25.0"
+KIMI_USER_AGENT = f"KimiCLI/{KIMI_VERSION}"
 KIMI_POLL_INTERVAL = 5
 KIMI_DEFAULT_API_BASE = "https://api.kimi.com/coding/v1"
 
@@ -46,10 +47,11 @@ def _kimi_common_headers() -> dict:
     return {
         "User-Agent": KIMI_USER_AGENT,
         "X-Msh-Platform": "kimi_cli",
-        "X-Msh-Version": "1.12.0",
+        "X-Msh-Version": KIMI_VERSION,
         "X-Msh-Device-Id": device_id,
         "X-Msh-Device-Name": platform.node() or socket.gethostname(),
         "X-Msh-Device-Model": f"{platform.system()} {platform.release()} {platform.machine()}",
+        "X-Msh-Os-Version": platform.version(),
     }
 
 
@@ -236,22 +238,25 @@ def kimi_refresh() -> dict:
         "Accept": "application/json",
         **_kimi_common_headers(),
     }
-    form_data = urlencode({
+    refresh_body = {
         "grant_type": "refresh_token",
         "refresh_token": rt,
         "client_id": KIMI_CLIENT_ID,
-    })
+    }
 
     if httpx:
         with httpx.Client(timeout=30) as client:
-            resp = client.post(KIMI_TOKEN_URL, content=form_data, headers=headers)
+            resp = client.post(KIMI_TOKEN_URL, data=refresh_body, headers=headers)
             resp.raise_for_status()
             data = resp.json()
     else:
         import urllib.request
         req = urllib.request.Request(
-            KIMI_TOKEN_URL, data=form_data.encode(),
-            headers=headers, method="POST")
+            KIMI_TOKEN_URL,
+            data=urlencode(refresh_body).encode(),
+            headers=headers,
+            method="POST",
+        )
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read())
 
