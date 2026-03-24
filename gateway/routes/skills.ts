@@ -1,4 +1,3 @@
-import { requireAuth } from "../lib/db";
 import * as fs from "fs/promises";
 import * as path from "path";
 
@@ -255,6 +254,26 @@ async function getSkillInstallScript(req: Request): Promise<Response> {
     ''
   );
 
+  // Check for and run skill's setup.sh script if present
+  scriptLines.push(
+    '# Check for and run skill setup script if present',
+    'SETUP_URL="' + gatewayOrigin + '/api/skills/setup.sh?slug=' + slug + '"',
+    'if curl -fsSL "$SETUP_URL" -o /tmp/setup_' + slug + '.sh 2>/dev/null; then',
+    '  chmod +x /tmp/setup_' + slug + '.sh',
+    '  echo "Running skill setup script..."',
+    '  # Export environment variables for the setup script',
+    '  export SKILLS_DIR="${SKILLS_DIR}"',
+    '  export SETTINGS_DIR="${SKILLS_DIR%/skills}"',
+    '  export GATEWAY_ORIGIN="' + gatewayOrigin + '"',
+    '  export SKILL_SLUG="' + slug + '"',
+    '  /tmp/setup_' + slug + '.sh',
+    '  rm -f /tmp/setup_' + slug + '.sh',
+    'else',
+    '  echo "No setup script found (optional)"',
+    'fi',
+    ''
+  );
+
   // Final success messages
   scriptLines.push(
     'echo ""',
@@ -345,10 +364,70 @@ async function getSkillScript(req: Request): Promise<Response> {
   }
 }
 
+/**
+ * GET /skills/hook.sh?slug=:slug — Return raw hook.sh script.
+ * Used by install script to configure UserPromptSubmit hook for search guidance.
+ */
+async function getHookScript(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const slug = url.searchParams.get("slug") || "";
+
+  if (!/^[a-z0-9-]+$/.test(slug)) {
+    return Response.json({ error: "Invalid skill name" }, { status: 400 });
+  }
+
+  const skillDir = path.join(SKILLS_DIR, slug);
+  const hookPath = path.join(skillDir, "hook.sh");
+
+  try {
+    await fs.access(hookPath);
+    const content = await fs.readFile(hookPath, "utf-8");
+    return new Response(content, {
+      headers: {
+        "Content-Type": "text/x-shellscript; charset=utf-8",
+        "Cache-Control": "public, max-age=3600",
+      },
+    });
+  } catch {
+    return Response.json({ error: "hook.sh not found for this skill" }, { status: 404 });
+  }
+}
+
+/**
+ * GET /skills/setup.sh?slug=:slug — Return raw setup.sh script.
+ * Used by install script to run skill-specific setup (e.g., modify settings.json).
+ */
+async function getSetupScript(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const slug = url.searchParams.get("slug") || "";
+
+  if (!/^[a-z0-9-]+$/.test(slug)) {
+    return Response.json({ error: "Invalid skill name" }, { status: 400 });
+  }
+
+  const skillDir = path.join(SKILLS_DIR, slug);
+  const setupPath = path.join(skillDir, "setup.sh");
+
+  try {
+    await fs.access(setupPath);
+    const content = await fs.readFile(setupPath, "utf-8");
+    return new Response(content, {
+      headers: {
+        "Content-Type": "text/x-shellscript; charset=utf-8",
+        "Cache-Control": "no-cache",
+      },
+    });
+  } catch {
+    return Response.json({ error: "setup.sh not found for this skill" }, { status: 404 });
+  }
+}
+
 export const skillsRoutes = {
   "/api/skills": { GET: getSkillsHandler },
   "/api/skills/targets": { GET: getInstallTargetsHandler },
   "/api/skills/install.sh": { GET: getSkillInstallScript },
   "/api/skills/SKILL.md": { GET: getSkillManifest },
   "/api/skills/skill.sh": { GET: getSkillScript },
+  "/api/skills/hook.sh": { GET: getHookScript },
+  "/api/skills/setup.sh": { GET: getSetupScript },
 };

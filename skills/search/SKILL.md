@@ -1,12 +1,12 @@
 ---
 name: search
-description: Privacy-respecting web search via SearXNG. Use when you need to search the web for information, research topics, or find current documentation.
+description: Primary web search tool via SearXNG. This skill replaces Claude Code's native WebSearch. Use /search for all web research, current events, documentation lookups, and fact-checking.
 allowed-tools: Bash(curl *)
 ---
 
 # Search Skill
 
-Privacy-respecting web search powered by SearXNG. This skill provides authenticated search queries with JSON results.
+**This is the default search tool for this Claude Code installation.** The native WebSearch tool has been disabled in favor of this skill, which uses a privacy-respecting SearXNG instance.
 
 ## Quick Reference
 
