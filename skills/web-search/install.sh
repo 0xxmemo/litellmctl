@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 # Web search skill install script - runs inline during installation
+# Cross-OS: macOS (BSD) and Linux (GNU)
 set -euo pipefail
 
+# --- Configuration from wrapper ---
 SKILLS_DIR="${SKILLS_DIR:-~/.claude/skills}"
 SETTINGS_DIR="${SETTINGS_DIR:-~/.claude}"
+GATEWAY_ORIGIN="${GATEWAY_ORIGIN:-http://localhost:14041}"
+SKILL_DIR="${SKILL_DIR:-${SKILLS_DIR}/web-search}"
 
-# Expand tilde
+# Expand tilde (cross-OS)
 SKILLS_DIR="$(echo "$SKILLS_DIR" | sed "s|^~|$HOME|g")"
 SETTINGS_DIR="$(echo "$SETTINGS_DIR" | sed "s|^~|$HOME|g")"
 SETTINGS_FILE="${SETTINGS_DIR}/settings.json"
 
-# Get gateway URL and API key from environment (passed by gateway/routes/skills.ts)
-# API_KEY is injected by the wrapper install script from LLM_GATEWAY_API_KEY
-GATEWAY_URL="${GATEWAY_ORIGIN:-http://localhost:14041}"
-
+# --- Validate API key ---
 if [ -z "${API_KEY:-}" ]; then
     echo "Error: API_KEY is not set. This should be passed from the wrapper install script."
     exit 1
@@ -21,27 +22,30 @@ fi
 
 echo "Configuring Claude Code settings for web-search skill..."
 
-# Create settings.json if it doesn't exist
-if [ ! -f "$SETTINGS_FILE" ]; then
-  cat > "$SETTINGS_FILE" << 'EOF'
-{
-  "env": {},
-  "permissions": {
-    "allow": [],
-    "deny": [],
-    "ask": []
-  }
+# --- Helper: sed in-place (cross-OS) ---
+sed_inplace() {
+    local pattern="$1"
+    local replacement="$2"
+    local file="$3"
+    if sed --version 2>/dev/null | grep -q GNU; then
+        sed -i "s|${pattern}|${replacement}|g" "$file"
+    else
+        sed -i '' "s|${pattern}|${replacement}|g" "$file"
+    fi
 }
-EOF
-  echo "  Created settings.json"
-fi
 
-# Use Python for reliable JSON manipulation
-python3 << PYEOF
+# --- Helper: JSON manipulation with python3 or jq ---
+configure_settings() {
+    local settings_file="$1"
+    local hooks_dir="$2"
+    local hook_file="${hooks_dir}/web-search-skill-hook.sh"
+
+    if command -v python3 &>/dev/null; then
+        python3 << PYEOF
 import json
 import sys
 
-settings_file = "${SETTINGS_FILE}"
+settings_file = "${settings_file}"
 try:
     with open(settings_file, "r") as f:
         settings = json.load(f)
@@ -65,7 +69,7 @@ if "hooks" not in settings:
 if "UserPromptSubmit" not in settings["hooks"]:
     settings["hooks"]["UserPromptSubmit"] = []
 
-hook_file = "${SETTINGS_DIR}/hooks/web-search-skill-hook.sh"
+hook_file = "${hook_file}"
 hook_cmd = {"type": "command", "command": hook_file, "timeout": 5}
 
 registered = False
@@ -90,32 +94,90 @@ with open(settings_file, "w") as f:
 
 print("  settings.json updated")
 PYEOF
+    elif command -v jq &>/dev/null; then
+        # Create settings.json if missing
+        if [ ! -f "$settings_file" ]; then
+            cat > "$settings_file" << 'EOF'
+{
+  "env": {},
+  "permissions": {
+    "allow": [],
+    "deny": [],
+    "ask": []
+  }
+}
+EOF
+            echo "  Created settings.json"
+        fi
 
-# Install hook inline
+        # Disable WebSearch
+        if ! jq -e '.permissions.deny | index("WebSearch")' "$settings_file" >/dev/null 2>&1; then
+            jq '.permissions.deny += ["WebSearch"]' "$settings_file" > "${settings_file}.tmp" && mv "${settings_file}.tmp" "$settings_file"
+            echo "  Disabled WebSearch"
+        else
+            echo "  WebSearch already disabled"
+        fi
+
+        # Register hook
+        if ! jq -e --arg hf "$hook_file" '.hooks.UserPromptSubmit[]? | select(.hooks[]? | .command == $hf)' "$settings_file" >/dev/null 2>&1; then
+            jq --arg hf "$hook_file" '
+                if .hooks == null then .hooks = {} else . end |
+                if .hooks.UserPromptSubmit == null then .hooks.UserPromptSubmit = [] else . end |
+                .hooks.UserPromptSubmit += [{"hooks": [{"type": "command", "command": $hf, "timeout": 5}]}]
+            ' "$settings_file" > "${settings_file}.tmp" && mv "${settings_file}.tmp" "$settings_file"
+            echo "  Registered UserPromptSubmit hook"
+        else
+            echo "  Hook already registered"
+        fi
+    else
+        echo "  Warning: Neither python3 nor jq available."
+        echo "  Manual configuration required. See: https://docs.anthropic.com/en/docs/claude-code/hooks"
+        return 1
+    fi
+}
+
+# --- Main installation ---
+
+# Ensure settings directory exists
+mkdir -p "${SETTINGS_DIR}"
+
+# Create settings.json if it doesn't exist
+if [ ! -f "$SETTINGS_FILE" ]; then
+    cat > "$SETTINGS_FILE" << 'EOF'
+{
+  "env": {},
+  "permissions": {
+    "allow": [],
+    "deny": [],
+    "ask": []
+  }
+}
+EOF
+    echo "  Created settings.json"
+fi
+
+# Configure settings.json (disable WebSearch, register hook)
+configure_settings "$SETTINGS_FILE" "$SETTINGS_DIR/hooks"
+
+# Install hook - the wrapper downloaded hook.sh to SKILL_DIR
+HOOK_SOURCE="${SKILL_DIR}/hook.sh"
 HOOKS_DIR="${SETTINGS_DIR}/hooks"
-mkdir -p "${HOOKS_DIR}"
-cat > "${HOOKS_DIR}/web-search-skill-hook.sh" << 'HOOK_EOF'
-#!/usr/bin/env bash
-set -euo pipefail
-PROMPT=$(cat)
-[ -z "$PROMPT" ] && exit 0
-case "$PROMPT" in
-    *[Tt]rending*|*[Ll]atest*|*[Nn]ews*|*[Cc]urrent*|*[Rr]ecent*|*[Hh]appening*|*[Uu]pdate*|*[Ee]vents*|*[Ss]cores*|*[Ww]eather*|*[Pp]rices*|*[Ss]tocks*|202[5-9]|203[0-9])
-        echo "Tip: Use /web-search for web queries. Example: /web-search latest trends"
-        ;;
-esac
-exit 0
-HOOK_EOF
-chmod +x "${HOOKS_DIR}/web-search-skill-hook.sh"
-echo "  Hook installed: ${HOOKS_DIR}/web-search-skill-hook.sh"
+
+if [ -f "$HOOK_SOURCE" ]; then
+    mkdir -p "${HOOKS_DIR}"
+    cp "$HOOK_SOURCE" "${HOOKS_DIR}/web-search-skill-hook.sh"
+    chmod +x "${HOOKS_DIR}/web-search-skill-hook.sh"
+    echo "  Hook installed: ${HOOKS_DIR}/web-search-skill-hook.sh"
+else
+    echo "  Warning: hook.sh not found in ${SKILL_DIR}, skipping hook installation"
+fi
 
 # Inject gateway URL and API key into SKILL.md
 SKILL_MD="${SKILLS_DIR}/web-search/SKILL.md"
 if [ -f "$SKILL_MD" ]; then
     echo "  Injecting configuration into SKILL.md..."
-    sed -i.bak "s|__GATEWAY_URL__|${GATEWAY_URL}|g" "$SKILL_MD"
-    sed -i.bak "s|__API_KEY__|${API_KEY}|g" "$SKILL_MD"
-    rm -f "${SKILL_MD}.bak"
+    sed_inplace "__GATEWAY_URL__" "${GATEWAY_ORIGIN}" "$SKILL_MD"
+    sed_inplace "__API_KEY__" "${API_KEY}" "$SKILL_MD"
     echo "  Configuration injected"
 fi
 
