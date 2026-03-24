@@ -151,10 +151,10 @@ async function getInstallTargetsHandler(): Promise<Response> {
 /**
  * GET /skills/install.sh?slug=:slug — Return install script for a skill.
  * Supports target platform selection via query param: ?target=claude-code
+ * Note: No auth required - skills are public. The API key is passed as an env var to the install script.
  */
 async function getSkillInstallScript(req: Request): Promise<Response> {
-  const auth = await requireAuth(req);
-  if (auth instanceof Response) return auth;
+  // No auth required - skills are public resources
 
   const url = new URL(req.url);
   // Get slug from query param
@@ -242,6 +242,21 @@ async function getSkillInstallScript(req: Request): Promise<Response> {
     '${CONTENT}',
     'SKILL_EOF',
     '',
+  ];
+
+  // Check if skill has a skill.sh script and copy it
+  scriptLines.push(
+    '# Check for and install skill.sh script if present',
+    'if curl -fsSL "' + gatewayOrigin + '/api/skills/skill.sh?slug=' + slug + '" -o /tmp/skill_' + slug + '.sh 2>/dev/null; then',
+    '  mv /tmp/skill_' + slug + '.sh "${SKILL_DIR}/skill.sh"',
+    '  chmod +x "${SKILL_DIR}/skill.sh"',
+    '  echo "  Executable:    ${SKILL_DIR}/skill.sh"',
+    'fi',
+    ''
+  );
+
+  // Final success messages
+  scriptLines.push(
     'echo ""',
     'echo "✅ ' + slug + ' skill installed successfully!"',
     'echo ""',
@@ -258,8 +273,8 @@ async function getSkillInstallScript(req: Request): Promise<Response> {
     'echo "  - API key is stored in ${SKILL_DIR}/SKILL.md"',
     'echo "  - Ensure this file has restricted permissions: chmod 600 ${SKILL_DIR}/SKILL.md"',
     'echo ""',
-    'chmod 600 "${SKILL_DIR}/SKILL.md"',
-  ];
+    'chmod 600 "${SKILL_DIR}/SKILL.md"'
+  );
   const script = scriptLines.join('\n');
 
   return new Response(script, {
@@ -301,9 +316,39 @@ async function getSkillManifest(req: Request): Promise<Response> {
   }
 }
 
+/**
+ * GET /skills/skill.sh?slug=:slug — Return raw skill.sh script.
+ * Used by install script to copy executable script for the skill.
+ */
+async function getSkillScript(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const slug = url.searchParams.get("slug") || "";
+
+  if (!/^[a-z0-9-]+$/.test(slug)) {
+    return Response.json({ error: "Invalid skill name" }, { status: 400 });
+  }
+
+  const skillDir = path.join(SKILLS_DIR, slug);
+  const scriptPath = path.join(skillDir, "skill.sh");
+
+  try {
+    await fs.access(scriptPath);
+    const content = await fs.readFile(scriptPath, "utf-8");
+    return new Response(content, {
+      headers: {
+        "Content-Type": "text/x-shellscript; charset=utf-8",
+        "Cache-Control": "public, max-age=3600",
+      },
+    });
+  } catch {
+    return Response.json({ error: "skill.sh not found for this skill" }, { status: 404 });
+  }
+}
+
 export const skillsRoutes = {
   "/api/skills": { GET: getSkillsHandler },
   "/api/skills/targets": { GET: getInstallTargetsHandler },
   "/api/skills/install.sh": { GET: getSkillInstallScript },
   "/api/skills/SKILL.md": { GET: getSkillManifest },
+  "/api/skills/skill.sh": { GET: getSkillScript },
 };

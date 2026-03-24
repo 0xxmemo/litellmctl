@@ -141,6 +141,8 @@ interface EndpointTryCardProps {
   /** If set, show a model selector in the Try tab with this as the default */
   defaultModel?: string
   allowedModes?: string[]
+  /** For GET endpoints, whether to show query parameters input */
+  hasQueryParams?: boolean
 }
 
 export function EndpointTryCard({
@@ -154,6 +156,7 @@ export function EndpointTryCard({
   requiresAuth = true,
   defaultModel,
   allowedModes,
+  hasQueryParams = false,
 }: EndpointTryCardProps) {
   // Try panel state
   const [body, setBody] = useState(defaultBody ?? '')
@@ -300,7 +303,7 @@ export function EndpointTryCard({
                   spellCheck={false}
                 />
               </div>
-            ) : (
+            ) : hasQueryParams ? (
               <div className="space-y-2">
                 <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider block">
                   Query Parameters
@@ -318,7 +321,7 @@ export function EndpointTryCard({
                   </div>
                 )}
               </div>
-            )}
+            ) : null}
 
             {/* Send + Clear */}
             <div className="flex items-center gap-3">

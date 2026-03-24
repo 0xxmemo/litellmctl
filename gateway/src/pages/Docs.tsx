@@ -221,6 +221,7 @@ curl ${baseUrl}/api/health | jq '.features | {search, embedding, transcription, 
       description:
         "Privacy-respecting search via SearXNG (requires authentication)",
       requiresAuth: true,
+      hasQueryParams: true,
       curlExample: `# Search for a topic
 curl "${baseUrl}/api/search?q=machine+learning" \\
   -H "Authorization: Bearer YOUR_API_KEY" | jq '.results[:3]'
@@ -300,6 +301,7 @@ export function Docs() {
               requiresAuth={ep.requiresAuth}
               defaultModel={"defaultModel" in ep ? ep.defaultModel : undefined}
               allowedModes={"allowedModes" in ep ? ep.allowedModes : undefined}
+              hasQueryParams={"hasQueryParams" in ep ? ep.hasQueryParams : undefined}
             />
           ))}
         </CardContent>
