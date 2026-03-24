@@ -272,6 +272,7 @@ def qwen_refresh() -> dict:
     resource_url = data.get("resource_url") or auth.get("resource_url")
 
     record = {
+        **auth,
         "access_token": at,
         "refresh_token": data.get("refresh_token", rt),
         "expires_at": int(time.time() + expires_in_secs),
