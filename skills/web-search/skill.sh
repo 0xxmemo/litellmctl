@@ -1,17 +1,21 @@
 #!/usr/bin/env bash
-# Search skill executor - makes authenticated request to LLM Gateway search endpoint
-# Supports query params: categories=, time_range=, engines=, language=
+# Web search skill executor - makes authenticated request to LLM Gateway search endpoint
 set -euo pipefail
 
-# Configuration (injected by SKILL.md frontmatter at install time)
-# GATEWAY_URL and API_KEY are expected to be set in the environment
-# or extracted from the SKILL.md frontmatter
+# Configuration (injected during installation)
+GATEWAY_URL="${GATEWAY_URL:-__GATEWAY_URL__}"
+API_KEY="${API_KEY:-__API_KEY__}"
 
-INPUT="${*:-}"
+# Read input from stdin if no args provided
+if [ $# -eq 0 ]; then
+    INPUT=$(cat)
+else
+    INPUT="${*}"
+fi
 
 if [ -z "$INPUT" ]; then
-    echo "Usage: /search <your query> [categories=programming,science] [time_range=week] [engines=google,duckduckgo]"
-    echo "Example: /search latest TypeScript features categories=it,time_range=month"
+    echo "Usage: /web-search <your query> [categories=programming,science] [time_range=week] [engines=google,duckduckgo]"
+    echo "Example: /web-search latest TypeScript features categories=it,time_range=month"
     exit 1
 fi
 
@@ -54,27 +58,6 @@ if [ -z "$QUERY" ]; then
     exit 1
 fi
 
-# Detect gateway URL and API key from environment or SKILL.md
-if [ -z "${GATEWAY_URL:-}" ]; then
-    # Try to extract from SKILL.md frontmatter
-    SKILL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    SKILL_FILE="${SKILL_DIR}/SKILL.md"
-    if [ -f "$SKILL_FILE" ]; then
-        GATEWAY_URL=$(grep "^gateway_url:" "$SKILL_FILE" | sed 's/^gateway_url: *//')
-        API_KEY=$(grep "^api_key:" "$SKILL_FILE" | sed 's/^api_key: *//')
-    fi
-fi
-
-if [ -z "${GATEWAY_URL:-}" ]; then
-    echo "Error: GATEWAY_URL is not set and could not be extracted from SKILL.md"
-    exit 1
-fi
-
-if [ -z "${API_KEY:-}" ]; then
-    echo "Error: API_KEY is not set and could not be extracted from SKILL.md"
-    exit 1
-fi
-
 # Build URL with query parameters
 URL="${GATEWAY_URL}/api/search?q=$(python3 -c "import urllib.parse; print(urllib.parse.quote('''$QUERY'''))")"
 
@@ -100,7 +83,7 @@ RESPONSE=$(curl -sf "$URL" -H "Authorization: Bearer ${API_KEY}")
 
 CURL_EXIT=$?
 if [ $CURL_EXIT -ne 0 ]; then
-    echo "Error: Search request failed. Is the gateway running at ${GATEWAY_URL}?"
+    echo "Error: Web search request failed. Is the gateway running at ${GATEWAY_URL}?"
     exit 1
 fi
 
