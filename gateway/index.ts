@@ -17,6 +17,7 @@ import { proxyRoutes } from "./routes/proxy";
 import { searchRoutes } from "./routes/search";
 import { healthRoutes } from "./routes/health";
 import { setupRoutes } from "./routes/setup";
+import { skillsRoutes } from "./routes/skills";
 
 // ============================================================================
 // CONFIGURATION
@@ -55,7 +56,7 @@ await initCliSecret();
 
 const allRoutes = [
   authRoutes, keysRoutes, modelsRoutes, statsRoutes,
-  userRoutes, adminRoutes, proxyRoutes, searchRoutes, healthRoutes, setupRoutes,
+  userRoutes, adminRoutes, proxyRoutes, searchRoutes, healthRoutes, setupRoutes, skillsRoutes,
 ];
 
 function buildRouteManifest() {
@@ -180,7 +181,7 @@ Bun.serve({
     // Route manifest (for CLI auto-discovery)
     "/api/_routes": { GET: () => Response.json({ routes: routeManifest }) },
 
-    // Auth, keys, models, stats, user, admin, proxy, search, health routes
+    // Auth, keys, models, stats, user, admin, proxy, search, health, setup, skills routes
     ...authRoutes,
     ...keysRoutes,
     ...modelsRoutes,
@@ -191,6 +192,7 @@ Bun.serve({
     ...searchRoutes,
     ...healthRoutes,
     ...setupRoutes,
+    ...skillsRoutes,
 
     // Icons (served from /public/)
     "/favicon.ico": async () => (await serveStaticFile("/public/favicon.ico")) || new Response("Not found", { status: 404 }),

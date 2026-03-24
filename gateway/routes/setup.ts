@@ -1,30 +1,140 @@
+import { requireAuth } from "../lib/db";
 import { PORT } from "../lib/config";
 
-// GET /setup/claude-code.sh — Configure Claude Code to use LLM Gateway
-function claudeCodeSetup(req: Request) {
-  const url = new URL(req.url);
-  const host = url.hostname;
-  // Detect protocol from X-Forwarded-Proto header (for reverse proxy/SSL setups)
-  // or from the request URL itself; default to http for local hosting
-  const forwardedProto = req.headers.get('x-forwarded-proto');
-  const protocol = forwardedProto || (url.protocol === 'https:' ? 'https' : 'http');
-  const gatewayOrigin = `${protocol}://${host}${protocol === 'http' && PORT ? ':' + PORT : ''}`;
+// ── Types ────────────────────────────────────────────────────────────────────
 
+export interface SetupOption {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  scriptUrl: string;
+  configVar: string;
+  docsUrl: string;
+  features: string[];
+  requirements: string[];
+}
+
+export interface SetupOptionsResponse {
+  options: SetupOption[];
+}
+
+// ── Setup Option Definitions ────────────────────────────────────────────────
+// Add new setup options here to extend available configurations
+
+const SETUP_OPTIONS = {
+  "claude-code": {
+    name: "Claude Code",
+    description: "Configure Claude Code to use LLM Gateway as your API provider",
+    icon: "terminal",
+    configVar: "LLM_GATEWAY_API_KEY",
+    features: [
+      "Creates ~/.claude/settings.json — non-destructive merge",
+      "Sets ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN",
+      "Maps model aliases: ultra / plus / lite",
+      "Bypasses onboarding in ~/.claude.json",
+    ],
+    requirements: [
+      "Claude Code CLI installed",
+      "jq (auto-installed if missing)",
+    ],
+  },
+  "openclaw": {
+    name: "OpenClaw",
+    description: "Configure OpenClaw to use LLM Gateway as your API provider",
+    icon: "bot",
+    configVar: "LITELLM_API_KEY",
+    features: [
+      "Updates ~/.openclaw/openclaw.json — adds LLM Gateway provider",
+      "Sets LITELLM_API_KEY in ~/.openclaw/.env",
+      "Configures model aliases: litellm/ultra / litellm/plus / litellm/lite",
+      "Sets up fallback chain: ultra → plus → lite",
+    ],
+    requirements: [
+      "OpenClaw installed and initialized",
+      "jq (auto-installed if missing)",
+    ],
+  },
+} as const;
+
+type SetupOptionId = keyof typeof SETUP_OPTIONS;
+
+// ── Helper Functions ─────────────────────────────────────────────────────────
+
+function getGatewayOrigin(url: URL, req: Request): string {
+  const host = url.hostname;
+  const forwardedProto = req.headers.get("x-forwarded-proto");
+  const protocol = forwardedProto || (url.protocol === "https:" ? "https" : "http");
+  const port = PORT;
+  return `${protocol}://${host}${protocol === "http" && port !== 443 && port !== 80 ? ":" + port : ""}`;
+}
+
+/**
+ * GET /api/setup/options — Return all available setup options.
+ * Public endpoint for docs discovery.
+ */
+async function getSetupOptionsHandler(): Promise<Response> {
+  const options: SetupOption[] = Object.entries(SETUP_OPTIONS).map(([key, value]) => ({
+    id: key,
+    name: value.name,
+    description: value.description,
+    icon: value.icon,
+    scriptUrl: `/setup/${key}.sh`,
+    configVar: value.configVar,
+    docsUrl: `/docs/setup/${key}`,
+    features: [...value.features],
+    requirements: [...value.requirements],
+  }));
+
+  return Response.json({ options });
+}
+
+/**
+ * GET /api/setup/:id — Return setup script for a specific option.
+ */
+async function getSetupScript(req: Request): Promise<Response> {
+  const auth = await requireAuth(req);
+  if (auth instanceof Response) return auth;
+
+  const url = new URL(req.url);
+  const pathParts = url.pathname.split("/");
+  const id = pathParts[pathParts.length - 1] as SetupOptionId;
+
+  // Validate setup option exists
+  if (!(id in SETUP_OPTIONS)) {
+    return Response.json({ error: "Invalid setup option" }, { status: 400 });
+  }
+
+  const config = SETUP_OPTIONS[id];
+  const gatewayOrigin = getGatewayOrigin(url, req);
+
+  // Generate setup script based on option type
+  switch (id) {
+    case "claude-code":
+      return generateClaudeCodeScript(gatewayOrigin, config.configVar);
+    case "openclaw":
+      return generateOpenClawScript(gatewayOrigin, config.configVar);
+    default:
+      return Response.json({ error: "Setup script not found" }, { status: 404 });
+  }
+}
+
+function generateClaudeCodeScript(gatewayOrigin: string, configVar: string): Response {
   const script = `#!/usr/bin/env bash
 # Configure Claude Code to use LLM Gateway as your API provider.
 #
 # Usage:
-#   curl -fsSL ${gatewayOrigin}/setup/claude-code.sh | LLM_GATEWAY_API_KEY="sk-..." bash
+#   curl -fsSL ${gatewayOrigin}/api/setup/claude-code | ${configVar}="sk-..." bash
 #
 set -euo pipefail
 
-API_KEY="\${LLM_GATEWAY_API_KEY:-}"
+API_KEY="\${${configVar}:-}"
 
 if [ -z "\$API_KEY" ]; then
-  echo "Error: LLM_GATEWAY_API_KEY is not set." >&2
+  echo "Error: ${configVar} is not set." >&2
   echo "" >&2
   echo "Usage:" >&2
-  echo "  curl -fsSL ${gatewayOrigin}/setup/claude-code.sh | LLM_GATEWAY_API_KEY=\\"YOUR_KEY\\" bash" >&2
+  echo "  curl -fsSL ${gatewayOrigin}/api/setup/claude-code | ${configVar}=\\"YOUR_KEY\\" bash" >&2
   exit 1
 fi
 
@@ -92,29 +202,22 @@ echo "Run 'claude' to start using Claude Code through LLM Gateway."
   });
 }
 
-// GET /setup/openclaw.sh — Configure OpenClaw to use LLM Gateway
-function openclawSetup(req: Request) {
-  const url = new URL(req.url);
-  const host = url.hostname;
-  const forwardedProto = req.headers.get('x-forwarded-proto');
-  const protocol = forwardedProto || (url.protocol === 'https:' ? 'https' : 'http');
-  const gatewayOrigin = `${protocol}://${host}${protocol === 'http' && PORT ? ':' + PORT : ''}`;
-
+function generateOpenClawScript(gatewayOrigin: string, configVar: string): Response {
   const script = `#!/usr/bin/env bash
 # Configure OpenClaw to use LLM Gateway as your API provider.
 #
 # Usage:
-#   curl -fsSL ${gatewayOrigin}/setup/openclaw.sh | LITELLM_API_KEY="sk-..." bash
+#   curl -fsSL ${gatewayOrigin}/api/setup/openclaw | ${configVar}="sk-..." bash
 #
 set -euo pipefail
 
-API_KEY="\${LITELLM_API_KEY:-}"
+API_KEY="\${${configVar}:-}"
 
 if [ -z "\$API_KEY" ]; then
-  echo "Error: LITELLM_API_KEY is not set." >&2
+  echo "Error: ${configVar} is not set." >&2
   echo "" >&2
   echo "Usage:" >&2
-  echo "  curl -fsSL ${gatewayOrigin}/setup/openclaw.sh | LITELLM_API_KEY=\\"YOUR_KEY\\" bash" >&2
+  echo "  curl -fsSL ${gatewayOrigin}/api/setup/openclaw | ${configVar}=\\"YOUR_KEY\\" bash" >&2
   exit 1
 fi
 
@@ -124,14 +227,14 @@ ENV_FILE="\$OPENCLAW_DIR/.env"
 
 mkdir -p "\$OPENCLAW_DIR"
 
-# Add LITELLM_API_KEY to .env file (non-destructive)
+# Add ${configVar} to .env file (non-destructive)
 if [ -f "\$ENV_FILE" ]; then
-  # Remove existing LITELLM_API_KEY line if present
-  grep -v "^LITELLM_API_KEY=" "\$ENV_FILE" > "\$ENV_FILE.tmp" || true
+  # Remove existing ${configVar} line if present
+  grep -v "^${configVar}=" "\$ENV_FILE" > "\$ENV_FILE.tmp" || true
   mv "\$ENV_FILE.tmp" "\$ENV_FILE"
-  echo "LITELLM_API_KEY=\$API_KEY" >> "\$ENV_FILE"
+  echo "${configVar}=\$API_KEY" >> "\$ENV_FILE"
 else
-  echo "LITELLM_API_KEY=\$API_KEY" > "\$ENV_FILE"
+  echo "${configVar}=\$API_KEY" > "\$ENV_FILE"
 fi
 
 # Update openclaw.json with LLM Gateway provider
@@ -144,7 +247,7 @@ if [ -f "\$CONFIG_FILE" ]; then
        --arg haiku "lite" '
       .models.providers.litellm = {
         "baseUrl": \$url,
-        "apiKey": "\${LITELLM_API_KEY}",
+        "apiKey": "${configVar}",
         "api": "anthropic-messages",
         "models": [
           {"id": "ultra", "name": "LLM Gateway Ultra"},
@@ -161,7 +264,7 @@ if [ -f "\$CONFIG_FILE" ]; then
     jq --arg url "${gatewayOrigin}" '
       .models.providers.litellm = {
         "baseUrl": \$url,
-        "apiKey": "\${LITELLM_API_KEY}",
+        "apiKey": "${configVar}",
         "api": "anthropic-messages",
         "models": [
           {"id": "ultra", "name": "LLM Gateway Ultra"},
@@ -196,7 +299,10 @@ echo "Restart OpenClaw to apply changes."
   });
 }
 
+// ── Route Exports ────────────────────────────────────────────────────────────
+
 export const setupRoutes = {
-  "/setup/claude-code.sh": { GET: claudeCodeSetup },
-  "/setup/openclaw.sh": { GET: openclawSetup },
+  "/api/setup/options": { GET: getSetupOptionsHandler },
+  "/api/setup/claude-code": { GET: getSetupScript },
+  "/api/setup/openclaw": { GET: getSetupScript },
 };

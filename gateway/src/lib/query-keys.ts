@@ -35,4 +35,11 @@ export const queryKeys = {
 
   // User settings
   modelOverrides: ['user', 'model-overrides'] as const,
+
+  // Skills
+  skills: ['skills'] as const,
+  skillsTargets: ['skills', 'targets'] as const,
+
+  // Setup options
+  setupOptions: ['setup', 'options'] as const,
 } as const
