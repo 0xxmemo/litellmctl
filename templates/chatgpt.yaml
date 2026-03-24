@@ -7,11 +7,19 @@ role: fallback
 
 tiers:
   ultra:
+    - model_name: codex/gpt-5.4
+      model: chatgpt/gpt-5.4
+      model_info:
+        mode: responses
     - model_name: codex/gpt-5.3-codex
       model: chatgpt/gpt-5.3-codex
       model_info:
         mode: responses
   plus:
+    - model_name: codex/gpt-5.4-mini
+      model: chatgpt/gpt-5.4-mini
+      model_info:
+        mode: responses
     - model_name: codex/gpt-5.3-codex-spark
       model: chatgpt/gpt-5.3-codex-spark
       model_info:
