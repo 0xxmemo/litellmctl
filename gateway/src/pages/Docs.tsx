@@ -110,18 +110,18 @@ function buildEndpoints(baseUrl: string) {
       path: "/v1/chat/completions",
       description: 'Chat completions — OpenAI format (supports "stream": true)',
       requiresAuth: true,
-      defaultModel: "anthropic/claude-sonnet-4-6",
+      defaultModel: "ultra",
       allowedModes: ['chat', 'responses'],
       curlExample: `curl ${baseUrl}/v1/chat/completions \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "anthropic/claude-sonnet-4-6",
+    "model": "ultra",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'`,
       defaultBody: JSON.stringify(
         {
-          model: "anthropic/claude-sonnet-4-6",
+          model: "ultra",
           messages: [{ role: "user", content: "Hello!" }],
         },
         null,
@@ -133,19 +133,19 @@ function buildEndpoints(baseUrl: string) {
       path: "/v1/messages",
       description: "Chat completions — Anthropic format (Claude's native API)",
       requiresAuth: true,
-      defaultModel: "anthropic/claude-sonnet-4-6",
+      defaultModel: "ultra",
       allowedModes: ['chat', 'responses'],
       curlExample: `curl ${baseUrl}/v1/messages \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "anthropic/claude-sonnet-4-6",
+    "model": "ultra",
     "max_tokens": 1024,
     "messages": [{"role": "user", "content": "Hello!"}]
   }'`,
       defaultBody: JSON.stringify(
         {
-          model: "anthropic/claude-sonnet-4-6",
+          model: "ultra",
           max_tokens: 1024,
           messages: [{ role: "user", content: "Hello!" }],
         },
@@ -182,20 +182,20 @@ function buildEndpoints(baseUrl: string) {
       description:
         "Image generation — requires an image model configured in /v1/models",
       requiresAuth: true,
-      defaultModel: "anthropic/claude-opus-4-6",
+      defaultModel: "ultra",
       allowedModes: ['image_generation'],
       curlExample: `curl ${baseUrl}/v1/images/generations \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "anthropic/claude-opus-4-6",
+    "model": "ultra",
     "prompt": "A cute cat",
     "n": 1,
     "size": "1024x1024"
   }'`,
       defaultBody: JSON.stringify(
         {
-          model: "anthropic/claude-opus-4-6",
+          model: "ultra",
           prompt: "A cute cat",
           n: 1,
           size: "1024x1024",
@@ -204,7 +204,7 @@ function buildEndpoints(baseUrl: string) {
         2,
       ),
       bodyNote:
-        'Endpoint is live. Uses "anthropic/claude-opus-4-6" model. Ensure the model is configured for image generation in your LiteLLM config.',
+        'Endpoint is live. Uses "ultra" model. Ensure the model is configured for image generation in your LiteLLM config.',
     },
     {
       method: "POST",
