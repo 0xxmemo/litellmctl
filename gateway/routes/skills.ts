@@ -232,8 +232,6 @@ async function getSkillInstallScript(req: Request): Promise<Response> {
     'cat > "${SKILL_DIR}/SKILL.md" << SKILL_EOF',
     '---',
     'name: ' + slug,
-    'gateway_url: ' + gatewayOrigin,
-    'api_key: ${API_KEY}',
     'target_platform: ' + target,
     'installed_at: ${INSTALLED_AT}',
     '---',
@@ -246,10 +244,12 @@ async function getSkillInstallScript(req: Request): Promise<Response> {
   // Check if skill has a skill.sh script and copy it
   scriptLines.push(
     '# Check for and install skill.sh script if present',
-    'if curl -fsSL "' + gatewayOrigin + '/api/skills/skill.sh?slug=' + slug + '" -o /tmp/skill_' + slug + '.sh 2>/dev/null; then',
+    'if curl -sf "' + gatewayOrigin + '/api/skills/skill.sh?slug=' + slug + '" -o /tmp/skill_' + slug + '.sh; then',
     '  mv /tmp/skill_' + slug + '.sh "${SKILL_DIR}/skill.sh"',
     '  chmod +x "${SKILL_DIR}/skill.sh"',
     '  echo "  Executable:    ${SKILL_DIR}/skill.sh"',
+    'else',
+    '  rm -f /tmp/skill_' + slug + '.sh',
     'fi',
     ''
   );
@@ -287,19 +287,28 @@ async function getSkillInstallScript(req: Request): Promise<Response> {
     'echo ""',
     'echo "  Skill directory: ${SKILL_DIR}"',
     'echo "  Documentation:   ${SKILL_DIR}/SKILL.md"',
-    'echo "  Executable:      ${SKILL_DIR}/skill.sh"',
     'echo "  Gateway URL:     ' + gatewayOrigin + '"',
     'echo "  Target Platform: ' + targetConfig.name + '"',
     'echo ""',
-    'echo "The skill is now available for use with ' + targetConfig.name + '."',
-    'echo ""',
-    'echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"',
-    'echo ""',
-    'echo "Security Note:"',
-    'echo "  - API key is stored in ${SKILL_DIR}/skill.sh"',
-    'echo "  - Ensure this file has restricted permissions: chmod 700 ${SKILL_DIR}/skill.sh"',
-    'echo ""',
-    'chmod 700 "${SKILL_DIR}/skill.sh"'
+    'echo "The skill is now available for use with ' + targetConfig.name + '."'
+  );
+
+  // Add security note and chmod only if skill.sh exists
+  scriptLines.push(
+    'if [ -f "${SKILL_DIR}/skill.sh" ]; then',
+    '  echo "  Executable:      ${SKILL_DIR}/skill.sh"',
+    '  echo ""',
+    '  echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"',
+    '  echo ""',
+    '  echo "Security Note:"',
+    '  echo "  - API key is stored in ${SKILL_DIR}/skill.sh"',
+    '  echo "  - Ensure this file has restricted permissions: chmod 700 ${SKILL_DIR}/skill.sh"',
+    '  echo ""',
+    '  chmod 700 "${SKILL_DIR}/skill.sh"',
+    'else',
+    '  echo "  API key stored in: ${SKILL_DIR}/SKILL.md (frontmatter)"',
+    '  echo ""',
+    'fi'
   );
   const script = scriptLines.join('\n');
 

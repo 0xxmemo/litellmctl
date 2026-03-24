@@ -109,13 +109,13 @@ HOOK_EOF
 chmod +x "${HOOKS_DIR}/web-search-skill-hook.sh"
 echo "  Hook installed: ${HOOKS_DIR}/web-search-skill-hook.sh"
 
-# Inject gateway URL and API key into skill.sh
-SKILL_SCRIPT="${SKILLS_DIR}/web-search/skill.sh"
-if [ -f "$SKILL_SCRIPT" ]; then
-    echo "  Injecting configuration into skill.sh..."
-    sed -i.bak "s|__GATEWAY_URL__|${GATEWAY_URL}|g" "$SKILL_SCRIPT"
-    sed -i.bak "s|__API_KEY__|${API_KEY}|g" "$SKILL_SCRIPT"
-    rm -f "${SKILL_SCRIPT}.bak"
+# Inject gateway URL and API key into SKILL.md
+SKILL_MD="${SKILLS_DIR}/web-search/SKILL.md"
+if [ -f "$SKILL_MD" ]; then
+    echo "  Injecting configuration into SKILL.md..."
+    sed -i.bak "s|__GATEWAY_URL__|${GATEWAY_URL}|g" "$SKILL_MD"
+    sed -i.bak "s|__API_KEY__|${API_KEY}|g" "$SKILL_MD"
+    rm -f "${SKILL_MD}.bak"
     echo "  Configuration injected"
 fi
 
