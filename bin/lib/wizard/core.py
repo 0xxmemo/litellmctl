@@ -298,11 +298,11 @@ def run_wizard() -> bool:
         if confirm("\n  Proxy is running. Restart now?"):
             ctl = PROJECT_DIR / "bin" / "litellmctl"
             try:
-                subprocess.run([str(ctl), "restart"], check=True)
+                subprocess.run([str(ctl), "restart", "proxy"], check=True)
             except (subprocess.CalledProcessError, FileNotFoundError):
-                console.print(f"  {WARN_SYM} Auto-restart failed. Run manually: litellmctl restart")
+                console.print(f"  {WARN_SYM} Auto-restart failed. Run manually: litellmctl restart proxy")
         else:
-            console.print(f"  {dim('Run litellmctl restart when ready.')}")
+            console.print(f"  {dim('Run litellmctl restart proxy when ready.')}")
     else:
         console.print(f"  {dim('Start the proxy with: litellmctl start')}")
 
