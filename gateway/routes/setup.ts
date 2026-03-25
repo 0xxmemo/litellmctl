@@ -79,7 +79,7 @@ async function getSetupOptionsHandler(): Promise<Response> {
     name: value.name,
     description: value.description,
     icon: value.icon,
-    scriptUrl: `/setup/${key}.sh`,
+    scriptUrl: `/api/setup/${key}`,
     configVar: value.configVar,
     docsUrl: `/docs/setup/${key}`,
     features: [...value.features],
