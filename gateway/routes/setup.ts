@@ -1,4 +1,3 @@
-import { requireAuth } from "../lib/db";
 import { PORT } from "../lib/config";
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -25,7 +24,8 @@ export interface SetupOptionsResponse {
 const SETUP_OPTIONS = {
   "claude-code": {
     name: "Claude Code",
-    description: "Configure Claude Code to use LLM Gateway as your API provider",
+    description:
+      "Configure Claude Code to use LLM Gateway as your API provider",
     icon: "terminal",
     configVar: "LLM_GATEWAY_API_KEY",
     features: [
@@ -39,7 +39,7 @@ const SETUP_OPTIONS = {
       "jq (auto-installed if missing)",
     ],
   },
-  "openclaw": {
+  openclaw: {
     name: "OpenClaw",
     description: "Configure OpenClaw to use LLM Gateway as your API provider",
     icon: "bot",
@@ -64,7 +64,8 @@ type SetupOptionId = keyof typeof SETUP_OPTIONS;
 function getGatewayOrigin(url: URL, req: Request): string {
   const host = url.hostname;
   const forwardedProto = req.headers.get("x-forwarded-proto");
-  const protocol = forwardedProto || (url.protocol === "https:" ? "https" : "http");
+  const protocol =
+    forwardedProto || (url.protocol === "https:" ? "https" : "http");
   const port = PORT;
   return `${protocol}://${host}${protocol === "http" && port !== 443 && port !== 80 ? ":" + port : ""}`;
 }
@@ -74,28 +75,28 @@ function getGatewayOrigin(url: URL, req: Request): string {
  * Public endpoint for docs discovery.
  */
 async function getSetupOptionsHandler(): Promise<Response> {
-  const options: SetupOption[] = Object.entries(SETUP_OPTIONS).map(([key, value]) => ({
-    id: key,
-    name: value.name,
-    description: value.description,
-    icon: value.icon,
-    scriptUrl: `/api/setup/${key}`,
-    configVar: value.configVar,
-    docsUrl: `/docs/setup/${key}`,
-    features: [...value.features],
-    requirements: [...value.requirements],
-  }));
+  const options: SetupOption[] = Object.entries(SETUP_OPTIONS).map(
+    ([key, value]) => ({
+      id: key,
+      name: value.name,
+      description: value.description,
+      icon: value.icon,
+      scriptUrl: `/api/setup/${key}`,
+      configVar: value.configVar,
+      docsUrl: `/docs/setup/${key}`,
+      features: [...value.features],
+      requirements: [...value.requirements],
+    }),
+  );
 
   return Response.json({ options });
 }
 
 /**
  * GET /api/setup/:id — Return setup script for a specific option.
+ * Public endpoint — no auth required.
  */
 async function getSetupScript(req: Request): Promise<Response> {
-  const auth = await requireAuth(req);
-  if (auth instanceof Response) return auth;
-
   const url = new URL(req.url);
   const pathParts = url.pathname.split("/");
   const id = pathParts[pathParts.length - 1] as SetupOptionId;
@@ -115,11 +116,17 @@ async function getSetupScript(req: Request): Promise<Response> {
     case "openclaw":
       return generateOpenClawScript(gatewayOrigin, config.configVar);
     default:
-      return Response.json({ error: "Setup script not found" }, { status: 404 });
+      return Response.json(
+        { error: "Setup script not found" },
+        { status: 404 },
+      );
   }
 }
 
-function generateClaudeCodeScript(gatewayOrigin: string, configVar: string): Response {
+function generateClaudeCodeScript(
+  gatewayOrigin: string,
+  configVar: string,
+): Response {
   const script = `#!/usr/bin/env bash
 # Configure Claude Code to use LLM Gateway as your API provider.
 #
@@ -202,7 +209,10 @@ echo "Run 'claude' to start using Claude Code through LLM Gateway."
   });
 }
 
-function generateOpenClawScript(gatewayOrigin: string, configVar: string): Response {
+function generateOpenClawScript(
+  gatewayOrigin: string,
+  configVar: string,
+): Response {
   const script = `#!/usr/bin/env bash
 # Configure OpenClaw to use LLM Gateway as your API provider.
 #
