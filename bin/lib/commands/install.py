@@ -22,6 +22,41 @@ from ..common.process import find_proxy_pid
 from ..common.prompts import confirm as _confirm
 
 
+def _resolve_install_mode(
+    current_mode: str,
+    *,
+    service_name: str,
+    running: bool,
+    installed: bool,
+    setup_prompt: str,
+    start_prompt: str,
+    start_hint: str,
+    running_message: str | None = None,
+) -> str:
+    """Decide whether to install/start a service, with consistent prompting."""
+    if current_mode:
+        return current_mode
+
+    if running:
+        info(running_message or f"{service_name} already running — skipping")
+        return "no"
+
+    if installed:
+        if is_interactive():
+            if _confirm(start_prompt, default=False):
+                return "yes"
+            info(f"Skipped starting {service_name}. Run '{start_hint}' when ready.")
+        else:
+            info(f"{service_name} is installed but not running.")
+            info(f"Run '{start_hint}' to start it.")
+        return "no"
+
+    if is_interactive():
+        return "yes" if _confirm(setup_prompt) else "no"
+
+    return current_mode
+
+
 def cmd_install(
     *,
     db_mode: str = "",
@@ -118,28 +153,27 @@ def cmd_install(
         "LOCAL_TRANSCRIPTION_API_BASE", "http://localhost:10300/v1",
     )
 
-    # Auto-detect: skip if already running, install if binary found but not running
-    if not embed_mode:
-        if _ollama_is_running(embed_base):
-            info(f"Embedding server already running at {embed_base}")
-        elif shutil.which("ollama"):
-            embed_mode = "yes"
-        elif is_interactive():
-            if _confirm("Set up local embedding server (Ollama)?"):
-                embed_mode = "yes"
-            else:
-                embed_mode = "no"
+    embed_mode = _resolve_install_mode(
+        embed_mode,
+        service_name="embedding server (Ollama)",
+        running=_ollama_is_running(embed_base),
+        installed=bool(shutil.which("ollama")),
+        setup_prompt="Set up local embedding server (Ollama)?",
+        start_prompt="Ollama is installed but not running. Start it now?",
+        start_hint="litellmctl install --with-embedding",
+        running_message=f"Embedding server already running at {embed_base}",
+    )
 
-    if not transcr_mode:
-        if _transcription_is_running(transcr_base):
-            info(f"Transcription server already running at {transcr_base}")
-        elif shutil.which("faster-whisper-server") or shutil.which("speaches"):
-            transcr_mode = "yes"
-        elif is_interactive():
-            if _confirm("Set up local transcription server (faster-whisper-server)?"):
-                transcr_mode = "yes"
-            else:
-                transcr_mode = "no"
+    transcr_mode = _resolve_install_mode(
+        transcr_mode,
+        service_name="transcription server",
+        running=_transcription_is_running(transcr_base),
+        installed=bool(shutil.which("faster-whisper-server") or shutil.which("speaches")),
+        setup_prompt="Set up local transcription server (faster-whisper-server)?",
+        start_prompt="Transcription server is installed but not running. Start it now?",
+        start_hint="litellmctl install --with-transcription",
+        running_message=f"Transcription server already running at {transcr_base}",
+    )
 
     if embed_mode == "yes" or transcr_mode == "yes":
         console.print()
@@ -150,24 +184,31 @@ def cmd_install(
             install_transcription()
 
     # ── SearXNG ───────────────────────────────────────────────────────────
-    if not searxng_mode:
-        if shutil.which("docker"):
-            result = subprocess.run(
-                ["docker", "ps", "--format", "{{.Names}}"],
-                capture_output=True, text=True,
-            )
-            if "searxng" in result.stdout.splitlines():
-                info("SearXNG already running — skipping")
-            elif is_interactive():
-                if _confirm("Set up SearXNG search server?"):
-                    searxng_mode = "yes"
-                else:
-                    searxng_mode = "no"
-        elif is_interactive():
-            if _confirm("Set up SearXNG search server?"):
-                searxng_mode = "yes"
-            else:
-                searxng_mode = "no"
+    searxng_running = False
+    searxng_installed = False
+    if shutil.which("docker"):
+        running_result = subprocess.run(
+            ["docker", "ps", "--format", "{{.Names}}"],
+            capture_output=True, text=True,
+        )
+        searxng_running = "searxng" in running_result.stdout.splitlines()
+
+        installed_result = subprocess.run(
+            ["docker", "ps", "-a", "--format", "{{.Names}}"],
+            capture_output=True, text=True,
+        )
+        searxng_installed = "searxng" in installed_result.stdout.splitlines()
+
+    searxng_mode = _resolve_install_mode(
+        searxng_mode,
+        service_name="SearXNG",
+        running=searxng_running,
+        installed=searxng_installed,
+        setup_prompt="Set up SearXNG search server?",
+        start_prompt="SearXNG is installed but stopped. Start it now?",
+        start_hint="docker start searxng",
+        running_message="SearXNG already running — skipping",
+    )
 
     if searxng_mode == "yes":
         console.print()

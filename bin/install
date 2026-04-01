@@ -140,6 +140,45 @@ sync_repo() {
   esac
 }
 
+normalize_submodule_ref() {
+  local dir="$1"
+  [ -d "$dir/.git" ] || [ -f "$dir/.git" ] || return 0
+
+  # Avoid changing branch state if user has local submodule edits.
+  if has_local_changes "$dir"; then
+    warn "Skipping submodule branch normalization (local changes detected)."
+    return 0
+  fi
+
+  local head_sha main_sha current_branch
+  head_sha=$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)
+  if [ -z "$head_sha" ]; then
+    return 0
+  fi
+
+  # Fetch remote main so comparison is accurate after sync.
+  run_with_timeout 30 git -C "$dir" fetch --quiet origin main || true
+  main_sha=$(git -C "$dir" rev-parse origin/main 2>/dev/null || true)
+  if [ -z "$main_sha" ]; then
+    main_sha=$(git -C "$dir" rev-parse main 2>/dev/null || true)
+  fi
+  [ -n "$main_sha" ] || return 0
+
+  if [ "$head_sha" = "$main_sha" ]; then
+    current_branch="$(git -C "$dir" symbolic-ref -q --short HEAD 2>/dev/null || true)"
+    if [ "$current_branch" != "main" ]; then
+      if git -C "$dir" show-ref --verify --quiet refs/heads/main; then
+        git -C "$dir" checkout -q main
+      else
+        git -C "$dir" checkout -q -b main origin/main
+      fi
+      info "Submodule aligned to branch main (matches origin/main)."
+    fi
+  else
+    info "Submodule pinned to commit $head_sha (does not match origin/main)."
+  fi
+}
+
 detect_python() {
   for cmd in python3 python; do
     if command -v "$cmd" &>/dev/null; then
@@ -215,9 +254,11 @@ fi
 if [ ! -f "$SUBMODULE_DIR/pyproject.toml" ]; then
   info "Initializing litellm submodule ..."
   run_with_timeout 120 git -C "$PROJECT_DIR" submodule update --init --depth 1 litellm
+  normalize_submodule_ref "$SUBMODULE_DIR"
 else
   info "Checking litellm submodule ..."
   sync_repo "$SUBMODULE_DIR" "litellm submodule" submodule
+  normalize_submodule_ref "$SUBMODULE_DIR"
 fi
 
 # ── Virtualenv ──

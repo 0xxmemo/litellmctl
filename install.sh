@@ -21,6 +21,38 @@ error() { printf "\033[1;31m==> %s\033[0m\n" "$*" >&2; }
 ok()    { printf "  \033[32m✓\033[0m %s\n" "$*"; }
 skip()  { printf "  \033[33m-\033[0m %s\n" "$*"; }
 
+normalize_submodule_ref() {
+  local dir="$1"
+  [ -d "$dir/.git" ] || [ -f "$dir/.git" ] || return 0
+
+  local head_sha main_sha current_branch
+  head_sha=$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)
+  if [ -z "$head_sha" ]; then
+    return 0
+  fi
+
+  git -C "$dir" fetch --quiet origin main || true
+  main_sha=$(git -C "$dir" rev-parse origin/main 2>/dev/null || true)
+  if [ -z "$main_sha" ]; then
+    main_sha=$(git -C "$dir" rev-parse main 2>/dev/null || true)
+  fi
+  [ -n "$main_sha" ] || return 0
+
+  if [ "$head_sha" = "$main_sha" ]; then
+    current_branch="$(git -C "$dir" symbolic-ref -q --short HEAD 2>/dev/null || true)"
+    if [ "$current_branch" != "main" ]; then
+      if git -C "$dir" show-ref --verify --quiet refs/heads/main; then
+        git -C "$dir" checkout -q main
+      else
+        git -C "$dir" checkout -q -b main origin/main
+      fi
+      ok "Submodule aligned to branch main (matches origin/main)"
+    fi
+  else
+    info "Submodule pinned to commit $head_sha (does not match origin/main)"
+  fi
+}
+
 # ── 1. Prerequisites ──────────────────────────────────────────────────────
 
 info "litellmctl installer"
@@ -167,8 +199,10 @@ SUBMODULE_DIR="$INSTALL_DIR/litellm"
 if [ ! -f "$SUBMODULE_DIR/pyproject.toml" ]; then
   info "Initializing litellm submodule ..."
   git -C "$INSTALL_DIR" submodule update --init --depth 1 litellm
+  normalize_submodule_ref "$SUBMODULE_DIR"
   ok "Submodule ready"
 else
+  normalize_submodule_ref "$SUBMODULE_DIR"
   ok "Submodule already initialized"
 fi
 
