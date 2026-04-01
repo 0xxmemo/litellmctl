@@ -143,7 +143,7 @@ New providers on top of upstream `BerriAI/litellm`:
 | `kimi_code` | Moonshot Kimi Code API (`api.kimi.com/coding/v1`) | OAuth Bearer + agent headers |
 | `qwen_portal` | Qwen Portal API (`portal.qwen.ai/v1`) | OAuth Bearer |
 | `chatgpt` / `codex` | OpenAI Responses API | OAuth Bearer |
-| `alibaba` | Alibaba DashScope Coding Plan (`coding-intl.dashscope.aliyuncs.com`) | API key |
+| `dashscope` | Alibaba DashScope Coding Plan (`https://coding-intl.dashscope.aliyuncs.com/v1`) | API key (`DASHSCOPE_API_KEY`) |
 
 - System prompt injection callback (`bin/system_prompt_injection.py`) —
   pre-call hook that injects a configurable system prompt on all requests

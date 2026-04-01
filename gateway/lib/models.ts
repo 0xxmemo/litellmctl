@@ -63,7 +63,7 @@ const PROVIDER_AUTH: Record<string, { envVar: string; hint: string } | null> = {
   'gemini-cli': { envVar: 'GEMINI_API_KEY', hint: 'AIza...' },
   gemini: { envVar: 'GEMINI_API_KEY', hint: 'AIza...' },
   'qwen-cli': { envVar: 'QWEN_API_KEY', hint: 'sk-...' },
-  alibaba: { envVar: 'ALIBABACLOUD_API_KEY', hint: 'sk-...' },
+  alibaba: { envVar: 'DASHSCOPE_API_KEY', hint: 'sk-...' },
   zai: { envVar: 'ZAI_API_KEY', hint: 'sk-...' },
   minimax: { envVar: 'MINIMAX_API_KEY', hint: 'sk-...' },
   'kimi-code': { envVar: 'MOONSHOT_API_KEY', hint: 'sk-...' },
