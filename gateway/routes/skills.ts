@@ -6,7 +6,6 @@
 
 import {
   scanSkills,
-  parseFrontmatter,
   buildGatewayOrigin,
   hasSkillComponent,
   getSkillComponent,

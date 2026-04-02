@@ -38,6 +38,16 @@ def generate_yaml(models: list[dict], aliases: dict[str, str],
         lines.append("")
         lines.append("  # ── Local embedding models ──────────────────────────────────────────────")
         lines.append("  # Base URL: LOCAL_EMBEDDING_API_BASE env var  (default: http://localhost:11434)")
+        ollama_tags: list[str] = []
+        for em in embedding_models:
+            raw = (em.get("litellm_params") or {}).get("model")
+            if isinstance(raw, str) and raw.startswith("ollama/"):
+                tag = raw.split("/", 1)[1]
+                if tag not in ollama_tags:
+                    ollama_tags.append(tag)
+        if ollama_tags:
+            pull = " && ollama pull ".join(ollama_tags)
+            lines.append(f"  # ollama pull {pull}")
         write_model_entries(lines, embedding_models)
 
     if transcription_models:

@@ -35,6 +35,13 @@ export interface ExtendedModel extends NormalizedModel {
   apiKeyEnvVar: string | null
   apiKeyHint: string | null
   supportsStreaming: boolean
+  /** Embedding vector width from config model_info.output_vector_size when set */
+  outputVectorSize: number | null
+  /**
+   * Typical widths you can pass as `dimensions` on POST /v1/embeddings when supported.
+   * From model_info.embedding_dimensions_options in config, or inferred for known models.
+   */
+  embeddingDimensionsOptions: number[] | null
   mode: 'chat' | 'embedding' | 'audio_transcription' | 'image_generation' | 'responses' | string
   maxTokens: number | null
   maxInputTokens: number | null
@@ -199,6 +206,9 @@ export function dedupeModels(models: RawModel[]): NormalizedModel[] {
 interface LiteLLMModelInfo {
   litellm_provider?: string
   mode?: string
+  output_vector_size?: number
+  /** Optional list of supported embedding widths for the `dimensions` request field */
+  embedding_dimensions_options?: number[]
   max_tokens?: number
   max_input_tokens?: number
   max_output_tokens?: number
@@ -224,6 +234,30 @@ function nullIfMissing<T>(v: T | undefined | null): T | null {
   return v != null ? v : null
 }
 
+function normalizeEmbeddingDimensionsOptions(raw: unknown): number[] | null {
+  if (!Array.isArray(raw) || raw.length === 0) return null
+  const nums = raw
+    .map((x) => (typeof x === 'number' ? x : Number.parseInt(String(x), 10)))
+    .filter((n) => Number.isFinite(n) && n > 0)
+  if (nums.length === 0) return null
+  return [...new Set(nums)].sort((a, b) => a - b)
+}
+
+/** Merge config and lightweight inference (e.g. Nomic v2 MoE Matryoshka sizes). */
+function resolveEmbeddingDimensionsOptions(
+  underlyingModel: string,
+  mode: string,
+  fromInfo: number[] | null,
+): number[] | null {
+  if (fromInfo && fromInfo.length > 0) return fromInfo
+  if (mode !== 'embedding') return null
+  const u = underlyingModel.toLowerCase()
+  if (u.includes('nomic-embed-text-v2') || u.includes('nomic-embed-text')) {
+    return [256, 512, 768]
+  }
+  return null
+}
+
 export function buildExtendedModel(raw: {
   model_name: string
   litellm_params?: { model?: string; api_base?: string; api_key?: string }
@@ -239,6 +273,11 @@ export function buildExtendedModel(raw: {
   const isStub = detectIsStub(modelName)
   const litellmProvider = mi.litellm_provider ?? provider
   const mode = mi.mode ?? 'chat'
+  const embeddingDimensionsOptions = resolveEmbeddingDimensionsOptions(
+    underlyingModel,
+    mode,
+    normalizeEmbeddingDimensionsOptions(mi.embedding_dimensions_options),
+  )
 
   return {
     id: modelName,
@@ -253,6 +292,8 @@ export function buildExtendedModel(raw: {
     isStub,
     ...resolveProviderAuth(provider),
     supportsStreaming: mode !== 'embedding' && mi.supports_native_streaming !== false,
+    outputVectorSize: nullIfMissing(mi.output_vector_size),
+    embeddingDimensionsOptions,
     mode,
     maxTokens: nullIfMissing(mi.max_tokens),
     maxInputTokens: nullIfMissing(mi.max_input_tokens),

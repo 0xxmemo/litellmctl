@@ -69,6 +69,22 @@ class TestParseEnv:
         assert result == {}
 
 
+class TestLoadEnv:
+    def test_strips_quotes_into_environ(self, tmp_path: Path, monkeypatch):
+        """Quoted .env values must not leave literal quotes in os.environ (breaks api_base URLs)."""
+        ef = tmp_path / ".env"
+        ef.write_text('LOCAL_EMBEDDING_API_BASE="http://localhost:11434"\n')
+        import lib.common.env as env_mod
+        original_file = env_mod.ENV_FILE
+        monkeypatch.delenv("LOCAL_EMBEDDING_API_BASE", raising=False)
+        try:
+            env_mod.ENV_FILE = ef
+            env_mod.load_env()
+        finally:
+            env_mod.ENV_FILE = original_file
+        assert os.environ["LOCAL_EMBEDDING_API_BASE"] == "http://localhost:11434"
+
+
 class TestUpsertEnvVar:
     def test_updates_existing(self, tmp_env_file: Path):
         from lib.common.env import upsert_env_var

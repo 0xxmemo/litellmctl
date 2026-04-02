@@ -170,12 +170,15 @@ export function EndpointTryCard({
     error: string | null
   } | null>(null)
 
-  // Track current curl example (updated when model changes)
   const [activeCurl, setActiveCurl] = useState(curlExample)
 
   const handleModelChange = (model: string) => {
     setBody((prev) => replaceModelInBody(prev, model))
     setActiveCurl(replaceModelInCurl(curlExample, model))
+  }
+
+  const handleBodyChange = (raw: string) => {
+    setBody(raw)
   }
 
   const handleSend = async () => {
@@ -252,9 +255,7 @@ export function EndpointTryCard({
         {/* curl tab */}
         <TabsContent value="curl">
           {(() => {
-            // Display: always show placeholder (key stays hidden on screen)
             const displayCurl = activeCurl
-            // Copy: use actual key from localStorage if available, else placeholder
             const copyCurl = apiKey
               ? activeCurl.split('YOUR_API_KEY').join(apiKey)
               : activeCurl
@@ -299,9 +300,14 @@ export function EndpointTryCard({
                 <textarea
                   className="w-full font-mono text-xs bg-slate-900 text-slate-200 p-3 rounded-lg border border-slate-700 resize-y min-h-[120px] focus:outline-none focus:ring-1 focus:ring-ring"
                   value={body}
-                  onChange={(e) => setBody(e.target.value)}
+                  onChange={(e) => handleBodyChange(e.target.value)}
                   spellCheck={false}
                 />
+                {bodyNote && (
+                  <div className="text-xs text-muted-foreground bg-muted/30 p-3 rounded-lg mt-2">
+                    {bodyNote}
+                  </div>
+                )}
               </div>
             ) : hasQueryParams ? (
               <div className="space-y-2">

@@ -8,7 +8,7 @@ from ..common.env import load_env, remove_db_env_config
 from ..common.formatting import console, info, warn, error
 from ..common.platform import is_macos, is_linux, is_interactive
 from ..common.process import get_proxy_port
-from ..common.network import http_check, transcr_http_check
+from ..common.network import http_check, ollama_server_check, transcr_http_check
 
 from .service import launchd_uninstall, systemd_uninstall, nohup_stop
 from .gateway import uninstall_gateway, gateway_is_running
@@ -58,7 +58,7 @@ def _uninstall_embedding() -> None:
     if not shutil.which("ollama"):
         console.print("  Not installed.\n")
         return
-    if http_check(f"{embed_base.rstrip('/')}/v1/models", timeout=2):
+    if ollama_server_check(embed_base, timeout=2):
         console.print(f"  Running at {embed_base}. Stop it:\n")
         if is_macos() and shutil.which("brew"):
             console.print("      brew services stop ollama\n")

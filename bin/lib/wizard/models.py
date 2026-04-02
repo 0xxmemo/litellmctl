@@ -15,6 +15,8 @@ def model_entry(m: dict) -> dict:
     for key in ("api_key", "api_base"):
         if key in m:
             params[key] = m[key]
+    if m.get("dimensions") is not None:
+        params["dimensions"] = m["dimensions"]
     if "thinking" in m:
         params["thinking"] = dict(m["thinking"])
     entry["litellm_params"] = params

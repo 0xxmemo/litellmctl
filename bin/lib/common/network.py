@@ -20,6 +20,15 @@ def http_check(url: str, timeout: int = 3) -> bool:
         return False
 
 
+def ollama_server_check(base_url: str, timeout: int = 3) -> bool:
+    """True if an Ollama instance responds (native /api/tags — works on all Ollama versions)."""
+    base = base_url.rstrip("/")
+    if http_check(f"{base}/api/tags", timeout=timeout):
+        return True
+    # Some proxied setups only expose OpenAI-compatible routes
+    return http_check(f"{base}/v1/models", timeout=timeout)
+
+
 def transcr_http_check(base_url: str, timeout: int = 3) -> bool:
     """Return True if transcription server accepts connections (any HTTP status)."""
     try:

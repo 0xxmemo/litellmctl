@@ -56,6 +56,31 @@ export function ModelsList({ extendedModels }: ModelsListProps) {
               )}
               <code className="text-sm font-mono truncate flex-1">{model.displayName}</code>
 
+              {model.mode === 'embedding' &&
+                (model.embeddingDimensionsOptions?.length ||
+                  model.outputVectorSize != null) && (
+                <span
+                  className="text-xs tabular-nums text-muted-foreground shrink-0 max-w-44 truncate text-right"
+                  title={
+                    model.embeddingDimensionsOptions?.length
+                      ? `Optional dimensions field on POST /v1/embeddings${
+                          model.outputVectorSize != null
+                            ? ` (deployment default ${model.outputVectorSize})`
+                            : ''
+                        }`
+                      : model.outputVectorSize != null
+                        ? 'Default vector width (model_info.output_vector_size)'
+                        : undefined
+                  }
+                >
+                  {model.embeddingDimensionsOptions?.length ? (
+                    <>{model.embeddingDimensionsOptions.join(', ')}</>
+                  ) : (
+                    <>{model.outputVectorSize}d</>
+                  )}
+                </span>
+              )}
+
               {/* Capability icons */}
               <div className="flex items-center gap-1.5 shrink-0">
                 {model.supportsVision && (

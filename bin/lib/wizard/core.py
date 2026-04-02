@@ -237,6 +237,10 @@ def run_wizard() -> bool:
 
     console.print(f"\n  Models: {len(models)} total  |  Tiers: {', '.join(active_tiers)}")
     console.print(f"  Providers: {', '.join(providers[p]['name'] for p in all_selected)}")
+    if embedding_models:
+        console.print(f"  {dim(f'Local embedding deployments: {len(embedding_models)}')}")
+    if transcription_models:
+        console.print(f"  {dim(f'Local transcription deployments: {len(transcription_models)}')}")
 
     env_vars_needed: list[str] = []
     auth_cmds_needed: list[str] = []

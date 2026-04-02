@@ -8,6 +8,14 @@ from pathlib import Path
 from .paths import PROJECT_DIR, ENV_FILE
 
 
+def _strip_env_value_quotes(raw: str) -> str:
+    """Drop one pair of surrounding quotes (.env style: KEY=\"value\")."""
+    v = raw.strip()
+    if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
+        return v[1:-1]
+    return v
+
+
 def load_env() -> None:
     """Load .env into os.environ (skips already-set vars)."""
     if not ENV_FILE.exists():
@@ -17,7 +25,8 @@ def load_env() -> None:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        key, value = key.strip(), value.strip()
+        key = key.strip()
+        value = _strip_env_value_quotes(value)
         if key and key not in os.environ:
             os.environ[key] = value
 
@@ -32,10 +41,7 @@ def parse_env() -> dict[str, str]:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        v = value.strip()
-        if len(v) >= 2 and v[0] == v[-1] and v[0] in ('"', "'"):
-            v = v[1:-1]
-        env[key.strip()] = v
+        env[key.strip()] = _strip_env_value_quotes(value)
     return env
 
 
@@ -90,8 +96,8 @@ def patch_local_defaults(env_file: Path | None = None) -> bool:
     ef = env_file or ENV_FILE
     dirty = False
     defaults = {
-        "LOCAL_EMBEDDING_API_BASE": '"http://localhost:11434"',
-        "LOCAL_TRANSCRIPTION_API_BASE": '"http://localhost:10300/v1"',
+        "LOCAL_EMBEDDING_API_BASE": "http://localhost:11434",
+        "LOCAL_TRANSCRIPTION_API_BASE": "http://localhost:10300/v1",
     }
     text = ef.read_text() if ef.exists() else ""
     for var, val in defaults.items():

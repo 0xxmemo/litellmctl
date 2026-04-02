@@ -10,7 +10,7 @@ from ..common.paths import PROJECT_DIR, LOG_DIR
 from ..common.env import load_env
 from ..common.formatting import console, info, warn
 from ..common.platform import is_macos, is_linux
-from ..common.network import http_check, transcr_http_check, port_in_use
+from ..common.network import ollama_server_check, transcr_http_check, port_in_use
 
 
 def _extract_port(url: str) -> int:
@@ -25,7 +25,7 @@ def _ollama_is_running(embed_base: str) -> bool:
     port = _extract_port(embed_base)
     if port_in_use(port):
         return True
-    return http_check(f"{embed_base.rstrip('/')}/v1/models", timeout=2)
+    return ollama_server_check(embed_base, timeout=2)
 
 
 def _transcription_is_running(transcr_base: str) -> bool:
@@ -228,13 +228,13 @@ def install_embedding() -> None:
                 else:
                     warn("Ollama did not respond — start manually: ollama serve")
 
-        for model in ["nomic-embed-text", "mxbai-embed-large"]:
-            result = subprocess.run(["ollama", "list"], capture_output=True, text=True)
-            if model not in result.stdout:
-                info(f"Pulling {model} ...")
-                subprocess.call(["ollama", "pull", model])
-            else:
-                info(f"{model} already present")
+        embed_model = "nomic-embed-text-v2-moe"
+        result = subprocess.run(["ollama", "list"], capture_output=True, text=True)
+        if embed_model not in result.stdout:
+            info(f"Pulling {embed_model} ...")
+            subprocess.call(["ollama", "pull", embed_model])
+        else:
+            info(f"{embed_model} already present")
     else:
         warn("Ollama install failed — re-run after installing manually: litellmctl install --with-embedding")
 

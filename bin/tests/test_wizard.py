@@ -68,6 +68,17 @@ class TestModelEntry:
         result = model_entry(m)
         assert result["litellm_params"]["thinking"]["type"] == "enabled"
 
+    def test_includes_dimensions_for_single_local_embedding(self):
+        from lib.wizard.models import model_entry
+        m = {
+            "model_name": "local/nomic-embed-text",
+            "model": "ollama/nomic-embed-text-v2-moe",
+            "api_base": "os.environ/LOCAL_EMBEDDING_API_BASE",
+            "dimensions": 512,
+        }
+        result = model_entry(m)
+        assert result["litellm_params"]["dimensions"] == 512
+
     def test_no_extra_keys_without_optionals(self):
         from lib.wizard.models import model_entry
         m = {"model_name": "x", "model": "p/m"}
@@ -181,3 +192,74 @@ class TestBuildFallbacks:
             providers=providers,
         )
         assert fallbacks == []
+
+
+# ── Local provider readiness (wizard) ──────────────────────────────────────────
+
+class TestCheckProviderReadyLocal:
+    def test_only_ollama_up_still_ready(self, monkeypatch):
+        from lib.wizard import providers as p
+        monkeypatch.setattr(
+            p,
+            "probe_local_services",
+            lambda _env: (True, False, "http://127.0.0.1:11434", "http://127.0.0.1:10300/v1"),
+        )
+        prov = {
+            "auth": "none",
+            "embedding_models": [{"model_name": "a", "model": "ollama/a"}],
+            "transcription_models": [{"model_name": "b", "model": "openai/whisper"}],
+        }
+        ok, reason = p.check_provider_ready("local", prov, {}, {})
+        assert ok is True
+        assert "ollama" in reason.lower()
+
+    def test_supplemental_both_servers_down_still_ready(self, monkeypatch):
+        from lib.wizard import providers as p
+        monkeypatch.setattr(
+            p,
+            "probe_local_services",
+            lambda _env: (False, False, "http://127.0.0.1:11434", "http://127.0.0.1:10300/v1"),
+        )
+        prov = {
+            "auth": "none",
+            "role": "supplemental",
+            "embedding_models": [{"model_name": "a", "model": "ollama/a"}],
+            "transcription_models": [{"model_name": "b", "model": "openai/whisper"}],
+        }
+        ok, _reason = p.check_provider_ready("local", prov, {}, {})
+        assert ok is True
+
+    def test_non_supplemental_both_down_not_ready(self, monkeypatch):
+        from lib.wizard import providers as p
+        monkeypatch.setattr(
+            p,
+            "probe_local_services",
+            lambda _env: (False, False, "http://127.0.0.1:11434", "http://127.0.0.1:10300/v1"),
+        )
+        prov = {
+            "auth": "none",
+            "embedding_models": [{"model_name": "a", "model": "ollama/a"}],
+            "transcription_models": [{"model_name": "b", "model": "openai/whisper"}],
+        }
+        ok, _reason = p.check_provider_ready("custom_local", prov, {}, {})
+        assert ok is False
+
+
+class TestGenerateYamlOllamaPullHint:
+    def test_includes_ollama_pull_for_embedding_models(self):
+        from lib.wizard.config_gen import generate_yaml
+        defaults = {"router_settings": {}, "litellm_settings": {}, "general_settings": {}}
+        emb = [
+            {
+                "model_name": "local/foo",
+                "litellm_params": {"model": "ollama/foo", "api_base": "os.environ/LOCAL_EMBEDDING_API_BASE"},
+                "model_info": {"mode": "embedding"},
+            },
+            {
+                "model_name": "local/bar",
+                "litellm_params": {"model": "ollama/bar", "api_base": "os.environ/LOCAL_EMBEDDING_API_BASE"},
+                "model_info": {"mode": "embedding"},
+            },
+        ]
+        out = generate_yaml([], {}, [], defaults, embedding_models=emb, transcription_models=None)
+        assert "ollama pull foo && ollama pull bar" in out

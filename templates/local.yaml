@@ -8,38 +8,20 @@ role: supplemental
 tiers: {}
 extra_models: []
 
-# Local embedding models
-# Served by Ollama at LOCAL_EMBEDDING_API_BASE (written to .env by litellmctl install --with-embedding)
-# Uses litellm's built-in ollama provider with api_base override.
+# Local embedding — single preset: Nomic Embed v2 MoE @ 512-d (Matryoshka, lightweight vectors).
+# Ollama: ollama pull nomic-embed-text-v2-moe
+# Optional: pass "dimensions" on /v1/embeddings to override (e.g. 768) when supported.
 embedding_models:
   - model_name: local/nomic-embed-text
-    model: ollama/nomic-embed-text
+    model: ollama/nomic-embed-text-v2-moe
     api_base: os.environ/LOCAL_EMBEDDING_API_BASE
+    dimensions: 512
     model_info:
       mode: embedding
       input_cost_per_token: 0
       output_cost_per_token: 0
-  - model_name: local/mxbai-embed-large
-    model: ollama/mxbai-embed-large
-    api_base: os.environ/LOCAL_EMBEDDING_API_BASE
-    model_info:
-      mode: embedding
-      input_cost_per_token: 0
-      output_cost_per_token: 0
-  - model_name: local/bge-m3
-    model: ollama/bge-m3
-    api_base: os.environ/LOCAL_EMBEDDING_API_BASE
-    model_info:
-      mode: embedding
-      input_cost_per_token: 0
-      output_cost_per_token: 0
-  - model_name: local/all-minilm
-    model: ollama/all-minilm
-    api_base: os.environ/LOCAL_EMBEDDING_API_BASE
-    model_info:
-      mode: embedding
-      input_cost_per_token: 0
-      output_cost_per_token: 0
+      output_vector_size: 512
+      embedding_dimensions_options: [256, 512, 768]
 
 # Local transcription models
 # Served by faster-whisper-server at LOCAL_TRANSCRIPTION_API_BASE (written to .env by litellmctl install --with-transcription)

@@ -83,7 +83,7 @@ function buildEndpoints(baseUrl: string) {
       method: "POST",
       path: "/v1/embeddings",
       description:
-        "Text embeddings — local Ollama embedding models running on your machine",
+        "Text embeddings — local Nomic Embed v2 MoE (Ollama), 512-d default",
       requiresAuth: true,
       defaultModel: "local/nomic-embed-text",
       allowedModes: ['embedding'],
@@ -92,15 +92,20 @@ function buildEndpoints(baseUrl: string) {
   -H "Content-Type: application/json" \\
   -d '{
     "model": "local/nomic-embed-text",
-    "input": "The quick brown fox"
+    "input": "The quick brown fox",
+    "dimensions": 768
   }'`,
       defaultBody: JSON.stringify(
-        { model: "local/nomic-embed-text", input: "The quick brown fox" },
+        {
+          model: "local/nomic-embed-text",
+          input: "The quick brown fox",
+          dimensions: 768,
+        },
         null,
         2,
       ),
       bodyNote:
-        "Uses local Ollama embedding models. Available: local/nomic-embed-text, local/mxbai-embed-large, local/bge-m3, local/all-minilm.",
+        "Optional `dimensions` selects output width when the backend supports it. See Available Models for typical values; omit the key to use the deployment default.",
     },
     {
       method: "POST",
@@ -266,7 +271,8 @@ export function Docs() {
           </CardTitle>
           <CardDescription>
             Live list fetched from <code>/v1/models</code> — public endpoint, no
-            auth required.
+            auth required. Embedding models list common <code>dimensions</code>{' '}
+            choices when known; omit the field to use the deployment default.
           </CardDescription>
         </CardHeader>
         <CardContent>

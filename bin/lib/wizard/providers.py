@@ -11,7 +11,7 @@ import yaml
 
 from ..common.paths import TEMPLATES_DIR, PROJECT_DIR, ENV_FILE
 from ..common.formatting import TICK, CROSS, console
-from ..common.network import http_check, transcr_http_check
+from ..common.network import ollama_server_check, transcr_http_check
 
 
 def load_defaults() -> dict:
@@ -87,7 +87,8 @@ def auth_file_valid(env: dict, auth_info: dict) -> bool:
         return False
 
 
-def check_local_servers(env: dict) -> tuple[bool, str]:
+def probe_local_services(env: dict) -> tuple[bool, bool, str, str]:
+    """Return (embed_ok, transcr_ok, embed_base, transcr_base)."""
     embed_base = (
         env.get("LOCAL_EMBEDDING_API_BASE")
         or env.get("OLLAMA_API_BASE")
@@ -97,18 +98,9 @@ def check_local_servers(env: dict) -> tuple[bool, str]:
         env.get("LOCAL_TRANSCRIPTION_API_BASE")
         or "http://localhost:10300/v1"
     ).rstrip("/")
-
-    embed_up = http_check(f"{embed_base}/v1/models", timeout=2)
-    transcr_up = transcr_http_check(transcr_base, timeout=2)
-
-    if embed_up and transcr_up:
-        return True, "both servers reachable"
-    parts = []
-    if not embed_up:
-        parts.append(f"embedding offline ({embed_base})")
-    if not transcr_up:
-        parts.append(f"transcription offline ({transcr_base})")
-    return False, "; ".join(parts) + " — run: litellmctl local setup"
+    embed_ok = ollama_server_check(embed_base, timeout=2)
+    transcr_ok = transcr_http_check(transcr_base, timeout=2)
+    return embed_ok, transcr_ok, embed_base, transcr_base
 
 
 def check_provider_ready(pid: str, prov: dict, env: dict,
@@ -129,10 +121,50 @@ def check_provider_ready(pid: str, prov: dict, env: dict,
     has_embed = bool(prov.get("embedding_models"))
     has_transcr = bool(prov.get("transcription_models"))
     if has_embed or has_transcr:
-        up, reason = check_local_servers(env)
-        if up:
-            return True, "local servers reachable"
-        return False, reason
+        embed_ok, transcr_ok, embed_base, transcr_base = probe_local_services(env)
+        # Allow wizard to proceed if any configured local service is up (common: Ollama only).
+        if has_embed and has_transcr:
+            if embed_ok and transcr_ok:
+                return True, "Ollama and transcription reachable"
+            if embed_ok:
+                return True, (
+                    f"Ollama OK ({embed_base}); transcription offline ({transcr_base}) "
+                    "— embeddings will work; run litellmctl local setup for whisper"
+                )
+            if transcr_ok:
+                return True, (
+                    f"transcription OK ({transcr_base}); Ollama offline ({embed_base}) "
+                    "— start Ollama for local embeddings"
+                )
+            if prov.get("role") == "supplemental":
+                return True, (
+                    "local servers not detected — Ollama/transcription entries will still be written; "
+                    "set LOCAL_EMBEDDING_API_BASE / LOCAL_TRANSCRIPTION_API_BASE and run litellmctl local setup"
+                )
+            return False, (
+                f"Ollama ({embed_base}) and transcription ({transcr_base}) offline "
+                "— run: litellmctl local setup"
+            )
+        if has_embed:
+            if embed_ok:
+                return True, f"Ollama reachable ({embed_base})"
+            if prov.get("role") == "supplemental":
+                return True, (
+                    f"Ollama not detected ({embed_base}) — embedding entries will still be written; "
+                    "start Ollama before calling the API"
+                )
+            return False, f"Ollama offline ({embed_base}) — run: litellmctl local setup"
+        if has_transcr:
+            if transcr_ok:
+                return True, f"transcription reachable ({transcr_base})"
+            if prov.get("role") == "supplemental":
+                return True, (
+                    f"transcription not detected ({transcr_base}) — transcription entries will still be written; "
+                    "start faster-whisper-server before calling the API"
+                )
+            return False, (
+                f"transcription offline ({transcr_base}) — run: litellmctl local setup"
+            )
     return True, "no auth required"
 
 
