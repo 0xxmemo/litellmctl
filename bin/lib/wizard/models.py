@@ -23,21 +23,17 @@ def model_entry(m: dict) -> dict:
     return entry
 
 
-def collect_models(selected_providers: list[str], providers: OrderedDict,
-                   tiers: list[str]) -> list[dict]:
+def collect_models(selected_providers: list[str], providers: OrderedDict) -> list[dict]:
+    """Collect all models from selected providers, dedup, sort alphanumerically."""
     seen: set[str] = set()
     models: list[dict] = []
     for pid in selected_providers:
         prov = providers[pid]
-        for tier in tiers:
-            for m in prov["tiers"].get(tier, []):
-                if m["model_name"] not in seen:
-                    seen.add(m["model_name"])
-                    models.append(model_entry(m))
-        for m in prov.get("extra_models", []):
+        for m in prov.get("models", []):
             if m["model_name"] not in seen:
                 seen.add(m["model_name"])
                 models.append(model_entry(m))
+    models.sort(key=lambda e: e["model_name"])
     return models
 
 
@@ -54,37 +50,29 @@ def collect_task_models(selected_providers: list[str], providers: OrderedDict,
     return models
 
 
-def build_aliases(tiers: list[str], primary_map: dict[str, str],
-                  providers: OrderedDict) -> dict[str, str]:
+def build_aliases(chain_sets: list[dict]) -> dict[str, str]:
+    """Build model_group_alias from chain set definitions.
+
+    Each chain set has: name, primary (model_name string).
+    """
     aliases = {}
-    for tier in tiers:
-        pid = primary_map.get(tier)
-        if not pid or pid not in providers:
-            continue
-        tier_models = providers[pid]["tiers"].get(tier, [])
-        if tier_models:
-            aliases[tier] = tier_models[0]["model_name"]
+    for chain in chain_sets:
+        name = chain["name"]
+        primary = chain.get("primary")
+        if primary:
+            aliases[name] = primary
     return aliases
 
 
-def build_fallbacks(tiers: list[str], primary_map: dict[str, str],
-                    fallback_map: dict[str, list[str]],
-                    providers: OrderedDict) -> list[dict]:
+def build_fallbacks(chain_sets: list[dict]) -> list[dict]:
+    """Build fallback list from chain set definitions.
+
+    Each chain set has: name, fallbacks (list of model_name strings).
+    """
     fallbacks: list[dict] = []
-    for tier in tiers:
-        primary_pid = primary_map.get(tier)
-        if not primary_pid:
-            continue
-        chain: list[str] = []
-        for fpid in fallback_map.get(tier, []):
-            if fpid == primary_pid:
-                continue
-            fp = providers.get(fpid)
-            if not fp:
-                continue
-            for m in fp["tiers"].get(tier, []):
-                if m["model_name"] not in chain:
-                    chain.append(m["model_name"])
-        if chain:
-            fallbacks.append({tier: chain})
+    for chain in chain_sets:
+        name = chain["name"]
+        fb_models = chain.get("fallbacks", [])
+        if fb_models:
+            fallbacks.append({name: fb_models})
     return fallbacks

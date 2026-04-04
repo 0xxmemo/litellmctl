@@ -23,33 +23,57 @@ def load_defaults() -> dict:
         return yaml.safe_load(f)
 
 
-def load_providers(load_order: list[str]) -> OrderedDict:
+def _flatten_tiers(data: dict) -> None:
+    """Backward compat: convert old tiers + extra_models format to flat models list."""
+    tiers = data.pop("tiers", {})
+    extra = data.pop("extra_models", [])
+    if not tiers and not extra:
+        return
+    seen: set[str] = set()
+    models: list[dict] = data.get("models", [])
+    # Collect existing model_names to avoid dupes
+    for m in models:
+        seen.add(m["model_name"])
+    # Flatten tiers (sorted by tier name for determinism)
+    for _tier_name in sorted(tiers.keys()):
+        for m in tiers[_tier_name]:
+            if m["model_name"] not in seen:
+                seen.add(m["model_name"])
+                models.append(m)
+    # Append extra models
+    for m in extra:
+        if m["model_name"] not in seen:
+            seen.add(m["model_name"])
+            models.append(m)
+    # Sort by model_name
+    models.sort(key=lambda m: m["model_name"])
+    data["models"] = models
+
+
+def _normalize_provider(data: dict) -> None:
+    """Ensure all expected keys exist on a provider dict."""
+    # Backward compat: flatten old tiers format
+    if "tiers" in data or "extra_models" in data:
+        _flatten_tiers(data)
+    data.setdefault("models", [])
+    data.setdefault("env_vars", [])
+    data.setdefault("auth", "none")
+    data.setdefault("embedding_models", [])
+    data.setdefault("transcription_models", [])
+    # Sort models by model_name
+    data["models"].sort(key=lambda m: m["model_name"])
+
+
+def load_providers() -> OrderedDict:
+    """Load all provider templates in alphanumeric order."""
     providers: OrderedDict = OrderedDict()
-    for pid in load_order:
-        path = TEMPLATES_DIR / f"{pid}.yaml"
-        if not path.exists():
-            continue
-        with open(path) as f:
-            data = yaml.safe_load(f)
-        data.setdefault("env_vars", [])
-        data.setdefault("extra_models", [])
-        data.setdefault("tiers", {})
-        data.setdefault("auth", "none")
-        data.setdefault("embedding_models", [])
-        data.setdefault("transcription_models", [])
-        providers[pid] = data
     for path in sorted(TEMPLATES_DIR.glob("*.yaml")):
         pid = path.stem
-        if pid == "defaults" or pid in providers:
+        if pid == "defaults":
             continue
         with open(path) as f:
             data = yaml.safe_load(f)
-        data.setdefault("env_vars", [])
-        data.setdefault("extra_models", [])
-        data.setdefault("tiers", {})
-        data.setdefault("auth", "none")
-        data.setdefault("embedding_models", [])
-        data.setdefault("transcription_models", [])
+        _normalize_provider(data)
         providers[pid] = data
     return providers
 

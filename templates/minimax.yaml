@@ -5,21 +5,8 @@ env_vars:
   - MINIMAX_API_KEY
 role: fallback
 
-tiers:
-  ultra:
-    - model_name: minimax/MiniMax-M2.5-highspeed
-      model: anthropic/MiniMax-M2.5-highspeed
-      api_key: os.environ/MINIMAX_API_KEY
-      api_base: https://api.minimax.io/anthropic
-  plus:
-    - model_name: minimax/MiniMax-M2.5-highspeed
-      model: anthropic/MiniMax-M2.5-highspeed
-      api_key: os.environ/MINIMAX_API_KEY
-      api_base: https://api.minimax.io/anthropic
-  lite:
-    - model_name: minimax/MiniMax-M2.5-highspeed
-      model: anthropic/MiniMax-M2.5-highspeed
-      api_key: os.environ/MINIMAX_API_KEY
-      api_base: https://api.minimax.io/anthropic
-
-extra_models: []
+models:
+  - model_name: minimax/MiniMax-M2.5-highspeed
+    model: anthropic/MiniMax-M2.5-highspeed
+    api_key: os.environ/MINIMAX_API_KEY
+    api_base: https://api.minimax.io/anthropic

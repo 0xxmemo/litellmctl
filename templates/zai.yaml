@@ -5,26 +5,17 @@ env_vars:
   - ZAI_API_KEY
 role: fallback
 
-tiers:
-  ultra:
-    - model_name: zai/glm-5
-      model: anthropic/glm-5
-      api_key: os.environ/ZAI_API_KEY
-      api_base: https://api.z.ai/api/anthropic
-  plus:
-    - model_name: zai/glm-4.5-air
-      model: anthropic/glm-4.5-air
-      api_key: os.environ/ZAI_API_KEY
-      api_base: https://api.z.ai/api/anthropic
-  lite:
-    - model_name: zai/glm-4.5-flash
-      model: anthropic/glm-4.5-flash
-      api_key: os.environ/ZAI_API_KEY
-      api_base: https://api.z.ai/api/anthropic
-
-extra_models:
+models:
   - model_name: zai/glm-4.5
     model: anthropic/glm-4.5
+    api_key: os.environ/ZAI_API_KEY
+    api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.5-air
+    model: anthropic/glm-4.5-air
+    api_key: os.environ/ZAI_API_KEY
+    api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-4.5-flash
+    model: anthropic/glm-4.5-flash
     api_key: os.environ/ZAI_API_KEY
     api_base: https://api.z.ai/api/anthropic
   - model_name: zai/glm-4.5v
@@ -51,11 +42,15 @@ extra_models:
     model: anthropic/glm-4.7-flashx
     api_key: os.environ/ZAI_API_KEY
     api_base: https://api.z.ai/api/anthropic
-  - model_name: zai/glm-5v
-    model: anthropic/glm-5v
+  - model_name: zai/glm-5
+    model: anthropic/glm-5
     api_key: os.environ/ZAI_API_KEY
     api_base: https://api.z.ai/api/anthropic
   - model_name: zai/glm-5-flash
     model: anthropic/glm-5-flash
+    api_key: os.environ/ZAI_API_KEY
+    api_base: https://api.z.ai/api/anthropic
+  - model_name: zai/glm-5v
+    model: anthropic/glm-5v
     api_key: os.environ/ZAI_API_KEY
     api_base: https://api.z.ai/api/anthropic

@@ -5,12 +5,8 @@ auth_cmd: litellmctl auth qwen
 env_vars: []
 role: fallback
 
-tiers:
-  ultra:
-    - model_name: qwen-cli/vision-model
-      model: qwen_portal/vision-model
-  plus:
-    - model_name: qwen-cli/coder-model
-      model: qwen_portal/coder-model
-
-extra_models: []
+models:
+  - model_name: qwen-cli/coder-model
+    model: qwen_portal/coder-model
+  - model_name: qwen-cli/vision-model
+    model: qwen_portal/vision-model

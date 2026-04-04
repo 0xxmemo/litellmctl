@@ -10,22 +10,19 @@ from collections import OrderedDict
 def _make_providers() -> OrderedDict:
     return OrderedDict([
         ("chatgpt", {
-            "tiers": {
-                "opus":   [{"model_name": "ultra", "model": "chatgpt/gpt-4o"}],
-                "sonnet": [{"model_name": "plus",  "model": "chatgpt/gpt-4o-mini"}],
-                "haiku":  [{"model_name": "lite",  "model": "chatgpt/gpt-3.5-turbo"}],
-            },
-            "extra_models": [],
+            "models": [
+                {"model_name": "chatgpt/gpt-3.5-turbo", "model": "chatgpt/gpt-3.5-turbo"},
+                {"model_name": "chatgpt/gpt-4o", "model": "chatgpt/gpt-4o"},
+                {"model_name": "chatgpt/gpt-4o-mini", "model": "chatgpt/gpt-4o-mini"},
+            ],
             "embedding_models": [],
             "transcription_models": [],
         }),
         ("gemini", {
-            "tiers": {
-                "opus":   [{"model_name": "ultra", "model": "gemini/gemini-1.5-pro"}],
-                "sonnet": [{"model_name": "plus",  "model": "gemini/gemini-1.5-flash"}],
-                "haiku":  [],
-            },
-            "extra_models": [],
+            "models": [
+                {"model_name": "gemini/gemini-1.5-flash", "model": "gemini/gemini-1.5-flash"},
+                {"model_name": "gemini/gemini-1.5-pro", "model": "gemini/gemini-1.5-pro"},
+            ],
             "embedding_models": [
                 {"model_name": "embed-small", "model": "gemini/text-embedding-004",
                  "model_info": {"mode": "embedding", "input_cost_per_token": 0,
@@ -41,9 +38,9 @@ def _make_providers() -> OrderedDict:
 class TestModelEntry:
     def test_basic_entry(self):
         from lib.wizard.models import model_entry
-        m = {"model_name": "ultra", "model": "chatgpt/gpt-4o"}
+        m = {"model_name": "chatgpt/gpt-4o", "model": "chatgpt/gpt-4o"}
         result = model_entry(m)
-        assert result["model_name"] == "ultra"
+        assert result["model_name"] == "chatgpt/gpt-4o"
         assert result["litellm_params"]["model"] == "chatgpt/gpt-4o"
 
     def test_includes_model_info(self):
@@ -90,26 +87,45 @@ class TestModelEntry:
 # ── collect_models ────────────────────────────────────────────────────────────
 
 class TestCollectModels:
-    def test_collects_across_tiers(self):
+    def test_collects_all_models(self):
         from lib.wizard.models import collect_models
         providers = _make_providers()
-        models = collect_models(["chatgpt"], providers, ["opus", "sonnet", "haiku"])
+        models = collect_models(["chatgpt"], providers)
         names = [m["model_name"] for m in models]
-        assert "ultra" in names
-        assert "plus" in names
-        assert "lite" in names
+        assert len(names) == 3
+        assert "chatgpt/gpt-4o" in names
+        assert "chatgpt/gpt-4o-mini" in names
+        assert "chatgpt/gpt-3.5-turbo" in names
+
+    def test_sorted_alphanumerically(self):
+        from lib.wizard.models import collect_models
+        providers = _make_providers()
+        models = collect_models(["chatgpt"], providers)
+        names = [m["model_name"] for m in models]
+        assert names == sorted(names)
 
     def test_deduplicates_across_providers(self):
-        """Both providers map tier 'opus' → model_name 'ultra'; only one entry."""
+        """Models with the same model_name across providers are deduped."""
         from lib.wizard.models import collect_models
-        providers = _make_providers()
-        models = collect_models(["chatgpt", "gemini"], providers, ["opus"])
-        assert len([m for m in models if m["model_name"] == "ultra"]) == 1
+        providers = OrderedDict([
+            ("a", {"models": [{"model_name": "shared/model", "model": "a/model"}]}),
+            ("b", {"models": [{"model_name": "shared/model", "model": "b/model"}]}),
+        ])
+        models = collect_models(["a", "b"], providers)
+        assert len([m for m in models if m["model_name"] == "shared/model"]) == 1
 
     def test_empty_providers_returns_empty(self):
         from lib.wizard.models import collect_models
-        models = collect_models([], _make_providers(), ["opus"])
+        models = collect_models([], _make_providers())
         assert models == []
+
+    def test_multi_provider_sorted(self):
+        from lib.wizard.models import collect_models
+        providers = _make_providers()
+        models = collect_models(["chatgpt", "gemini"], providers)
+        names = [m["model_name"] for m in models]
+        assert names == sorted(names)
+        assert len(names) == 5  # 3 chatgpt + 2 gemini
 
 
 # ── collect_task_models ───────────────────────────────────────────────────────
@@ -132,37 +148,22 @@ class TestCollectTaskModels:
 # ── build_aliases ─────────────────────────────────────────────────────────────
 
 class TestBuildAliases:
-    def test_builds_alias_from_primary(self):
+    def test_builds_alias_from_chain_sets(self):
         from lib.wizard.models import build_aliases
-        providers = _make_providers()
-        aliases = build_aliases(
-            tiers=["opus", "sonnet", "haiku"],
-            primary_map={"opus": "chatgpt", "sonnet": "gemini", "haiku": "chatgpt"},
-            providers=providers,
-        )
-        assert aliases["opus"] == "ultra"
-        assert aliases["haiku"] == "lite"
+        chain_sets = [
+            {"name": "ultra", "primary": "chatgpt/gpt-4o", "fallbacks": []},
+            {"name": "plus", "primary": "chatgpt/gpt-4o-mini", "fallbacks": []},
+            {"name": "lite", "primary": "chatgpt/gpt-3.5-turbo", "fallbacks": []},
+        ]
+        aliases = build_aliases(chain_sets)
+        assert aliases["ultra"] == "chatgpt/gpt-4o"
+        assert aliases["plus"] == "chatgpt/gpt-4o-mini"
+        assert aliases["lite"] == "chatgpt/gpt-3.5-turbo"
 
-    def test_skips_missing_provider(self):
+    def test_empty_chain_sets(self):
         from lib.wizard.models import build_aliases
-        providers = _make_providers()
-        aliases = build_aliases(
-            tiers=["opus"],
-            primary_map={"opus": "nonexistent"},
-            providers=providers,
-        )
-        assert "opus" not in aliases
-
-    def test_skips_empty_tier(self):
-        from lib.wizard.models import build_aliases
-        providers = _make_providers()
-        # gemini has no haiku models
-        aliases = build_aliases(
-            tiers=["haiku"],
-            primary_map={"haiku": "gemini"},
-            providers=providers,
-        )
-        assert "haiku" not in aliases
+        aliases = build_aliases([])
+        assert aliases == {}
 
 
 # ── build_fallbacks ───────────────────────────────────────────────────────────
@@ -170,28 +171,63 @@ class TestBuildAliases:
 class TestBuildFallbacks:
     def test_builds_fallback_chain(self):
         from lib.wizard.models import build_fallbacks
-        providers = _make_providers()
-        fallbacks = build_fallbacks(
-            tiers=["opus"],
-            primary_map={"opus": "chatgpt"},
-            fallback_map={"opus": ["chatgpt", "gemini"]},
-            providers=providers,
-        )
+        chain_sets = [
+            {
+                "name": "ultra",
+                "primary": "chatgpt/gpt-4o",
+                "fallbacks": ["gemini/gemini-1.5-pro", "gemini/gemini-1.5-flash"],
+            },
+        ]
+        fallbacks = build_fallbacks(chain_sets)
         assert len(fallbacks) == 1
-        chain = fallbacks[0]["opus"]
-        # gemini's opus model should be in fallback (chatgpt is primary, excluded)
-        assert "ultra" in chain or len(chain) >= 0  # gemini also maps to "ultra" (dedup)
+        chain = fallbacks[0]["ultra"]
+        assert chain == ["gemini/gemini-1.5-pro", "gemini/gemini-1.5-flash"]
 
-    def test_no_fallbacks_if_no_fallback_map(self):
+    def test_no_fallbacks_if_empty(self):
         from lib.wizard.models import build_fallbacks
-        providers = _make_providers()
-        fallbacks = build_fallbacks(
-            tiers=["opus"],
-            primary_map={"opus": "chatgpt"},
-            fallback_map={},
-            providers=providers,
-        )
+        chain_sets = [
+            {"name": "ultra", "primary": "chatgpt/gpt-4o", "fallbacks": []},
+        ]
+        fallbacks = build_fallbacks(chain_sets)
         assert fallbacks == []
+
+    def test_multiple_chain_sets(self):
+        from lib.wizard.models import build_fallbacks
+        chain_sets = [
+            {"name": "ultra", "primary": "a", "fallbacks": ["b", "c"]},
+            {"name": "plus", "primary": "d", "fallbacks": ["e"]},
+            {"name": "lite", "primary": "f", "fallbacks": []},
+        ]
+        fallbacks = build_fallbacks(chain_sets)
+        assert len(fallbacks) == 2  # lite has no fallbacks, not included
+        assert fallbacks[0]["ultra"] == ["b", "c"]
+        assert fallbacks[1]["plus"] == ["e"]
+
+
+# ── Provider backward compat (flatten tiers) ─────────────────────────────────
+
+class TestFlattenTiers:
+    def test_old_format_flattened(self):
+        from lib.wizard.providers import _flatten_tiers
+        data = {
+            "tiers": {
+                "ultra": [{"model_name": "a/z", "model": "x/z"}],
+                "lite": [{"model_name": "a/a", "model": "x/a"}],
+            },
+            "extra_models": [{"model_name": "a/m", "model": "x/m"}],
+        }
+        _flatten_tiers(data)
+        assert "tiers" not in data
+        assert "extra_models" not in data
+        names = [m["model_name"] for m in data["models"]]
+        assert names == sorted(names)  # alphabetically sorted
+        assert len(names) == 3
+
+    def test_no_tiers_no_op(self):
+        from lib.wizard.providers import _flatten_tiers
+        data = {"models": [{"model_name": "x", "model": "y"}]}
+        _flatten_tiers(data)
+        assert len(data["models"]) == 1
 
 
 # ── Local provider readiness (wizard) ──────────────────────────────────────────
@@ -206,6 +242,7 @@ class TestCheckProviderReadyLocal:
         )
         prov = {
             "auth": "none",
+            "models": [],
             "embedding_models": [{"model_name": "a", "model": "ollama/a"}],
             "transcription_models": [{"model_name": "b", "model": "openai/whisper"}],
         }
@@ -223,6 +260,7 @@ class TestCheckProviderReadyLocal:
         prov = {
             "auth": "none",
             "role": "supplemental",
+            "models": [],
             "embedding_models": [{"model_name": "a", "model": "ollama/a"}],
             "transcription_models": [{"model_name": "b", "model": "openai/whisper"}],
         }
@@ -238,6 +276,7 @@ class TestCheckProviderReadyLocal:
         )
         prov = {
             "auth": "none",
+            "models": [],
             "embedding_models": [{"model_name": "a", "model": "ollama/a"}],
             "transcription_models": [{"model_name": "b", "model": "openai/whisper"}],
         }

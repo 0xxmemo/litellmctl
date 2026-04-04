@@ -9,7 +9,9 @@ from ..common.paths import PROJECT_DIR, CONFIG_FILE, ENV_FILE, ENV_EXAMPLE
 from ..common.env import parse_env
 from ..common.formatting import console, header, step, dim, TICK, CROSS, WARN_SYM, ARROW
 from ..common.platform import detect_os
-from ..common.prompts import pick_ordered
+from ..common.prompts import (
+    confirm, pick_many, pick_ordered, ask, select, choice, separator,
+)
 
 from .providers import (
     load_defaults, load_providers, check_provider_ready,
@@ -17,19 +19,92 @@ from .providers import (
 )
 from .models import collect_models, collect_task_models, build_aliases, build_fallbacks
 from .config_gen import generate_yaml
-from ..common.prompts import confirm, pick_one, pick_many
+
+
+def _all_models_for_display(selected_pids: list[str], providers: dict) -> list[tuple[str, str, dict]]:
+    """Return (provider_name, model_name, model_dict) sorted by model_name.
+
+    Used to present models to the user during chain set configuration.
+    """
+    result: list[tuple[str, str, dict]] = []
+    seen: set[str] = set()
+    for pid in selected_pids:
+        prov = providers[pid]
+        for m in prov.get("models", []):
+            if m["model_name"] not in seen:
+                seen.add(m["model_name"])
+                result.append((prov.get("name", pid), m["model_name"], m))
+    result.sort(key=lambda x: x[1])
+    return result
+
+
+def _configure_chain_set_interactive(
+    set_names: list[str],
+    selected_pids: list[str],
+    providers: dict,
+) -> list[dict]:
+    """Interactively configure a chain set (group of 3 chains).
+
+    Returns list of chain dicts: [{name, primary, fallbacks}, ...]
+    """
+    all_models = _all_models_for_display(selected_pids, providers)
+    chain_set: list[dict] = []
+
+    for chain_name in set_names:
+        console.print(f"\n  [bold]{chain_name}[/]:")
+
+        # Build model choice list grouped by provider with separators
+        model_choices = []   # questionary Choice objects
+        model_names: list[str] = []
+        current_provider = ""
+        for prov_name, model_name, _m in all_models:
+            if prov_name != current_provider:
+                current_provider = prov_name
+                model_choices.append(separator(f"── {prov_name} ──"))
+            model_choices.append(choice(model_name, value=model_name))
+            model_names.append(model_name)
+
+        # Pick primary
+        console.print(f"    {dim('Select the primary model (alias target):')}")
+        result = select(f"  Primary for {chain_name}:", model_choices)
+        if result is None:
+            raise KeyboardInterrupt
+        primary_model = result
+        console.print(f"    {TICK} primary: [green]{primary_model}[/]")
+
+        # Pick fallbacks (excluding primary)
+        fb_choices: list[str] = []
+        for mname in model_names:
+            if mname != primary_model:
+                fb_choices.append(mname)
+
+        if fb_choices:
+            console.print(f"    {dim('Select fallback models (spacebar to toggle, Enter when done):')}")
+            fb_order = pick_ordered(f"  Fallbacks for {chain_name}:", fb_choices)
+            fallbacks = [fb_choices[i] for i in fb_order] if fb_order else []
+        else:
+            fallbacks = []
+
+        if fallbacks:
+            console.print(f"    {TICK} fallbacks: {' → '.join(fallbacks)}")
+        else:
+            console.print(f"    {dim('no fallbacks')}")
+
+        chain_set.append({
+            "name": chain_name,
+            "primary": primary_model,
+            "fallbacks": fallbacks,
+        })
+
+    return chain_set
 
 
 def run_wizard() -> bool:
     """Run the wizard. Returns True on success, False on failure/cancel."""
     defaults = load_defaults()
-    tiers = defaults.get("tiers", ["ultra", "plus", "lite"])
-    load_order = defaults.get("load_order", [])
     auth_files_conf = defaults.get("auth_files", {})
-    default_primary = defaults.get("primary", {})
-    default_fallback = defaults.get("fallback_order", {})
 
-    providers = load_providers(load_order)
+    providers = load_providers()
     if not providers:
         console.print("[red]No provider templates found in templates/[/]")
         return False
@@ -43,7 +118,7 @@ def run_wizard() -> bool:
     console.print(f"  OS: {detect_os()}  |  Project: {PROJECT_DIR}")
     console.print()
 
-    # Step 1: Environment scan
+    # ── Step 1: Environment scan ─────────────────────────────────────────────
     step(1, "Environment & provider readiness")
 
     if not ENV_FILE.exists():
@@ -79,10 +154,9 @@ def run_wizard() -> bool:
         auth_label = {"api_key": "API key", "oauth": "OAuth"}.get(auth_type, "none")
         name = prov.get("name", pid)
 
-        tier_list = ", ".join(t for t in tiers if t in prov.get("tiers", {}))
-        console.print(f"  {icon} {name:<28} {auth_label:<10} {dim(reason)}")
-        if tier_list:
-            console.print(f"    {dim('Tiers: ' + tier_list)}")
+        model_count = len(prov.get("models", []))
+        model_hint = f"{model_count} model{'s' if model_count != 1 else ''}"
+        console.print(f"  {icon} {name:<28} {auth_label:<10} {dim(model_hint)}  {dim(reason)}")
 
         if ready:
             ready_pids.append(pid)
@@ -109,7 +183,6 @@ def run_wizard() -> bool:
                 console.print(f"    {ARROW} {prov['name']}: start local inference servers")
                 console.print(f"         run  [bold]litellmctl local setup[/]")
 
-        # Only prompt if ALL providers are unready; otherwise proceed with ready ones
         if len(ready_pids) == 0:
             console.print(f"\n  [red]No providers are ready.[/] Set up API keys in .env or run auth commands first.")
             console.print("  See .env.example for guidance, or run: litellmctl auth status")
@@ -117,7 +190,7 @@ def run_wizard() -> bool:
         else:
             console.print(f"\n  {dim(f'Proceeding with {len(ready_pids)} ready provider(s).')}")
 
-    # Step 2: Select providers
+    # ── Step 2: Select providers ─────────────────────────────────────────────
     step(2, "Select providers to include")
 
     available = [(pid, providers[pid]) for pid in ready_pids if pid in providers]
@@ -132,88 +205,51 @@ def run_wizard() -> bool:
     selected_names = [providers[pid]["name"] for pid in selected_pids]
     console.print(f"  {ARROW} [green]{', '.join(selected_names)}[/]")
 
-    # Step 3: Per-tier primary provider
-    step(3, "Choose primary provider for each tier")
-    console.print(f"  {dim('The primary is the main model behind the serving alias.')}")
-    console.print(f"  {dim('Others become fallbacks, tried in order on failure.')}")
+    # ── Step 3: Configure fallback chain sets ────────────────────────────────
+    step(3, "Configure fallback chains")
+    console.print(f"  {dim('Chains come in groups of 3 (high / mid / low capability).')}")
+    console.print(f"  {dim('For each chain you pick a primary model and optional fallbacks.')}")
 
-    primary_map: dict[str, str] = {}
+    chain_sets: list[dict] = []
+    set_num = 1
 
-    for tier in tiers:
-        candidates = [
-            pid for pid in selected_pids
-            if tier in providers[pid].get("tiers", {})
-        ]
-        if not candidates:
-            console.print(f"\n  [yellow]{tier}[/]: no providers have this tier — skipping")
-            continue
-
-        dp = default_primary.get(tier)
-        default_choice = None
-
-        choices = []
-        for pid in candidates:
-            m = providers[pid]["tiers"][tier][0]
-            marker = " (current)" if pid == dp else ""
-            choices.append(f"{providers[pid]['name']:<24} {ARROW} {m['model_name']}{marker}")
-            if pid == dp:
-                default_choice = choices[-1]
-
-        if len(candidates) == 1:
-            choice_idx = 0
-            console.print(f"\n  [bold]{tier}[/]: {dim('(only one option)')}")
+    while True:
+        if set_num == 1:
+            default_names_str = "ultra,plus,lite"
         else:
-            console.print(f"\n  [bold]{tier}[/]:")
-            choice_idx = pick_one(f"Primary for {tier}:", choices, default=default_choice)
+            default_names_str = f"set{set_num}-high,set{set_num}-mid,set{set_num}-low"
 
-        primary_map[tier] = candidates[choice_idx]
-        prim_model = providers[candidates[choice_idx]]["tiers"][tier][0]["model_name"]
-        console.print(f"    {TICK} {tier} {ARROW} [green]{prim_model}[/]")
-
-    active_tiers = [t for t in tiers if t in primary_map]
-
-    # Step 4: Fallback ordering
-    step(4, "Fallback order per tier")
-    console.print(f"  {dim('Reorder fallback providers, or press Enter for defaults.')}")
-
-    fallback_map: dict[str, list[str]] = {}
-
-    for tier in active_tiers:
-        primary_pid = primary_map[tier]
-        default_order = default_fallback.get(tier, [])
-        candidates = []
-        for pid in default_order:
-            if (pid in selected_pids and pid != primary_pid
-                    and tier in providers[pid].get("tiers", {})):
-                candidates.append(pid)
-        for pid in selected_pids:
-            if (pid not in candidates and pid != primary_pid
-                    and tier in providers[pid].get("tiers", {})):
-                candidates.append(pid)
-
-        if not candidates:
-            console.print(f"\n  [bold]{tier}[/]: {dim('no fallback providers')}")
-            fallback_map[tier] = []
+        console.print(f"\n  {dim(f'Chain set #{set_num} — enter 3 names, comma-separated.')}")
+        names_input = ask(f"  Chain names:", default=default_names_str)
+        names = [n.strip() for n in names_input.split(",") if n.strip()]
+        if len(names) != 3:
+            console.print(f"  {WARN_SYM} Need exactly 3 names (got {len(names)}). Try again.")
             continue
 
-        console.print(f"\n  [bold]{tier}[/] (primary: {providers[primary_pid]['name']}):")
-        fb_choices = []
-        for pid in candidates:
-            m = providers[pid]["tiers"][tier][0]
-            fb_choices.append(f"{providers[pid]['name']:<24} {ARROW} {m['model_name']}")
+        existing_names = {cs["name"] for cs in chain_sets}
+        dupes = [n for n in names if n in existing_names]
+        if dupes:
+            console.print(f"  {WARN_SYM} Name(s) already in use: {', '.join(dupes)}. Try again.")
+            continue
 
-        selected_fb = pick_ordered(f"Fallback order for {tier}:", fb_choices)
-        fallback_map[tier] = [candidates[i] for i in selected_fb] if selected_fb else candidates
+        new_chains = _configure_chain_set_interactive(names, selected_pids, providers)
+        chain_sets.extend(new_chains)
+        set_num += 1
 
-    # Step 5: Generate
-    step(5, "Generate config")
+        if not confirm("  Add another chain set?", default=False):
+            break
 
-    all_selected = list(dict.fromkeys(
-        [primary_map[t] for t in active_tiers] + selected_pids
-    ))
-    models = collect_models(all_selected, providers, tiers)
-    aliases = build_aliases(active_tiers, primary_map, providers)
-    fallbacks = build_fallbacks(active_tiers, primary_map, fallback_map, providers)
+    if not chain_sets:
+        console.print(f"\n  [red]No chains configured.[/] Aborting.")
+        return False
+
+    # ── Step 4: Generate ─────────────────────────────────────────────────────
+    step(4, "Generate config")
+
+    all_selected = list(dict.fromkeys(selected_pids))
+    models = collect_models(all_selected, providers)
+    aliases = build_aliases(chain_sets)
+    fallbacks = build_fallbacks(chain_sets)
     embedding_models = collect_task_models(all_selected, providers, "embedding_models")
     transcription_models = collect_task_models(all_selected, providers, "transcription_models")
     yaml_content = generate_yaml(models, aliases, fallbacks, defaults,
@@ -223,19 +259,12 @@ def run_wizard() -> bool:
     # Summary
     header("Summary")
 
-    for tier in active_tiers:
-        ppid = primary_map[tier]
-        pmodel = providers[ppid]["tiers"][tier][0]["model_name"]
-        fb_pids = fallback_map.get(tier, [])
-        fb_models = []
-        for fpid in fb_pids:
-            for m in providers[fpid]["tiers"].get(tier, []):
-                fb_models.append(m["model_name"])
-        console.print(f"  [bold]{tier}[/]: [green]{pmodel}[/]")
-        if fb_models:
-            console.print(f"    fallbacks: {' → '.join(fb_models)}")
+    for cs in chain_sets:
+        console.print(f"  [bold]{cs['name']}[/]: [green]{cs['primary']}[/]")
+        if cs["fallbacks"]:
+            console.print(f"    fallbacks: {' → '.join(cs['fallbacks'])}")
 
-    console.print(f"\n  Models: {len(models)} total  |  Tiers: {', '.join(active_tiers)}")
+    console.print(f"\n  Models: {len(models)} total  |  Chains: {len(chain_sets)}")
     console.print(f"  Providers: {', '.join(providers[p]['name'] for p in all_selected)}")
     if embedding_models:
         console.print(f"  {dim(f'Local embedding deployments: {len(embedding_models)}')}")

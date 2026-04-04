@@ -5,29 +5,24 @@ env_vars:
   - DASHSCOPE_API_KEY
 role: fallback
 
-tiers:
-  ultra:
-    - model_name: alibaba/qwen3.5-plus
-      model: dashscope/qwen3.5-plus
-      api_key: os.environ/DASHSCOPE_API_KEY
-      api_base: https://coding-intl.dashscope.aliyuncs.com/v1
-      timeout: 90
-    - model_name: alibaba/qwen3-max-2026-01-23
-      model: dashscope/qwen3-max-2026-01-23
-      api_key: os.environ/DASHSCOPE_API_KEY
-      api_base: https://coding-intl.dashscope.aliyuncs.com/v1
-      timeout: 90
-  plus:
-    - model_name: alibaba/qwen3-coder-plus
-      model: dashscope/qwen3-coder-plus
-      api_key: os.environ/DASHSCOPE_API_KEY
-      api_base: https://coding-intl.dashscope.aliyuncs.com/v1
-      timeout: 90
-  lite:
-    - model_name: alibaba/qwen3-coder-next
-      model: dashscope/qwen3-coder-next
-      api_key: os.environ/DASHSCOPE_API_KEY
-      api_base: https://coding-intl.dashscope.aliyuncs.com/v1
-      timeout: 60
-
-extra_models: []
+models:
+  - model_name: alibaba/qwen3-coder-next
+    model: dashscope/qwen3-coder-next
+    api_key: os.environ/DASHSCOPE_API_KEY
+    api_base: https://coding-intl.dashscope.aliyuncs.com/v1
+    timeout: 60
+  - model_name: alibaba/qwen3-coder-plus
+    model: dashscope/qwen3-coder-plus
+    api_key: os.environ/DASHSCOPE_API_KEY
+    api_base: https://coding-intl.dashscope.aliyuncs.com/v1
+    timeout: 90
+  - model_name: alibaba/qwen3-max-2026-01-23
+    model: dashscope/qwen3-max-2026-01-23
+    api_key: os.environ/DASHSCOPE_API_KEY
+    api_base: https://coding-intl.dashscope.aliyuncs.com/v1
+    timeout: 90
+  - model_name: alibaba/qwen3.5-plus
+    model: dashscope/qwen3.5-plus
+    api_key: os.environ/DASHSCOPE_API_KEY
+    api_base: https://coding-intl.dashscope.aliyuncs.com/v1
+    timeout: 90

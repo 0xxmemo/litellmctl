@@ -55,6 +55,9 @@ def confirm(prompt: str, default: bool = True) -> bool:
 
 def select(prompt: str, choices: list, **kwargs) -> Any:
     """Single-select menu."""
+    import sys
+    sys.stdout.flush()
+    sys.stderr.flush()
     q = require_questionary()
     kwargs.setdefault("style", style())
     return q.select(prompt, choices=choices, **kwargs).ask()
@@ -62,6 +65,9 @@ def select(prompt: str, choices: list, **kwargs) -> Any:
 
 def checkbox(prompt: str, choices: list, **kwargs) -> list:
     """Multi-select checkbox."""
+    import sys
+    sys.stdout.flush()
+    sys.stderr.flush()
     q = require_questionary()
     kwargs.setdefault("style", _checkbox_style())
     result = q.checkbox(prompt, choices=choices, **kwargs).ask()
@@ -92,13 +98,21 @@ def pick_ordered(prompt: str, choices: list[str]) -> list[int]:
     Users select/deselect with spacebar. Order is determined by selection sequence.
     Deselecting removes the item from order. Press Enter when done.
     """
+    import sys
     from prompt_toolkit import Application
+    from prompt_toolkit.formatted_text import HTML
     from prompt_toolkit.key_binding import KeyBindings
-    from prompt_toolkit.layout.containers import HSplit
+    from prompt_toolkit.layout.containers import HSplit, Window
+    from prompt_toolkit.layout.controls import FormattedTextControl
     from prompt_toolkit.layout.layout import Layout
     from prompt_toolkit.widgets import CheckboxList
 
     q = require_questionary()
+
+    # Flush stdout/stderr so prior Rich output is fully rendered before
+    # prompt_toolkit takes over the terminal.
+    sys.stdout.flush()
+    sys.stderr.flush()
 
     # Track selection order: list of indices in order they were selected
     selection_order: list[int] = []
@@ -108,13 +122,12 @@ def pick_ordered(prompt: str, choices: list[str]) -> list[int]:
     def make_values() -> list:
         """Build (value, label) tuples with order prefix for selected items."""
         result = []
-        for i, choice in enumerate(choices):
-            # Check if this index is in the current selection_order
+        for i, ch in enumerate(choices):
             if i in selection_order:
                 order_num = selection_order.index(i) + 1
-                result.append((i, f"[{order_num}] {choice}"))
+                result.append((i, f"[{order_num}] {ch}"))
             else:
-                result.append((i, f"    {choice}"))
+                result.append((i, f"    {ch}"))
         return result
 
     def update_order(cl: CheckboxList) -> None:
@@ -122,14 +135,12 @@ def pick_ordered(prompt: str, choices: list[str]) -> list[int]:
         nonlocal _prev_values
         current_vals = cl.current_values.copy()
 
-        # Detect what changed
         prev_set = set(_prev_values)
         curr_set = set(current_vals)
 
         added = curr_set - prev_set
         removed = prev_set - curr_set
 
-        # Update order: remove deselected, add newly selected at end
         for idx in removed:
             if idx in selection_order:
                 selection_order.remove(idx)
@@ -137,15 +148,12 @@ def pick_ordered(prompt: str, choices: list[str]) -> list[int]:
             selection_order.append(idx)
 
         _prev_values = current_vals
-        # Update display with order numbers
         cl.values = make_values()
 
-    # Initial values - use indices as both value and track in current_values
     initial_values = [(i, f"    {c}") for i, c in enumerate(choices)]
     checkbox_list = CheckboxList(values=initial_values)
-    _prev_values = []  # Start with nothing selected
+    _prev_values = []
 
-    # Patch _handle_enter to update display after toggle
     _original_handle_enter = checkbox_list._handle_enter
 
     def _patched_handle_enter() -> None:
@@ -154,7 +162,6 @@ def pick_ordered(prompt: str, choices: list[str]) -> list[int]:
 
     checkbox_list._handle_enter = _patched_handle_enter
 
-    # Remove Enter key binding from widget so it doesn't toggle
     from prompt_toolkit.keys import Keys
     widget_kb = checkbox_list.control.key_bindings
     widget_kb.remove(Keys.Enter)
@@ -163,15 +170,26 @@ def pick_ordered(prompt: str, choices: list[str]) -> list[int]:
 
     @kb.add("enter")
     def _done(event):
-        """Exit and return the selection order."""
         event.app.exit(result=selection_order.copy())
 
     @kb.add("c-c")
     def _interrupt(event):
-        """Handle Ctrl+C gracefully."""
         event.app.exit(exception=KeyboardInterrupt())
 
-    container = HSplit([checkbox_list])
+    # Header: prompt text
+    header = Window(
+        FormattedTextControl(HTML(f"<b>{prompt}</b>")),
+        height=1,
+    )
+    # Footer: usage hint
+    footer = Window(
+        FormattedTextControl(
+            HTML("<style fg='gray'>  ↑/↓ navigate  ·  Space toggle  ·  Enter confirm</style>")
+        ),
+        height=1,
+    )
+
+    container = HSplit([header, checkbox_list, footer])
     layout = Layout(container)
 
     application = Application(

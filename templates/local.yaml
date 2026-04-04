@@ -4,9 +4,7 @@ auth: none
 env_vars: []
 role: supplemental
 
-# Chat tiers (empty — local is for embedding + transcription only)
-tiers: {}
-extra_models: []
+models: []
 
 # Local embedding — single preset: Nomic Embed v2 MoE @ 512-d (Matryoshka, lightweight vectors).
 # Ollama: ollama pull nomic-embed-text-v2-moe
@@ -28,6 +26,12 @@ embedding_models:
 # /v1 suffix required in LOCAL_TRANSCRIPTION_API_BASE: LiteLLM appends /audio/transcriptions directly to api_base.
 # Uses litellm's openai provider with api_base override pointing to the local server.
 transcription_models:
+  - model_name: local/distil-whisper-large-v3
+    model: openai/distil-whisper-large-v3
+    api_base: os.environ/LOCAL_TRANSCRIPTION_API_BASE
+    api_key: sk-local
+    model_info:
+      mode: audio_transcription
   - model_name: local/whisper
     model: openai/whisper
     api_base: os.environ/LOCAL_TRANSCRIPTION_API_BASE
@@ -42,12 +46,6 @@ transcription_models:
       mode: audio_transcription
   - model_name: local/whisper-large-v3-turbo
     model: openai/whisper-large-v3-turbo
-    api_base: os.environ/LOCAL_TRANSCRIPTION_API_BASE
-    api_key: sk-local
-    model_info:
-      mode: audio_transcription
-  - model_name: local/distil-whisper-large-v3
-    model: openai/distil-whisper-large-v3
     api_base: os.environ/LOCAL_TRANSCRIPTION_API_BASE
     api_key: sk-local
     model_info:

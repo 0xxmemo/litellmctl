@@ -5,12 +5,6 @@ auth_cmd: litellmctl auth kimi
 env_vars: []
 role: fallback
 
-tiers:
-  ultra:
-    - model_name: kimi-code/kimi-for-coding
-      model: kimi_code/kimi-for-coding
-  plus:
-    - model_name: kimi-code/kimi-for-coding
-      model: kimi_code/kimi-for-coding
-
-extra_models: []
+models:
+  - model_name: kimi-code/kimi-for-coding
+    model: kimi_code/kimi-for-coding

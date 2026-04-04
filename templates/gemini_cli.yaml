@@ -5,21 +5,16 @@ auth_cmd: litellmctl auth gemini
 env_vars: []
 role: fallback
 
-tiers:
-  ultra:
-    - model_name: gemini-cli/gemini-3-pro-preview
-      model: gemini_cli/gemini-3-pro-preview
-    - model_name: gemini-cli/gemini-2.5-pro
-      model: gemini_cli/gemini-2.5-pro
-  plus:
-    - model_name: gemini-cli/gemini-3-flash-preview
-      model: gemini_cli/gemini-3-flash-preview
-    - model_name: gemini-cli/gemini-2.5-flash
-      model: gemini_cli/gemini-2.5-flash
-  lite:
-    - model_name: gemini-cli/gemini-3.1-flash-lite-preview
-      model: gemini_cli/gemini-3.1-flash-lite-preview
-    - model_name: gemini-cli/gemini-2.5-flash-lite
-      model: gemini_cli/gemini-2.5-flash-lite
-
-extra_models: []
+models:
+  - model_name: gemini-cli/gemini-2.5-flash
+    model: gemini_cli/gemini-2.5-flash
+  - model_name: gemini-cli/gemini-2.5-flash-lite
+    model: gemini_cli/gemini-2.5-flash-lite
+  - model_name: gemini-cli/gemini-2.5-pro
+    model: gemini_cli/gemini-2.5-pro
+  - model_name: gemini-cli/gemini-3-flash-preview
+    model: gemini_cli/gemini-3-flash-preview
+  - model_name: gemini-cli/gemini-3-pro-preview
+    model: gemini_cli/gemini-3-pro-preview
+  - model_name: gemini-cli/gemini-3.1-flash-lite-preview
+    model: gemini_cli/gemini-3.1-flash-lite-preview
