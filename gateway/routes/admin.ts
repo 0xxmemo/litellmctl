@@ -1,4 +1,3 @@
-import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
 import { accessRequests, apiKeys, validatedUsers, userProfileCache, apiKeyCache, requireAdmin } from "../lib/db";
 
 // Admin: pending requests
@@ -96,72 +95,6 @@ async function adminRevokeAllKeysHandler(req: Request) {
   return Response.json({ success: true, count: result.modifiedCount });
 }
 
-// GET /api/admin/litellm-config — read config from LiteLLM
-async function adminGetConfigHandler(req: Request) {
-  const auth = await requireAdmin(req);
-  if (auth instanceof Response) return auth;
-  try {
-    const res = await fetch(`${LITELLM_URL}/config`, {
-      headers: { Authorization: LITELLM_AUTH },
-    });
-    if (!res.ok) {
-      const errorBody = await res.text().catch(() => '');
-      return Response.json({ error: `LiteLLM API error: ${res.status} ${errorBody}` }, { status: res.status });
-    }
-    const config = await res.json();
-    return Response.json(config);
-  } catch (err) {
-    return Response.json({ error: (err as Error).message }, { status: 500 });
-  }
-}
-
-// PATCH /api/admin/litellm-config — update config via LiteLLM
-async function adminUpdateConfigHandler(req: Request) {
-  const auth = await requireAdmin(req);
-  if (auth instanceof Response) return auth;
-  try {
-    const patch = await req.json();
-    // Use PUT /config which accepts full config with save_to_file and update_router flags
-    const res = await fetch(`${LITELLM_URL}/config`, {
-      method: 'PUT',
-      headers: {
-        Authorization: LITELLM_AUTH,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(patch),
-    });
-    if (!res.ok) {
-      const errorBody = await res.text().catch(() => '');
-      return Response.json({ error: `LiteLLM API error: ${res.status} ${errorBody}` }, { status: res.status });
-    }
-    const config = await res.json();
-    return Response.json(config);
-  } catch (err) {
-    return Response.json({ error: (err as Error).message }, { status: 500 });
-  }
-}
-
-// POST /api/admin/litellm-config/reset — reset config via LiteLLM
-async function adminResetConfigHandler(req: Request) {
-  const auth = await requireAdmin(req);
-  if (auth instanceof Response) return auth;
-  try {
-    // LiteLLM's /config/reset deletes DB overrides and reloads from YAML file
-    const resetRes = await fetch(`${LITELLM_URL}/config/reset`, {
-      method: 'POST',
-      headers: { Authorization: LITELLM_AUTH },
-    });
-    if (!resetRes.ok) {
-      const errorBody = await resetRes.text().catch(() => '');
-      return Response.json({ error: `LiteLLM API error: ${resetRes.status} ${errorBody}` }, { status: resetRes.status });
-    }
-    // Return fresh config after reset
-    return adminGetConfigHandler(req);
-  } catch (err) {
-    return Response.json({ error: (err as Error).message }, { status: 500 });
-  }
-}
-
 export const adminRoutes = {
   "/api/admin/pending":              { GET: getPendingRequestsHandler },
   "/api/admin/approve":              { POST: approveUserHandler },
@@ -170,6 +103,4 @@ export const adminRoutes = {
   "/api/admin/reject":               { POST: adminRejectUserHandler },
   "/api/admin/disapprove-all":       { POST: adminDisapproveAllHandler },
   "/api/admin/keys/revoke-all":      { POST: adminRevokeAllKeysHandler },
-  "/api/admin/litellm-config":       { GET: adminGetConfigHandler, PATCH: adminUpdateConfigHandler },
-  "/api/admin/litellm-config/reset": { POST: adminResetConfigHandler },
 };

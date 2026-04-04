@@ -5,13 +5,10 @@ import { Sidebar } from '@/components/Sidebar'
 import { TopBar } from '@/components/TopBar'
 import { Toaster } from 'sonner'
 import { useAuth, useLogout } from '@/hooks/useAuth'
-import { useConfig } from '@/hooks/useSettings'
 
 export function DashboardLayout() {
-  // Fetch config early so registerAliases runs before model lists render
   const auth = useAuth()
   const logoutMutation = useLogout()
-  useConfig({ enabled: auth.user?.role === 'admin' })
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('dark')
 

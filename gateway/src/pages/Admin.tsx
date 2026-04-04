@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { AlertCircle, AlertTriangle, CheckCircle, XCircle, UserPlus, Trash2, Users, Settings2 } from 'lucide-react'
+import { AlertCircle, AlertTriangle, CheckCircle, XCircle, UserPlus, Trash2, Users } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import {
   useAdminUsers,
@@ -22,14 +22,8 @@ import { AdminErrorBoundary } from '@/components/AdminErrorBoundary'
 import { toast } from 'sonner'
 import { PrettyDate } from '@/components/PrettyDate'
 import { PrettyAmount } from '@/components/PrettyAmount'
-import { ConfigEditor } from '@/components/ConfigEditor'
-import { useConfigEditor } from '@/hooks/useSettings'
-import { useModels } from '@/lib/models-hooks'
-
 export function Admin() {
   const { user: currentUser } = useAuth()
-  const configEditor = useConfigEditor()
-  const modelsResult = useModels()
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
 
   // Add user modal state
@@ -151,14 +145,7 @@ export function Admin() {
           <TabsTrigger value="users" className="gap-1.5">
             <Users className="w-4 h-4" /> User Management
           </TabsTrigger>
-          <TabsTrigger value="config" className="gap-1.5">
-            <Settings2 className="w-4 h-4" /> Config Editor
-          </TabsTrigger>
         </TabsList>
-
-        <TabsContent value="config">
-          <ConfigEditor configEditor={configEditor} models={modelsResult} />
-        </TabsContent>
 
         <TabsContent value="users">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">

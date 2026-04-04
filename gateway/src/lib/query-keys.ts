@@ -30,7 +30,6 @@ export const queryKeys = {
   adminTopUsers: ['admin', 'top-users'] as const,
 
   // Config
-  config: ['admin', 'litellm-config'] as const,
   configAliases: ['config', 'aliases'] as const,
 
   // User settings
