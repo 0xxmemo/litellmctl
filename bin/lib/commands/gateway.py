@@ -8,10 +8,16 @@ import subprocess
 import tempfile
 import time
 
-from ..common.paths import PROJECT_DIR, LOG_DIR
+from ..common.paths import (
+    PROJECT_DIR, LOG_DIR, ENV_FILE,
+    GATEWAY_LAUNCHD_LABEL, GATEWAY_LAUNCHD_PLIST,
+    GATEWAY_SYSTEMD_UNIT, GATEWAY_SYSTEMD_FILE,
+    GATEWAY_PIDFILE, SYSTEMD_DIR,
+)
 from ..common.env import load_env
 from ..common.formatting import console, info, warn, error
 from ..common.network import http_check
+from ..common.platform import is_macos, is_linux, has_systemd_user
 from ..common.process import pids_on_port
 
 
@@ -21,22 +27,20 @@ def _ensure_bun_path() -> None:
         os.environ["PATH"] = f"{bun_dir}:{os.environ.get('PATH', '')}"
 
 
-def gateway_is_running() -> bool:
+def _bun_bin() -> str | None:
+    """Return full path to bun binary, or None."""
     _ensure_bun_path()
-    port = int(os.environ.get("GATEWAY_PORT", "14041"))
-    return http_check(f"http://localhost:{port}/api/health", timeout=2)
+    import shutil
+    return shutil.which("bun")
 
 
-def gateway_start() -> None:
-    gateway_dir = PROJECT_DIR / "gateway"
+def _gateway_port() -> int:
+    return int(os.environ.get("GATEWAY_PORT", "14041"))
 
-    if not gateway_dir.exists():
-        error(f"Gateway directory not found at {gateway_dir}")
-        error("Run 'litellmctl install --with-gateway' to install")
-        return
 
-    # Load gateway-local .env first so GATEWAY_PORT is available
-    env_path = gateway_dir / ".env"
+def _load_gateway_env() -> None:
+    """Load gateway-local .env so GATEWAY_PORT is available."""
+    env_path = PROJECT_DIR / "gateway" / ".env"
     if env_path.exists():
         for line in env_path.read_text().splitlines():
             line = line.strip()
@@ -44,52 +48,205 @@ def gateway_start() -> None:
                 k, _, v = line.partition("=")
                 os.environ.setdefault(k.strip(), v.strip())
 
-    port = int(os.environ.get("GATEWAY_PORT", "14041"))
 
-    if gateway_is_running():
-        info(f"Gateway already running on port {port}")
-        return
+def _parse_root_env_for_plist() -> str:
+    """Generate plist XML env block from root .env."""
+    if not ENV_FILE.exists():
+        return ""
+    block = ""
+    for line in ENV_FILE.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip(), value.strip()
+        if key:
+            block += f"    <key>{key}</key>\n    <string>{value}</string>\n"
+    return block
 
+
+def _parse_root_env_for_systemd() -> str:
+    """Generate systemd env lines from root .env."""
+    if not ENV_FILE.exists():
+        return ""
+    lines = ""
+    for line in ENV_FILE.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        lines += f"Environment={line}\n"
+    return lines
+
+
+def gateway_is_running() -> bool:
     _ensure_bun_path()
-    import shutil
-    if not shutil.which("bun"):
-        error("Bun not found. Install with: curl -fsSL https://bun.sh/install | bash")
-        return
+    port = _gateway_port()
+    return http_check(f"http://localhost:{port}/api/health", timeout=2)
 
-    info(f"Starting gateway on port {port} ...")
+
+# ── launchd (macOS) ──────────────────────────────────────────────────────────
+
+def _gateway_launchd_install(bun: str, port: int) -> None:
+    gateway_dir = PROJECT_DIR / "gateway"
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+    GATEWAY_LAUNCHD_PLIST.parent.mkdir(parents=True, exist_ok=True)
+
+    env_block = _parse_root_env_for_plist()
+
+    plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>{GATEWAY_LAUNCHD_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{bun}</string>
+    <string>--env-file=../.env</string>
+    <string>run</string>
+    <string>index.ts</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>{gateway_dir}</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>{os.path.dirname(bun)}:/usr/local/bin:/usr/bin:/bin</string>
+{env_block}  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+  <key>StandardOutPath</key>
+  <string>{LOG_DIR}/gateway.log</string>
+  <key>StandardErrorPath</key>
+  <string>{LOG_DIR}/gateway-error.log</string>
+</dict>
+</plist>"""
+
+    GATEWAY_LAUNCHD_PLIST.write_text(plist)
+
+    uid = os.getuid()
+    subprocess.call(["launchctl", "bootout", f"gui/{uid}/{GATEWAY_LAUNCHD_LABEL}"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    ret = subprocess.call(["launchctl", "bootstrap", f"gui/{uid}", str(GATEWAY_LAUNCHD_PLIST)])
+    if ret != 0:
+        warn("launchd bootstrap failed, retrying once ...")
+        subprocess.call(["launchctl", "bootout", f"gui/{uid}/{GATEWAY_LAUNCHD_LABEL}"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        time.sleep(1)
+        subprocess.check_call(["launchctl", "bootstrap", f"gui/{uid}", str(GATEWAY_LAUNCHD_PLIST)])
+
+    info(f"Installed launchd service ({GATEWAY_LAUNCHD_LABEL})")
+    info(f"Gateway starting on port {port} (auto-starts on login, auto-restarts on crash)")
+
+
+def _gateway_launchd_stop() -> None:
+    uid = os.getuid()
+    ret = subprocess.call(["launchctl", "bootout", f"gui/{uid}/{GATEWAY_LAUNCHD_LABEL}"],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if ret == 0:
+        info("Gateway service stopped.")
+    else:
+        warn("Gateway service not running.")
+
+
+def _gateway_launchd_is_running() -> bool:
+    uid = os.getuid()
+    return subprocess.call(
+        ["launchctl", "print", f"gui/{uid}/{GATEWAY_LAUNCHD_LABEL}"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    ) == 0
+
+
+# ── systemd (Linux) ─────────────────────────────────────────────────────────
+
+def _gateway_systemd_install(bun: str, port: int) -> None:
+    gateway_dir = PROJECT_DIR / "gateway"
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    SYSTEMD_DIR.mkdir(parents=True, exist_ok=True)
+
+    env_lines = _parse_root_env_for_systemd()
+
+    unit = f"""[Unit]
+Description=LiteLLM Gateway UI
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory={gateway_dir}
+ExecStart={bun} --env-file=../.env run index.ts
+Restart=on-failure
+RestartSec=3
+
+Environment=PATH={os.path.dirname(bun)}:/usr/local/bin:/usr/bin:/bin
+{env_lines}
+StandardOutput=append:{LOG_DIR}/gateway.log
+StandardError=append:{LOG_DIR}/gateway-error.log
+
+[Install]
+WantedBy=default.target"""
+
+    GATEWAY_SYSTEMD_FILE.write_text(unit)
+
+    subprocess.call(["systemctl", "--user", "daemon-reload"])
+    subprocess.call(["systemctl", "--user", "enable", GATEWAY_SYSTEMD_UNIT])
+    subprocess.call(["systemctl", "--user", "start", GATEWAY_SYSTEMD_UNIT])
+
+    info(f"Installed systemd user service ({GATEWAY_SYSTEMD_UNIT})")
+    info(f"Gateway starting on port {port} (auto-starts on login, auto-restarts on crash)")
+
+    # Ensure linger so service survives logout
+    import shutil
+    if shutil.which("loginctl"):
+        result = subprocess.run(
+            ["loginctl", "show-user", os.environ.get("USER", ""), "--property=Linger"],
+            capture_output=True, text=True,
+        )
+        if "yes" not in result.stdout:
+            warn(f"Enabling loginctl linger for {os.environ.get('USER', '')} (keeps service running after logout)")
+            subprocess.call(["loginctl", "enable-linger", os.environ.get("USER", "")],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+def _gateway_systemd_stop() -> None:
+    ret = subprocess.call(["systemctl", "--user", "stop", GATEWAY_SYSTEMD_UNIT],
+                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if ret == 0:
+        info("Gateway service stopped.")
+    else:
+        warn("Gateway service not running.")
+
+
+def _gateway_systemd_is_running() -> bool:
+    return subprocess.call(
+        ["systemctl", "--user", "is-active", GATEWAY_SYSTEMD_UNIT],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+    ) == 0
+
+
+# ── nohup fallback ───────────────────────────────────────────────────────────
+
+def _gateway_nohup_start(bun: str, port: int) -> None:
+    gateway_dir = PROJECT_DIR / "gateway"
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+
     log_f = open(LOG_DIR / "gateway.log", "a")
     proc = subprocess.Popen(
-        ["bun", "--env-file=../.env", "run", "index.ts"],
+        [bun, "--env-file=../.env", "run", "index.ts"],
         cwd=str(gateway_dir),
         stdout=log_f, stderr=log_f,
         start_new_session=True,
     )
-    (gateway_dir / ".gateway.pid").write_text(str(proc.pid))
-
-    for _ in range(8):
-        time.sleep(1)
-        if gateway_is_running():
-            info(f"Gateway started (PID {proc.pid})")
-            info(f"Web UI: http://localhost:{port}")
-            # Auto-start hydroxide SMTP bridge if installed and authenticated
-            try:
-                from .protonmail import hydroxide_start
-                hydroxide_start()
-            except Exception:
-                pass
-            return
-    warn("Gateway started but not responding yet")
-    warn(f"Check logs: tail -f {LOG_DIR}/gateway.log")
+    GATEWAY_PIDFILE.write_text(str(proc.pid))
+    info(f"Gateway started in background (PID {proc.pid}, port {port})")
+    warn("Note: nohup mode has no auto-restart on crash. Use systemd for crash recovery.")
 
 
-def gateway_stop() -> None:
-    gateway_dir = PROJECT_DIR / "gateway"
-    pid_file = gateway_dir / ".gateway.pid"
-
-    if pid_file.exists():
+def _gateway_nohup_stop() -> None:
+    if GATEWAY_PIDFILE.exists():
         try:
-            pid = int(pid_file.read_text().strip())
+            pid = int(GATEWAY_PIDFILE.read_text().strip())
             os.kill(pid, 0)
             os.kill(pid, 15)
             time.sleep(1)
@@ -100,9 +257,9 @@ def gateway_stop() -> None:
             info(f"Gateway stopped (PID {pid})")
         except (ValueError, ProcessLookupError):
             info("Gateway process not running")
-        pid_file.unlink(missing_ok=True)
+        GATEWAY_PIDFILE.unlink(missing_ok=True)
     else:
-        port = int(os.environ.get("GATEWAY_PORT", "14041"))
+        port = _gateway_port()
         found = False
         for pid in pids_on_port(port):
             try:
@@ -120,14 +277,75 @@ def gateway_stop() -> None:
             info("No gateway process found")
 
 
+# ── Public start/stop ────────────────────────────────────────────────────────
+
+def gateway_start() -> None:
+    gateway_dir = PROJECT_DIR / "gateway"
+
+    if not gateway_dir.exists():
+        error(f"Gateway directory not found at {gateway_dir}")
+        error("Run 'litellmctl install --with-gateway' to install")
+        return
+
+    _load_gateway_env()
+    port = _gateway_port()
+
+    if gateway_is_running():
+        info(f"Gateway already running on port {port}")
+        return
+
+    bun = _bun_bin()
+    if not bun:
+        error("Bun not found. Install with: curl -fsSL https://bun.sh/install | bash")
+        return
+
+    if is_macos():
+        _gateway_launchd_install(bun, port)
+    elif is_linux() and has_systemd_user():
+        _gateway_systemd_install(bun, port)
+    else:
+        _gateway_nohup_start(bun, port)
+
+    # Wait for gateway to become healthy
+    for _ in range(8):
+        time.sleep(1)
+        if gateway_is_running():
+            info(f"Web UI: http://localhost:{port}")
+            # Auto-start hydroxide SMTP bridge if installed and authenticated
+            try:
+                from .protonmail import hydroxide_start
+                hydroxide_start()
+            except Exception:
+                pass
+            return
+    warn("Gateway started but not responding yet")
+    warn(f"Check logs: tail -f {LOG_DIR}/gateway.log")
+
+
+def gateway_stop() -> None:
+    if is_macos() and _gateway_launchd_is_running():
+        _gateway_launchd_stop()
+    elif is_linux() and _gateway_systemd_is_running():
+        _gateway_systemd_stop()
+    else:
+        _gateway_nohup_stop()
+
+
 def gateway_status() -> None:
-    port = int(os.environ.get("GATEWAY_PORT", "14041"))
+    port = _gateway_port()
     console.print("[bold]Gateway UI[/]")
     if not (PROJECT_DIR / "gateway").exists():
         console.print("  Status:   [yellow]not installed[/]")
         console.print("  [dim]Install: litellmctl install --with-gateway[/]")
     elif gateway_is_running():
-        console.print("  Status:   [green]running[/]")
+        # Show which service manager is supervising
+        if is_macos() and _gateway_launchd_is_running():
+            svc = "launchd"
+        elif is_linux() and _gateway_systemd_is_running():
+            svc = "systemd"
+        else:
+            svc = "nohup"
+        console.print(f"  Status:   [green]running[/] ({svc})")
         console.print(f"  Port:     {port}")
         console.print(f"  Web UI:   http://localhost:{port}")
     else:
@@ -195,8 +413,24 @@ def uninstall_gateway() -> None:
         console.print("  Not installed.\n")
         return
     if gateway_is_running():
-        console.print("  Running. Stop it first:\n")
-        console.print("      litellmctl gateway stop\n")
+        gateway_stop()
+
+    # Clean up service files
+    if is_macos() and GATEWAY_LAUNCHD_PLIST.exists():
+        uid = os.getuid()
+        subprocess.call(["launchctl", "bootout", f"gui/{uid}/{GATEWAY_LAUNCHD_LABEL}"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        GATEWAY_LAUNCHD_PLIST.unlink(missing_ok=True)
+        info("Removed gateway launchd service.")
+    elif is_linux() and GATEWAY_SYSTEMD_FILE.exists():
+        subprocess.call(["systemctl", "--user", "stop", GATEWAY_SYSTEMD_UNIT],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.call(["systemctl", "--user", "disable", GATEWAY_SYSTEMD_UNIT],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        GATEWAY_SYSTEMD_FILE.unlink(missing_ok=True)
+        subprocess.call(["systemctl", "--user", "daemon-reload"])
+        info("Removed gateway systemd service.")
+
     console.print(f"  To remove the gateway directory:\n")
     console.print(f"      rm -rf {gateway_dir}\n")
 
@@ -569,12 +803,14 @@ def cmd_gateway(subcmd: str = "status") -> None:
         gateway_stop()
     elif subcmd == "restart":
         gateway_stop()
-        _ensure_bun_path()
-        gateway_dir = PROJECT_DIR / "gateway"
-        info("Building gateway frontend ...")
-        ret = subprocess.call(["bun", "run", "build"], cwd=str(gateway_dir))
-        if ret != 0:
-            warn("Frontend build failed — starting anyway")
+        time.sleep(1)
+        bun = _bun_bin()
+        if bun:
+            gateway_dir = PROJECT_DIR / "gateway"
+            info("Building gateway frontend ...")
+            ret = subprocess.call([bun, "run", "build"], cwd=str(gateway_dir))
+            if ret != 0:
+                warn("Frontend build failed — starting anyway")
         gateway_start()
     elif subcmd == "status":
         gateway_status()

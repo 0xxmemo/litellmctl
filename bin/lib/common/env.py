@@ -109,6 +109,28 @@ def patch_local_defaults(env_file: Path | None = None) -> bool:
     return dirty
 
 
+def patch_perf_defaults(env_file: Path | None = None) -> bool:
+    """Write proxy performance defaults (NUM_WORKERS, KEEPALIVE_TIMEOUT, etc.)."""
+    ef = env_file or ENV_FILE
+    dirty = False
+    defaults = {
+        "NUM_WORKERS": "4",
+        "KEEPALIVE_TIMEOUT": "120",
+        "AIOHTTP_CONNECTOR_LIMIT": "500",
+        "AIOHTTP_CONNECTOR_LIMIT_PER_HOST": "100",
+        "AIOHTTP_KEEPALIVE_TIMEOUT": "120",
+        "AIOHTTP_TTL_DNS_CACHE": "600",
+    }
+    text = ef.read_text() if ef.exists() else ""
+    for var, val in defaults.items():
+        if f"\n{var}=" not in f"\n{text}" and not text.startswith(f"{var}="):
+            with ef.open("a") as f:
+                f.write(f"{var}={val}\n")
+            dirty = True
+            text = ef.read_text()
+    return dirty
+
+
 def remove_db_env_config(env_file: Path | None = None) -> None:
     """Remove DATABASE_URL and related DB flags from .env."""
     ef = env_file or ENV_FILE

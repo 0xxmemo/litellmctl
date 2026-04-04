@@ -12,7 +12,7 @@ from ..common.paths import (
     PROJECT_DIR, VENV_DIR, PORT_FILE, LOG_DIR, CONFIG_FILE, PIDFILE,
     LAUNCHD_LABEL, LAUNCHD_PLIST, SYSTEMD_UNIT, SYSTEMD_DIR, SYSTEMD_FILE,
 )
-from ..common.env import load_env
+from ..common.env import load_env, patch_perf_defaults
 from ..common.formatting import info, warn, error
 from ..common.platform import is_macos, is_linux, has_systemd_user
 from ..common.process import get_proxy_port, find_proxy_pid, kill_stale
@@ -31,7 +31,7 @@ def _activate_venv() -> None:
 
 def _perf_flags() -> list[str]:
     flags = []
-    workers = os.environ.get("NUM_WORKERS", "1")
+    workers = os.environ.get("NUM_WORKERS", "4")
     try:
         if int(workers) > 1:
             flags.extend(["--num_workers", workers])
@@ -67,7 +67,7 @@ def _parse_env_for_plist() -> str:
 def _plist_perf_args() -> str:
     """Generate plist XML perf args."""
     args = ""
-    workers = os.environ.get("NUM_WORKERS", "1")
+    workers = os.environ.get("NUM_WORKERS", "4")
     try:
         if int(workers) > 1:
             args += f"    <string>--num_workers</string>\n    <string>{workers}</string>\n"
@@ -311,6 +311,8 @@ def nohup_is_running() -> bool:
 
 def cmd_start(port: int = 4040, config: str | None = None) -> None:
     load_env()
+    patch_perf_defaults()
+    load_env()  # reload so new defaults take effect
     cfg = config or str(CONFIG_FILE)
 
     # Check if config file exists, prompt for wizard if missing
@@ -362,6 +364,8 @@ def cmd_stop() -> None:
 
 def cmd_restart() -> None:
     load_env()
+    patch_perf_defaults()
+    load_env()  # reload so new defaults take effect
     port = get_proxy_port()
     config = str(CONFIG_FILE)
 

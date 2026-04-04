@@ -22,9 +22,16 @@ ENV_EXAMPLE = PROJECT_DIR / ".env.example"
 TEMPLATES_DIR = PROJECT_DIR / "templates"
 PIDFILE = PROJECT_DIR / ".proxy.pid"
 
-# Service identifiers
+# Service identifiers — Proxy
 LAUNCHD_LABEL = "com.litellm.proxy"
 LAUNCHD_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{LAUNCHD_LABEL}.plist"
 SYSTEMD_UNIT = "litellm-proxy"
 SYSTEMD_DIR = Path.home() / ".config" / "systemd" / "user"
 SYSTEMD_FILE = SYSTEMD_DIR / f"{SYSTEMD_UNIT}.service"
+
+# Service identifiers — Gateway
+GATEWAY_LAUNCHD_LABEL = "com.litellm.gateway"
+GATEWAY_LAUNCHD_PLIST = Path.home() / "Library" / "LaunchAgents" / f"{GATEWAY_LAUNCHD_LABEL}.plist"
+GATEWAY_SYSTEMD_UNIT = "litellm-gateway"
+GATEWAY_SYSTEMD_FILE = SYSTEMD_DIR / f"{GATEWAY_SYSTEMD_UNIT}.service"
+GATEWAY_PIDFILE = PROJECT_DIR / "gateway" / ".gateway.pid"

@@ -6,7 +6,7 @@ import os
 import subprocess
 
 from ..common.paths import PROJECT_DIR, BIN_DIR, ENV_FILE
-from ..common.env import load_env, patch_db_flags, patch_local_defaults
+from ..common.env import load_env, patch_db_flags, patch_local_defaults, patch_perf_defaults
 from ..common.formatting import info, warn, console
 from ..common.platform import is_macos, is_linux, is_interactive
 from ..common.network import port_in_use
@@ -139,6 +139,7 @@ def cmd_install(
         info("Run 'litellmctl install --with-db' to enable.")
 
     patch_local_defaults()
+    patch_perf_defaults()
     load_env()
 
     # ── Local inference servers ────────────────────────────────────────────
