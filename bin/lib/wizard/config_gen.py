@@ -98,9 +98,26 @@ def generate_yaml(models: list[dict], aliases: dict[str, str],
         if "websearch_interception" not in success_cb:
             success_cb.append("websearch_interception")
         ls["success_callback"] = success_cb
-        ls["websearch_interception_params"] = {
+
+        # Extract unique LiteLLM provider names from model list
+        # (provider is the prefix before "/" in litellm_params.model)
+        providers_set: set[str] = set()
+        for m in models:
+            lp_model = (m.get("litellm_params") or {}).get("model", "")
+            if "/" in lp_model:
+                providers_set.add(lp_model.split("/", 1)[0])
+        if embedding_models:
+            for m in embedding_models:
+                lp_model = (m.get("litellm_params") or {}).get("model", "")
+                if "/" in lp_model:
+                    providers_set.add(lp_model.split("/", 1)[0])
+
+        params: dict = {
             "search_tool_name": search_models[0]["search_tool_name"],
         }
+        if providers_set:
+            params["enabled_providers"] = sorted(providers_set)
+        ls["websearch_interception_params"] = params
 
     lines.append("")
     lines.append("litellm_settings:")
@@ -110,6 +127,10 @@ def generate_yaml(models: list[dict], aliases: dict[str, str],
             for sk, sv in v.items():
                 if isinstance(sv, str):
                     lines.append(f'    {sk}: "{sv}"')
+                elif isinstance(sv, list):
+                    lines.append(f"    {sk}:")
+                    for item in sv:
+                        lines.append(f"      - {item}")
                 else:
                     lines.append(f"    {sk}: {sv}")
         elif isinstance(v, bool):
