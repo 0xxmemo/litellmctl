@@ -6,6 +6,14 @@ role: supplemental
 
 models: []
 
+# SearXNG web search — detected automatically by the wizard when SearXNG is running.
+# Enables websearch interception: Claude Code's native web_search tool is routed through SearXNG.
+# Port: SEARXNG_PORT env var (default 8888)
+search_models:
+  - search_tool_name: searxng-local
+    search_provider: searxng
+    api_base: "http://localhost:8888"
+
 # Local embedding — single preset: Nomic Embed v2 MoE @ 512-d (Matryoshka, lightweight vectors).
 # Ollama: ollama pull nomic-embed-text-v2-moe
 # Optional: pass "dimensions" on /v1/embeddings to override (e.g. 768) when supported.

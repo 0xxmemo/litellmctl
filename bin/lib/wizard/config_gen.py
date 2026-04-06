@@ -30,7 +30,8 @@ def write_model_entries(lines: list[str], models: list[dict]) -> None:
 def generate_yaml(models: list[dict], aliases: dict[str, str],
                   fallbacks: list[dict], defaults: dict,
                   embedding_models: list[dict] | None = None,
-                  transcription_models: list[dict] | None = None) -> str:
+                  transcription_models: list[dict] | None = None,
+                  search_models: list[dict] | None = None) -> str:
     lines: list[str] = ["model_list:"]
     write_model_entries(lines, models)
 
@@ -56,6 +57,18 @@ def generate_yaml(models: list[dict], aliases: dict[str, str],
         lines.append("  # Base URL: LOCAL_TRANSCRIPTION_API_BASE env var  (default: http://localhost:10300/v1)")
         write_model_entries(lines, transcription_models)
 
+    if search_models:
+        lines.append("")
+        lines.append("# ── Web search tools (websearch interception) ─────────────────────────────")
+        lines.append("# Claude Code web searches are transparently routed through SearXNG.")
+        lines.append("search_tools:")
+        for sm in search_models:
+            lines.append(f'  - search_tool_name: "{sm["search_tool_name"]}"')
+            lines.append("    litellm_params:")
+            lines.append(f'      search_provider: "{sm["search_provider"]}"')
+            if "api_base" in sm:
+                lines.append(f'      api_base: "{sm["api_base"]}"')
+
     rs = defaults.get("router_settings", {})
     lines.append("")
     lines.append("router_settings:")
@@ -77,14 +90,28 @@ def generate_yaml(models: list[dict], aliases: dict[str, str],
                     lines.append(f"          {m},")
                 lines.append("        ]")
 
-    ls = defaults.get("litellm_settings", {})
+    ls = dict(defaults.get("litellm_settings", {}))
+
+    # Inject websearch_interception if search is enabled
+    if search_models:
+        success_cb = list(ls.get("success_callback", []))
+        if "websearch_interception" not in success_cb:
+            success_cb.append("websearch_interception")
+        ls["success_callback"] = success_cb
+        ls["websearch_interception_params"] = {
+            "search_tool_name": search_models[0]["search_tool_name"],
+        }
+
     lines.append("")
     lines.append("litellm_settings:")
     for k, v in ls.items():
         if isinstance(v, dict):
             lines.append(f"  {k}:")
             for sk, sv in v.items():
-                lines.append(f"    {sk}: {sv}")
+                if isinstance(sv, str):
+                    lines.append(f'    {sk}: "{sv}"')
+                else:
+                    lines.append(f"    {sk}: {sv}")
         elif isinstance(v, bool):
             lines.append(f"  {k}: {'true' if v else 'false'}")
         elif isinstance(v, list):

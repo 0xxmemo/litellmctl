@@ -17,7 +17,7 @@ from .providers import (
     load_defaults, load_providers, check_provider_ready,
     readiness_icon, env_var_set, auth_file_exists,
 )
-from .models import collect_models, collect_task_models, build_aliases, build_fallbacks
+from .models import collect_models, collect_task_models, collect_search_models, build_aliases, build_fallbacks
 from .config_gen import generate_yaml
 
 
@@ -243,6 +243,28 @@ def run_wizard() -> bool:
         console.print(f"\n  [red]No chains configured.[/] Aborting.")
         return False
 
+    # ── Step 3.5: Web search integration ────────────────────────────────────
+    search_models: list[dict] = []
+    has_search_provider = any(
+        providers[pid].get("search_models")
+        for pid in selected_pids
+    )
+    if has_search_provider:
+        from .providers import probe_local_services
+        _, _, searxng_ok, _, _, searxng_base = probe_local_services(env)
+        if searxng_ok:
+            console.print(f"\n[bold]Web search integration[/]")
+            console.print(f"  {TICK} SearXNG detected at [green]{searxng_base}[/]")
+            console.print(f"  {dim('Claude Code web searches will be routed through SearXNG via the proxy.')}")
+            if confirm("  Enable web search interception?"):
+                search_models = collect_search_models(selected_pids, providers)
+                console.print(f"  {TICK} Web search interception enabled")
+            else:
+                console.print(f"  {dim('Skipped.')}")
+        else:
+            console.print(f"\n  {dim('SearXNG not running — web search interception skipped.')}")
+            console.print(f"  {dim('Install with: litellmctl install --with-searxng')}")
+
     # ── Step 4: Generate ─────────────────────────────────────────────────────
     step(4, "Generate config")
 
@@ -254,7 +276,8 @@ def run_wizard() -> bool:
     transcription_models = collect_task_models(all_selected, providers, "transcription_models")
     yaml_content = generate_yaml(models, aliases, fallbacks, defaults,
                                  embedding_models=embedding_models or None,
-                                 transcription_models=transcription_models or None)
+                                 transcription_models=transcription_models or None,
+                                 search_models=search_models or None)
 
     # Summary
     header("Summary")
@@ -270,6 +293,8 @@ def run_wizard() -> bool:
         console.print(f"  {dim(f'Local embedding deployments: {len(embedding_models)}')}")
     if transcription_models:
         console.print(f"  {dim(f'Local transcription deployments: {len(transcription_models)}')}")
+    if search_models:
+        console.print(f"  {TICK} Web search: SearXNG (websearch interception enabled)")
 
     env_vars_needed: list[str] = []
     auth_cmds_needed: list[str] = []

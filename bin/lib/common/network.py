@@ -40,6 +40,11 @@ def transcr_http_check(base_url: str, timeout: int = 3) -> bool:
         return False
 
 
+def searxng_http_check(base_url: str, timeout: int = 3) -> bool:
+    """Return True if a SearXNG instance responds."""
+    return http_check(base_url.rstrip("/") + "/", timeout=timeout)
+
+
 def port_in_use(port: int) -> bool:
     """Return True if something is listening on the given port."""
     if shutil.which("lsof"):

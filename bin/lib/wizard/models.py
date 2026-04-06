@@ -50,6 +50,19 @@ def collect_task_models(selected_providers: list[str], providers: OrderedDict,
     return models
 
 
+def collect_search_models(selected_providers: list[str], providers: OrderedDict) -> list[dict]:
+    """Collect search_models (SearXNG config) from selected providers."""
+    models: list[dict] = []
+    seen: set[str] = set()
+    for pid in selected_providers:
+        for sm in providers[pid].get("search_models", []):
+            name = sm["search_tool_name"]
+            if name not in seen:
+                seen.add(name)
+                models.append(dict(sm))
+    return models
+
+
 def build_aliases(chain_sets: list[dict]) -> dict[str, str]:
     """Build model_group_alias from chain set definitions.
 
