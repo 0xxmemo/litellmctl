@@ -318,7 +318,7 @@ def cmd_start(port: int = 4040, config: str | None = None) -> None:
     # Check if config file exists, prompt for wizard if missing
     cfg_path = Path(cfg) if cfg.startswith("/") else PROJECT_DIR / cfg
     if not cfg_path.exists():
-        from ..common.formatting import warn
+
         from ..common.platform import is_interactive
         from ..common.prompts import confirm
         warn(f"Config file not found: {cfg_path}")
@@ -373,7 +373,7 @@ def cmd_restart() -> None:
 
     # Check if config file exists
     if not CONFIG_FILE.exists():
-        from ..common.formatting import warn
+
         from ..common.platform import is_interactive
         from ..common.prompts import confirm
         warn(f"Config file not found: {CONFIG_FILE}")
