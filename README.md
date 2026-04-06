@@ -15,7 +15,6 @@ source ~/.zshrc              # or ~/.bashrc
 litellmctl wizard            # generate config.yaml (providers, tiers, fallbacks)
 litellmctl install           # set up DB, local servers, gateway, search
 litellmctl start             # start proxy (auto-starts on boot)
-litellmctl gateway start     # start web UI + API gateway
 ```
 
 ## CLI Reference
@@ -47,9 +46,6 @@ litellmctl auth import            Read credentials from stdin
 ### Gateway
 
 ```
-litellmctl gateway start          Start web UI + API gateway
-litellmctl gateway stop           Stop gateway
-litellmctl gateway restart        Rebuild frontend + restart
 litellmctl gateway status         Show gateway status
 litellmctl gateway logs           Tail gateway logs
 litellmctl gateway routes         List all API endpoints (parsed from source)

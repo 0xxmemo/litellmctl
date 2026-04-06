@@ -351,7 +351,7 @@ def gateway_status() -> None:
     else:
         console.print("  Status:   [yellow]stopped[/]")
         console.print(f"  Port:     {port}")
-        console.print("  [dim]Start: litellmctl gateway start[/]")
+        console.print("  [dim]Start: litellmctl start gateway[/]")
     console.print()
 
 
@@ -402,7 +402,7 @@ def install_gateway() -> bool:
                 env_path.write_text(text)
 
     info(f"Gateway installed at {gateway_dir}")
-    info("Start with: litellmctl gateway start")
+    info("Start with: litellmctl start gateway")
     return True
 
 
@@ -696,7 +696,7 @@ def gateway_api(args: list[str], data: str | None = None) -> None:
         return
 
     if not gateway_is_running():
-        error("Gateway not running — litellmctl gateway start")
+        error("Gateway not running — litellmctl start gateway")
         return
 
     secret = _gateway_secret()

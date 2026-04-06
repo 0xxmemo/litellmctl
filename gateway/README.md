@@ -39,7 +39,7 @@ Client (CLI / Web / App)
 
 ```bash
 # Via litellmctl (recommended)
-litellmctl gateway start
+litellmctl start gateway
 
 # Manual
 bun install
@@ -52,11 +52,11 @@ The gateway loads environment variables from `../.env` via `--env-file` (set in 
 
 Three standardized gates in `lib/db.ts`, all supporting both API key and session auth:
 
-| Gate | Allows | Description |
-|------|--------|-------------|
-| `requireAuth` | Any authenticated user (incl. guests) | Minimum bar — just proves identity |
-| `requireUser` | `user` or `admin` role | Standard access — excludes guests |
-| `requireAdmin` | `admin` role only | Administrative operations |
+| Gate           | Allows                                | Description                        |
+| -------------- | ------------------------------------- | ---------------------------------- |
+| `requireAuth`  | Any authenticated user (incl. guests) | Minimum bar — just proves identity |
+| `requireUser`  | `user` or `admin` role                | Standard access — excludes guests  |
+| `requireAdmin` | `admin` role only                     | Administrative operations          |
 
 Usage pattern in route handlers:
 
@@ -103,23 +103,24 @@ litellmctl gateway api admin <TAB>    # users, approve, reject, ...
 
 ### Route groups
 
-| Command prefix | Examples |
-|---------------|----------|
-| `health` | `gateway api health` |
-| `stats` | `gateway api stats global`, `stats user`, `stats requests` |
-| `keys` | `gateway api keys`, `keys delete <id>` |
-| `models` | `gateway api models`, `models extended` |
-| `user` | `gateway api user aliases`, `user model-overrides` |
-| `search` | `gateway api search q=hello` |
-| `admin` | `gateway api admin users`, `admin approve`, `admin litellm-config` |
-| `auth` | `gateway api auth me` |
-| `v1` | `gateway api v1 models`, `v1 chat completions -d '{...}'` |
+| Command prefix | Examples                                                           |
+| -------------- | ------------------------------------------------------------------ |
+| `health`       | `gateway api health`                                               |
+| `stats`        | `gateway api stats global`, `stats user`, `stats requests`         |
+| `keys`         | `gateway api keys`, `keys delete <id>`                             |
+| `models`       | `gateway api models`, `models extended`                            |
+| `user`         | `gateway api user aliases`, `user model-overrides`                 |
+| `search`       | `gateway api search q=hello`                                       |
+| `admin`        | `gateway api admin users`, `admin approve`, `admin litellm-config` |
+| `auth`         | `gateway api auth me`                                              |
+| `v1`           | `gateway api v1 models`, `v1 chat completions -d '{...}'`          |
 
 The CLI bypasses all auth gates via a local secret (`.gateway-secret`), generated on each gateway start.
 
 ## Authentication
 
 ### API Key
+
 ```bash
 curl -H "Authorization: Bearer sk-llm-..." http://localhost:14041/v1/chat/completions
 # or
@@ -127,6 +128,7 @@ curl -H "x-api-key: sk-llm-..." http://localhost:14041/v1/chat/completions
 ```
 
 ### Session (browser)
+
 OTP-based email login. Sessions stored in MongoDB, delivered via `sessionId` httpOnly cookie.
 
 ## Development

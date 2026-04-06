@@ -220,7 +220,7 @@ def cmd_install(
         if gateway_is_running():
             info("Gateway already running — skipping")
         elif (PROJECT_DIR / "gateway" / "dist").exists():
-            info("Gateway already built — start with: litellmctl gateway start")
+            info("Gateway already built — start with: litellmctl start gateway")
         elif (PROJECT_DIR / "gateway").exists() and shutil.which("bun"):
             gateway_mode = "yes"
         elif is_interactive():
