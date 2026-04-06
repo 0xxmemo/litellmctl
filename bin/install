@@ -33,6 +33,8 @@ run_with_timeout() {
 }
 
 # Check for local uncommitted changes, untracked files, or unpushed commits.
+# For submodules, compares HEAD against the parent-expected SHA instead of
+# the upstream tracking branch (which can diverge independently).
 has_local_changes() {
   local dir="$1"
   [ -d "$dir/.git" ] || [ -f "$dir/.git" ] || return 1
@@ -42,10 +44,21 @@ has_local_changes() {
   ! git -C "$dir" diff --quiet 2>/dev/null && return 0
   # Untracked files
   [ -n "$(git -C "$dir" ls-files --others --exclude-standard 2>/dev/null)" ] && return 0
-  # Unpushed commits
-  local ahead
-  ahead=$(git -C "$dir" rev-list --count @{u}..HEAD 2>/dev/null || echo "0")
-  [ "$ahead" -gt 0 ] && return 0
+  # Unpushed commits — for submodules, compare against parent-expected SHA
+  local head_sha
+  head_sha=$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)
+  if [ -f "$dir/.git" ]; then
+    # This is a submodule (has .git file, not .git directory)
+    local expected_sha
+    expected_sha=$(git -C "$PROJECT_DIR" ls-tree HEAD -- litellm 2>/dev/null | awk '{print $3}')
+    if [ -n "$expected_sha" ] && [ "$head_sha" != "$expected_sha" ]; then
+      return 0
+    fi
+  else
+    local ahead
+    ahead=$(git -C "$dir" rev-list --count @{u}..HEAD 2>/dev/null || echo "0")
+    [ "$ahead" -gt 0 ] && return 0
+  fi
   return 1
 }
 
@@ -128,9 +141,22 @@ sync_repo() {
 
     discard)
       warn "Discarding all local $label changes."
-      # Reset tracked files (staged + unstaged)
-      git -C "$dir" checkout -- . 2>/dev/null || true
-      git -C "$dir" reset --quiet HEAD 2>/dev/null || true
+      if [ "$mode" = "submodule" ]; then
+        # For submodules: hard-reset to parent-expected commit, then let
+        # submodule update re-checkout. This removes unpushed commits that
+        # checkout/reset alone won't touch.
+        local expected_sha
+        expected_sha=$(git -C "$PROJECT_DIR" ls-tree HEAD -- litellm 2>/dev/null | awk '{print $3}')
+        if [ -n "$expected_sha" ]; then
+          git -C "$dir" reset --hard "$expected_sha" 2>/dev/null || true
+        else
+          git -C "$dir" reset --hard HEAD 2>/dev/null || true
+        fi
+      else
+        # Reset tracked files (staged + unstaged)
+        git -C "$dir" checkout -- . 2>/dev/null || true
+        git -C "$dir" reset --quiet HEAD 2>/dev/null || true
+      fi
       # Remove untracked files and directories
       git -C "$dir" clean -fd 2>/dev/null || true
 
@@ -150,33 +176,42 @@ normalize_submodule_ref() {
     return 0
   fi
 
-  local head_sha main_sha current_branch
+  local head_sha
   head_sha=$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)
-  if [ -z "$head_sha" ]; then
-    return 0
+  [ -n "$head_sha" ] || return 0
+
+  # The parent repo determines the expected submodule commit.
+  local expected_sha
+  expected_sha=$(git -C "$PROJECT_DIR" ls-tree HEAD -- litellm 2>/dev/null | awk '{print $3}')
+  [ -n "$expected_sha" ] || return 0
+
+  # If HEAD doesn't match what the parent expects, force it.
+  if [ "$head_sha" != "$expected_sha" ]; then
+    git -C "$dir" reset --hard "$expected_sha" 2>/dev/null || true
+    head_sha="$expected_sha"
   fi
 
-  # Fetch remote main so comparison is accurate after sync.
-  run_with_timeout 30 git -C "$dir" fetch --quiet origin main || true
-  main_sha=$(git -C "$dir" rev-parse origin/main 2>/dev/null || true)
-  if [ -z "$main_sha" ]; then
-    main_sha=$(git -C "$dir" rev-parse main 2>/dev/null || true)
-  fi
-  [ -n "$main_sha" ] || return 0
+  # Ensure local main branch points at the expected commit to avoid
+  # "diverged" status between local main and origin/main.
+  local current_branch
+  current_branch="$(git -C "$dir" symbolic-ref -q --short HEAD 2>/dev/null || true)"
 
-  if [ "$head_sha" = "$main_sha" ]; then
-    current_branch="$(git -C "$dir" symbolic-ref -q --short HEAD 2>/dev/null || true)"
-    if [ "$current_branch" != "main" ]; then
-      if git -C "$dir" show-ref --verify --quiet refs/heads/main; then
-        git -C "$dir" checkout -q main
-      else
-        git -C "$dir" checkout -q -b main origin/main
-      fi
-      info "Submodule aligned to branch main (matches origin/main)."
+  if [ "$current_branch" != "main" ]; then
+    # On detached HEAD — create or reset local main to expected commit and check it out
+    if git -C "$dir" show-ref --verify --quiet refs/heads/main; then
+      git -C "$dir" branch -f main "$expected_sha" 2>/dev/null || true
     fi
+    git -C "$dir" checkout -q -B main "$expected_sha" 2>/dev/null || true
   else
-    info "Submodule pinned to commit $head_sha (does not match origin/main)."
+    # Already on main — make sure it points at expected SHA
+    local main_sha
+    main_sha=$(git -C "$dir" rev-parse main 2>/dev/null || true)
+    if [ "$main_sha" != "$expected_sha" ]; then
+      git -C "$dir" reset --hard "$expected_sha" 2>/dev/null || true
+    fi
   fi
+
+  info "Submodule aligned to branch main (parent-pinned commit)."
 }
 
 detect_python() {
