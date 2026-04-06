@@ -6,13 +6,13 @@
 
 import {
   scanSkills,
-  buildGatewayOrigin,
   hasSkillComponent,
   getSkillComponent,
   buildInstallScript,
   buildUninstallScript,
   SKILL_MANIFEST,
 } from "../lib/skills";
+import { buildGatewayOrigin, scriptResponse } from "../lib/scripts";
 
 // Target platforms for skill installation
 const INSTALL_TARGETS = {
@@ -69,13 +69,7 @@ async function getSkillInstallScript(req: Request): Promise<Response> {
   const gatewayOrigin = buildGatewayOrigin(req);
   const installContent = await getSkillComponent(slug, "install.sh");
   const script = buildInstallScript(slug, targetConfig, gatewayOrigin, installContent);
-
-  return new Response(script, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-cache",
-    },
-  });
+  return scriptResponse(script);
 }
 
 /**
@@ -149,13 +143,7 @@ async function getSkillUninstallScript(req: Request): Promise<Response> {
   const gatewayOrigin = buildGatewayOrigin(req);
   const uninstallContent = await getSkillComponent(slug, "uninstall.sh");
   const script = buildUninstallScript(slug, targetConfig, gatewayOrigin, uninstallContent);
-
-  return new Response(script, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-cache",
-    },
-  });
+  return scriptResponse(script);
 }
 
 export const skillsRoutes = {

@@ -1,4 +1,14 @@
-import { PORT } from "../lib/config";
+/**
+ * Setup script routes — configure client tools to use LLM Gateway.
+ *
+ * Script generation uses shared utilities from lib/scripts.ts.
+ */
+
+import {
+  buildGatewayOrigin,
+  scriptResponse,
+  scriptValidateKey,
+} from "../lib/scripts";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -59,16 +69,7 @@ const SETUP_OPTIONS = {
 
 type SetupOptionId = keyof typeof SETUP_OPTIONS;
 
-// ── Helper Functions ─────────────────────────────────────────────────────────
-
-function getGatewayOrigin(url: URL, req: Request): string {
-  const host = url.hostname;
-  const forwardedProto = req.headers.get("x-forwarded-proto");
-  const protocol =
-    forwardedProto || (url.protocol === "https:" ? "https" : "http");
-  const port = PORT;
-  return `${protocol}://${host}${protocol === "http" && port !== 443 && port !== 80 ? ":" + port : ""}`;
-}
+// ── Route handlers ──────────────────────────────────────────────────────────
 
 /**
  * GET /api/setup/options — Return all available setup options.
@@ -107,7 +108,7 @@ async function getSetupScript(req: Request): Promise<Response> {
   }
 
   const config = SETUP_OPTIONS[id];
-  const gatewayOrigin = getGatewayOrigin(url, req);
+  const gatewayOrigin = buildGatewayOrigin(req);
 
   // Generate setup script based on option type
   switch (id) {
@@ -123,27 +124,22 @@ async function getSetupScript(req: Request): Promise<Response> {
   }
 }
 
+// ── Script generators ───────────────────────────────────────────────────────
+
 function generateClaudeCodeScript(
   gatewayOrigin: string,
   configVar: string,
 ): Response {
+  const usageUrl = `${gatewayOrigin}/api/setup/claude-code`;
+
   const script = `#!/usr/bin/env bash
 # Configure Claude Code to use LLM Gateway as your API provider.
 #
 # Usage:
-#   curl -fsSL ${gatewayOrigin}/api/setup/claude-code | ${configVar}="sk-..." bash
+#   curl -fsSL ${usageUrl} | ${configVar}="sk-..." bash
 #
 set -euo pipefail
-
-API_KEY="\${${configVar}:-}"
-
-if [ -z "\$API_KEY" ]; then
-  echo "Error: ${configVar} is not set." >&2
-  echo "" >&2
-  echo "Usage:" >&2
-  echo "  curl -fsSL ${gatewayOrigin}/api/setup/claude-code | ${configVar}=\\"YOUR_KEY\\" bash" >&2
-  exit 1
-fi
+${scriptValidateKey(configVar, usageUrl)}
 
 CLAUDE_DIR="\$HOME/.claude"
 SETTINGS_FILE="\$CLAUDE_DIR/settings.json"
@@ -155,9 +151,9 @@ if [ -f "\$SETTINGS_FILE" ]; then
   # Check if jq is available for safe JSON merging
   if command -v jq &>/dev/null; then
     tmp=\$(mktemp)
-    jq --arg key "\$API_KEY" --arg url "${gatewayOrigin}/v1" \
-       --arg opus "ultra" \
-       --arg sonnet "plus" \
+    jq --arg key "\$API_KEY" --arg url "${gatewayOrigin}/v1" \\
+       --arg opus "ultra" \\
+       --arg sonnet "plus" \\
        --arg haiku "lite" '
       .env.ANTHROPIC_API_KEY = \$key |
       .env.ANTHROPIC_BASE_URL = \$url |
@@ -201,35 +197,23 @@ echo ""
 echo "Run 'claude' to start using Claude Code through LLM Gateway."
 `;
 
-  return new Response(script, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-cache",
-    },
-  });
+  return scriptResponse(script);
 }
 
 function generateOpenClawScript(
   gatewayOrigin: string,
   configVar: string,
 ): Response {
+  const usageUrl = `${gatewayOrigin}/api/setup/openclaw`;
+
   const script = `#!/usr/bin/env bash
 # Configure OpenClaw to use LLM Gateway as your API provider.
 #
 # Usage:
-#   curl -fsSL ${gatewayOrigin}/api/setup/openclaw | ${configVar}="sk-..." bash
+#   curl -fsSL ${usageUrl} | ${configVar}="sk-..." bash
 #
 set -euo pipefail
-
-API_KEY="\${${configVar}:-}"
-
-if [ -z "\$API_KEY" ]; then
-  echo "Error: ${configVar} is not set." >&2
-  echo "" >&2
-  echo "Usage:" >&2
-  echo "  curl -fsSL ${gatewayOrigin}/api/setup/openclaw | ${configVar}=\\"YOUR_KEY\\" bash" >&2
-  exit 1
-fi
+${scriptValidateKey(configVar, usageUrl)}
 
 OPENCLAW_DIR="\$HOME/.openclaw"
 CONFIG_FILE="\$OPENCLAW_DIR/openclaw.json"
@@ -251,9 +235,9 @@ fi
 if [ -f "\$CONFIG_FILE" ]; then
   if command -v jq &>/dev/null; then
     tmp=\$(mktemp)
-    jq --arg key "\${API_KEY}" --arg url "${gatewayOrigin}" \
-       --arg opus "ultra" \
-       --arg sonnet "plus" \
+    jq --arg key "\${API_KEY}" --arg url "${gatewayOrigin}" \\
+       --arg opus "ultra" \\
+       --arg sonnet "plus" \\
        --arg haiku "lite" '
       .models.providers.litellm = {
         "baseUrl": \$url,
@@ -301,12 +285,7 @@ echo ""
 echo "Restart OpenClaw to apply changes."
 `;
 
-  return new Response(script, {
-    headers: {
-      "Content-Type": "text/plain; charset=utf-8",
-      "Cache-Control": "no-cache",
-    },
-  });
+  return scriptResponse(script);
 }
 
 // ── Route Exports ────────────────────────────────────────────────────────────
