@@ -15,7 +15,7 @@ from ..common.paths import (
 from ..common.env import load_env, patch_perf_defaults
 from ..common.formatting import info, warn, error
 from ..common.platform import is_macos, is_linux, has_systemd_user
-from ..common.process import get_proxy_port, find_proxy_pid, kill_stale
+from ..common.process import get_proxy_port, find_proxy_pid, kill_stale, kill_other_instances, find_all_litellm_pids
 from ..common.network import wait_for_ready
 
 
@@ -341,6 +341,7 @@ def cmd_start(port: int = 4040, config: str | None = None) -> None:
     _activate_venv()
     load_env()
     kill_stale(port)
+    kill_other_instances(port)
 
     if is_macos():
         launchd_install(port, cfg)
@@ -360,6 +361,7 @@ def cmd_stop() -> None:
     else:
         nohup_stop()
     kill_stale(port)
+    kill_other_instances(port)
 
 
 def cmd_restart() -> None:
@@ -392,6 +394,8 @@ def cmd_restart() -> None:
             sys.exit(1)
 
     info("Restarting proxy ...")
+
+    # Stop all litellm instances — service-managed and orphans alike
     if is_macos() and launchd_is_running():
         launchd_stop()
     elif is_linux() and systemd_is_running():
@@ -402,6 +406,24 @@ def cmd_restart() -> None:
 
     time.sleep(1)
     kill_stale(port)
+
+    # Kill any litellm processes on other ports (e.g. old systemd service on 4000)
+    remaining = find_all_litellm_pids()
+    if remaining:
+        warn(f"Killing {len(remaining)} remaining litellm process(es): {' '.join(map(str, remaining))}")
+        for pid in remaining:
+            try:
+                os.kill(pid, 15)
+            except (ProcessLookupError, PermissionError):
+                pass
+        time.sleep(2)
+        for pid in remaining:
+            try:
+                os.kill(pid, 0)
+                os.kill(pid, 9)
+            except (ProcessLookupError, PermissionError):
+                pass
+
     _activate_venv()
     load_env()
 

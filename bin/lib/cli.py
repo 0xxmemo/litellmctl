@@ -312,26 +312,8 @@ def help() -> None:
 
 
 # Gateway subcommands
-@gateway_app.command("start")
-def gateway_start() -> None:
-    """Start the gateway."""
-    from .commands.gateway import cmd_gateway
-    cmd_gateway("start")
-
-
-@gateway_app.command("stop")
-def gateway_stop() -> None:
-    """Stop the gateway."""
-    from .commands.gateway import cmd_gateway
-    cmd_gateway("stop")
-
-
-@gateway_app.command("restart")
-def gateway_restart() -> None:
-    """Restart the gateway."""
-    from .commands.gateway import cmd_gateway
-    cmd_gateway("restart")
-
+# Note: start/stop/restart are handled by the generic feature dispatch
+# (litellmctl start gateway, litellmctl stop gateway, etc.)
 
 @gateway_app.command("status")
 def gateway_status_cmd() -> None:
@@ -462,7 +444,7 @@ def _show_help() -> None:
   proxy [--port N]     Start proxy in foreground (for debugging)
   status               Show auth + proxy + local server status
   local [status]       Check local inference server reachability
-  gateway [start|stop|restart|status|logs|routes|api]
+  gateway [status|logs|routes|api]
                        Manage LLM API Gateway UI (web dashboard)
   gateway routes       List all API endpoints (parsed from source)
   gateway api health   Call gateway endpoints using human commands

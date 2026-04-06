@@ -18,7 +18,7 @@ BASH_COMPLETIONS = r"""_litellmctl_completions() {
   commands="auth wizard install init-env start stop restart r logs proxy status local gateway protonmail uninstall toggle-claude setup-completions help"
   auth_cmds="chatgpt gemini qwen kimi codex status refresh export import"
   uninstall_cmds="service db embedding transcription searxng gateway protonmail"
-  gateway_cmds="start stop restart status logs set-role users routes api"
+  gateway_cmds="status logs set-role users routes api"
   protonmail_cmds="start stop restart status auth"
   # gateway api <cmd...> → dynamic completions from route source files
   # Find position of "api" in COMP_WORDS and complete segments after it
@@ -94,7 +94,7 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
     'proxy:Start proxy in foreground (debug)'
     'status:Show auth + proxy + local server status'
     'local:Check local inference server reachability'
-    'gateway:Manage LLM API Gateway UI (start/stop/status/api)'
+    'gateway:Manage LLM API Gateway UI (status/logs/api)'
     'protonmail:Manage ProtonMail SMTP bridge (start/stop/status/auth)'
     'uninstall:Uninstall service, database config, or local servers'
     'toggle-claude:Toggle Claude Code between direct API and proxy'
@@ -122,9 +122,6 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
     'protonmail:Show ProtonMail bridge (hydroxide) stop and uninstall commands'
   )
   gateway_cmds=(
-    'start:Start the gateway'
-    'stop:Stop the gateway'
-    'restart:Rebuild frontend and restart'
     'status:Show gateway status'
     'logs:Tail gateway logs'
     'set-role:Set user role (guest/user/admin)'

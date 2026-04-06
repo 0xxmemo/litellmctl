@@ -94,10 +94,13 @@ def generate_yaml(models: list[dict], aliases: dict[str, str],
 
     # Inject websearch_interception if search is enabled
     if search_models:
-        success_cb = list(ls.get("success_callback", []))
-        if "websearch_interception" not in success_cb:
-            success_cb.append("websearch_interception")
-        ls["success_callback"] = success_cb
+        # websearch_interception must be in "callbacks" (not "success_callback")
+        # because initialize_callbacks_on_proxy() — which instantiates the
+        # WebSearchInterceptionLogger — only runs for the "callbacks" key.
+        callbacks = list(ls.get("callbacks", []))
+        if "websearch_interception" not in callbacks:
+            callbacks.append("websearch_interception")
+        ls["callbacks"] = callbacks
 
         # Extract unique LiteLLM provider names from model list
         # (provider is the prefix before "/" in litellm_params.model)
