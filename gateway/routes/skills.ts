@@ -10,6 +10,7 @@ import {
   hasSkillComponent,
   getSkillComponent,
   buildInstallScript,
+  buildUninstallScript,
   SKILL_MANIFEST,
 } from "../lib/skills";
 
@@ -125,10 +126,43 @@ async function getHookScript(req: Request): Promise<Response> {
   });
 }
 
+/**
+ * GET /api/skills/uninstall.sh?slug=:slug — Return uninstall script for a skill.
+ */
+async function getSkillUninstallScript(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const slug = url.searchParams.get("slug") || "";
+  const targetParam = url.searchParams.get("target") || "claude-code";
+  const target = (targetParam as InstallTarget) in INSTALL_TARGETS
+    ? (targetParam as InstallTarget)
+    : "claude-code";
+
+  if (!/^[a-z0-9-]+$/.test(slug)) {
+    return Response.json({ error: "Invalid skill name" }, { status: 400 });
+  }
+
+  if (!await hasSkillComponent(slug, SKILL_MANIFEST)) {
+    return Response.json({ error: "Skill not found" }, { status: 404 });
+  }
+
+  const targetConfig = INSTALL_TARGETS[target];
+  const gatewayOrigin = buildGatewayOrigin(req);
+  const uninstallContent = await getSkillComponent(slug, "uninstall.sh");
+  const script = buildUninstallScript(slug, targetConfig, gatewayOrigin, uninstallContent);
+
+  return new Response(script, {
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Cache-Control": "no-cache",
+    },
+  });
+}
+
 export const skillsRoutes = {
   "/api/skills": { GET: getSkillsHandler },
   "/api/skills/targets": { GET: getInstallTargetsHandler },
   "/api/skills/install.sh": { GET: getSkillInstallScript },
+  "/api/skills/uninstall.sh": { GET: getSkillUninstallScript },
   "/api/skills/SKILL.md": { GET: getSkillManifest },
   "/api/skills/hook.sh": { GET: getHookScript },
 };

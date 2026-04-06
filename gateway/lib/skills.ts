@@ -344,4 +344,77 @@ export function buildInstallScript(
   return scriptLines.join('\n');
 }
 
+/**
+ * Build the uninstall script that downloads and runs uninstall.sh for a skill.
+ * Mirrors buildInstallScript structure but reverses the installation.
+ */
+export function buildUninstallScript(
+  slug: string,
+  targetConfig: { name: string; skillsDir: string; configVar: string },
+  gatewayOrigin: string,
+  uninstallContent: string | null
+): string {
+  const scriptLines = [
+    '#!/usr/bin/env bash',
+    `# Uninstall ${slug} skill for ${targetConfig.name}`,
+    '#',
+    '# Usage:',
+    `#   curl -fsSL "${gatewayOrigin}/api/skills/uninstall.sh?slug=${slug}" | bash`,
+    '#',
+    '# Cross-OS: macOS (BSD) and Linux (GNU)',
+    '#',
+    'set -euo pipefail',
+    '',
+    '# --- Utility functions ---',
+    bashUtils.hasCommand(),
+    '',
+    bashUtils.ensureDir(),
+    '',
+    '# --- Configuration ---',
+    `SKILLS_DIR_RAW="${targetConfig.skillsDir}"`,
+    '',
+    '# --- Setup directories ---',
+    '# Expand tilde to home directory (cross-OS)',
+    `SKILLS_DIR="$(echo "$SKILLS_DIR_RAW" | sed "s|^~|$HOME|g")"`,
+    `SKILL_DIR="\${SKILLS_DIR}/${slug}"`,
+    `SETTINGS_DIR="\${SKILLS_DIR%/skills}"`,
+    `SKILL_SLUG="${slug}"`,
+    '',
+    `echo "Uninstalling ${slug} skill for ${targetConfig.name}..."`,
+    '',
+  ];
+
+  // Embed uninstall.sh if present
+  if (uninstallContent) {
+    scriptLines.push(
+      '# --- Run embedded uninstall.sh ---',
+      'export SKILLS_DIR="${SKILLS_DIR}"',
+      'export SETTINGS_DIR="${SETTINGS_DIR}"',
+      'export SKILL_SLUG="${SKILL_SLUG}"',
+      'export SKILL_DIR="${SKILL_DIR}"',
+      '# --- Embedded uninstall.sh starts below ---',
+      uninstallContent,
+      '# --- End of embedded uninstall.sh ---',
+      ''
+    );
+  } else {
+    // Generic uninstall: just remove the skill directory
+    scriptLines.push(
+      '# --- Generic uninstall (no uninstall.sh found) ---',
+      'if [ -d "${SKILL_DIR}" ]; then',
+      '  rm -rf "${SKILL_DIR}"',
+      '  echo "  Removed skill directory: ${SKILL_DIR}"',
+      'else',
+      '  echo "  Skill directory not found (already removed)"',
+      'fi',
+      '',
+      `echo ""`,
+      `echo "${slug} skill uninstalled."`,
+      ''
+    );
+  }
+
+  return scriptLines.join('\n');
+}
+
 export { SKILLS_DIR, SKILL_MANIFEST };
