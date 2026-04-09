@@ -7,11 +7,42 @@ import shutil
 import subprocess
 import time
 
+from ruamel.yaml import YAML
+
 from ..common.formatting import console, info, warn
 from ..common.network import http_check
 from ..common.paths import PROJECT_DIR
 
 SETTINGS_FILE = PROJECT_DIR / "searxng" / "settings.yml"
+
+_yaml = YAML()
+_yaml.preserve_quotes = True
+
+
+def _sync_proxy_settings() -> None:
+    """Sync SEARXNG_PROXIES env var into settings.yml before container start."""
+    proxies_raw = os.environ.get("SEARXNG_PROXIES", "").strip()
+    if not SETTINGS_FILE.exists():
+        return
+
+    data = _yaml.load(SETTINGS_FILE)
+    if data is None:
+        data = {}
+
+    if proxies_raw:
+        proxy_list = [p.strip() for p in proxies_raw.split(",") if p.strip()]
+        data.setdefault("outgoing", {})
+        data["outgoing"]["proxies"] = {"all://": proxy_list}
+        info(f"Rotating proxies configured ({len(proxy_list)} endpoints)")
+    else:
+        # Remove proxy config if env var is unset
+        if "outgoing" in data and "proxies" in data.get("outgoing", {}):
+            del data["outgoing"]["proxies"]
+            if not data["outgoing"]:
+                del data["outgoing"]
+
+    with open(SETTINGS_FILE, "w") as f:
+        _yaml.dump(data, f)
 
 
 def install_searxng() -> bool:
@@ -24,6 +55,8 @@ def install_searxng() -> bool:
         return False
 
     info("Setting up SearXNG search server")
+
+    _sync_proxy_settings()
 
     result = subprocess.run(
         ["docker", "ps", "--format", "{{.Names}}"],
@@ -92,6 +125,10 @@ def searxng_status() -> None:
             console.print(f"  Port:     {port}")
             console.print(f"  Web UI:   http://localhost:{port}")
             console.print(f"  API:      http://localhost:{port}/search")
+            proxies_raw = os.environ.get("SEARXNG_PROXIES", "").strip()
+            if proxies_raw:
+                count = len([p for p in proxies_raw.split(",") if p.strip()])
+                console.print(f"  Proxies:  [cyan]{count} rotating[/]")
         else:
             console.print("  Status:   [yellow]running but not responding[/]")
             console.print(f"  Port:     {port}")

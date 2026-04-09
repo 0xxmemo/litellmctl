@@ -105,6 +105,8 @@ def _searxng_start() -> None:
     if not shutil.which("docker"):
         warn("Docker not found — SearXNG requires Docker")
         return
+    from ..commands.searxng import _sync_proxy_settings
+    _sync_proxy_settings()
     ret = subprocess.call(["docker", "start", "searxng"])
     if ret == 0:
         info("SearXNG started")
