@@ -7,16 +7,13 @@ import shutil
 import subprocess
 import time
 
-from ruamel.yaml import YAML
+import yaml
 
 from ..common.formatting import console, info, warn
 from ..common.network import http_check
 from ..common.paths import PROJECT_DIR
 
 SETTINGS_FILE = PROJECT_DIR / "searxng" / "settings.yml"
-
-_yaml = YAML()
-_yaml.preserve_quotes = True
 
 
 def _sync_proxy_settings() -> None:
@@ -25,9 +22,8 @@ def _sync_proxy_settings() -> None:
     if not SETTINGS_FILE.exists():
         return
 
-    data = _yaml.load(SETTINGS_FILE)
-    if data is None:
-        data = {}
+    with open(SETTINGS_FILE) as f:
+        data = yaml.safe_load(f) or {}
 
     if proxies_raw:
         proxy_list = [p.strip() for p in proxies_raw.split(",") if p.strip()]
@@ -35,14 +31,13 @@ def _sync_proxy_settings() -> None:
         data["outgoing"]["proxies"] = {"all://": proxy_list}
         info(f"Rotating proxies configured ({len(proxy_list)} endpoints)")
     else:
-        # Remove proxy config if env var is unset
         if "outgoing" in data and "proxies" in data.get("outgoing", {}):
             del data["outgoing"]["proxies"]
             if not data["outgoing"]:
                 del data["outgoing"]
 
     with open(SETTINGS_FILE, "w") as f:
-        _yaml.dump(data, f)
+        yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
 
 def install_searxng() -> bool:
