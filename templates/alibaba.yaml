@@ -21,8 +21,8 @@ models:
     api_key: os.environ/DASHSCOPE_API_KEY
     api_base: https://coding-intl.dashscope.aliyuncs.com/v1
     timeout: 90
-  - model_name: alibaba/qwen3.5-plus
-    model: dashscope/qwen3.5-plus
+  - model_name: alibaba/qwen3.6-plus
+    model: dashscope/qwen3.6-plus
     api_key: os.environ/DASHSCOPE_API_KEY
     api_base: https://coding-intl.dashscope.aliyuncs.com/v1
     timeout: 90
