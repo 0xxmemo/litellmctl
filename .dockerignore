@@ -1,0 +1,11 @@
+.git
+.github
+**/__pycache__
+**/*.pyc
+**/node_modules
+**/venv
+**/.pytest_cache
+gateway
+.cursor
+*.md
+!litellm/**/*.md

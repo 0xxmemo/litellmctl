@@ -1,0 +1,49 @@
+# Build and push the ECS-oriented image (--target ecs) to Amazon ECR.
+# Set repository variable or fork: ECR_REPOSITORY, AWS_REGION.
+# Secrets: AWS_ROLE_TO_ASSUME (OIDC to AWS) — or replace the credential step with access keys.
+
+name: litellm-proxy-ecr
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REPOSITORY: litellm-proxy
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout (with litellm submodule)
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push
+        env:
+          REGISTRY: ${{ steps.ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          set -eux
+          IMAGE_URI="${REGISTRY}/${ECR_REPOSITORY}:${IMAGE_TAG}"
+          docker build -f docker/Dockerfile --target ecs -t "${IMAGE_URI}" .
+          docker push "${IMAGE_URI}"
+          docker tag "${IMAGE_URI}" "${REGISTRY}/${ECR_REPOSITORY}:latest"
+          docker push "${REGISTRY}/${ECR_REPOSITORY}:latest"
+          echo "Pushed ${IMAGE_URI}"

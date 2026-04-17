@@ -1,0 +1,52 @@
+# LiteLLM proxy + litellmctl wizard (split install: image at /opt/litellmctl, data at /data).
+#
+# 1) Generate config and .env (interactive):
+#    docker compose --profile wizard run --rm wizard
+#
+# 2) Start the proxy:
+#    docker compose up -d proxy
+#
+# Data persists in the `litellm-data` volume (config.yaml, .env, auth files, logs).
+# Optional: set PROXY_PORT (host) to match the port inside config / .env.
+
+services:
+  proxy:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    ports:
+      - "${PROXY_PORT:-4000}:4000"
+    environment:
+      LITELLMCTL_HOME: /data
+    volumes:
+      - litellm-data:/data
+    working_dir: /data
+    command:
+      - litellm
+      - --config
+      - /data/config.yaml
+      - --port
+      - "4000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:4000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 40s
+
+  wizard:
+    profiles: ["wizard"]
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    environment:
+      LITELLMCTL_HOME: /data
+    volumes:
+      - litellm-data:/data
+    stdin_open: true
+    tty: true
+    working_dir: /data
+    command: ["litellmctl", "wizard"]
+
+volumes:
+  litellm-data:

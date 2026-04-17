@@ -3,23 +3,40 @@
 from pathlib import Path
 import os
 
+
+def _bin_dir() -> Path:
+    return Path(__file__).resolve().parent.parent.parent  # bin/lib/common -> bin
+
+
+INSTALL_ROOT = _bin_dir().parent
+
+
 def _resolve_project_dir() -> Path:
-    """Resolve project directory, handling symlinks."""
-    bin_dir = Path(__file__).resolve().parent.parent.parent  # bin/lib/common -> bin
-    project = bin_dir.parent
-    if (project / "config.yaml").exists():
-        return project
+    """User data directory: config.yaml, .env, auth files, logs.
+
+    Set LITELLMCTL_HOME to separate data from the install tree (e.g. Docker volume).
+    """
+    env = os.environ.get("LITELLMCTL_HOME")
+    if env:
+        return Path(env).resolve()
+    if (INSTALL_ROOT / "config.yaml").exists():
+        return INSTALL_ROOT
     return Path.home() / ".litellm"
 
+
 PROJECT_DIR = _resolve_project_dir()
-BIN_DIR = PROJECT_DIR / "bin"
-VENV_DIR = PROJECT_DIR / "venv"
+BIN_DIR = INSTALL_ROOT / "bin"
+VENV_DIR = INSTALL_ROOT / "venv"
 PORT_FILE = PROJECT_DIR / ".proxy-port"
 LOG_DIR = PROJECT_DIR / "logs"
 CONFIG_FILE = PROJECT_DIR / "config.yaml"
 ENV_FILE = PROJECT_DIR / ".env"
-ENV_EXAMPLE = PROJECT_DIR / ".env.example"
-TEMPLATES_DIR = PROJECT_DIR / "templates"
+# Prefer templates and .env.example next to user data when present; otherwise install tree
+# (supports LITELLMCTL_HOME pointing at a volume while templates ship in the image).
+_tdir = PROJECT_DIR / "templates"
+TEMPLATES_DIR = _tdir if _tdir.exists() else (INSTALL_ROOT / "templates")
+_env_ex = PROJECT_DIR / ".env.example"
+ENV_EXAMPLE = _env_ex if _env_ex.exists() else (INSTALL_ROOT / ".env.example")
 PIDFILE = PROJECT_DIR / ".proxy.pid"
 
 # Service identifiers — Proxy

@@ -17,6 +17,23 @@ litellmctl install           # local servers, gateway, search
 litellmctl start             # start proxy (auto-starts on boot)
 ```
 
+### Docker Compose
+
+From a clone of this repo (includes the `litellm` submodule), build and run the proxy with data in a named volume. The **wizard** runs in a one-off interactive container that writes `config.yaml` and `.env` under `/data` (`LITELLMCTL_HOME`).
+
+```bash
+docker compose --profile wizard run --rm wizard   # interactive: litellmctl wizard
+docker compose up -d proxy                        # LiteLLM proxy on port 4000 (override with PROXY_PORT)
+```
+
+See `docker-compose.yml` and `docker/Dockerfile` for details.
+
+### Amazon ECS Express (config + auth outside the image)
+
+Use the **`ecs`** image target (`docker build -f docker/Dockerfile --target ecs`) so the task can sync `config.yaml`, `.env`, and OAuth JSON files from S3 into `/data` before starting the proxy — **no wizard in the cluster**. CI can push artifacts to S3, push the image to ECR, then update the Express service.
+
+See [docker/ecs-express.md](docker/ecs-express.md) and [.github/workflows/litellm-ecr.yml](.github/workflows/litellm-ecr.yml).
+
 ## CLI Reference
 
 ### Proxy

@@ -9,14 +9,18 @@
 set -euo pipefail
 
 BIN_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(cd "$BIN_DIR/.." && pwd)"
+INSTALL_ROOT="$(cd "$BIN_DIR/.." && pwd)"
 
-# If running from a symlink outside ~/.litellm, resolve to canonical path
-if [ ! -f "$PROJECT_DIR/config.yaml" ]; then
+# User data dir: explicit override (e.g. Docker volume), else same rules as lib.common.paths
+if [ -n "${LITELLMCTL_HOME:-}" ]; then
+  PROJECT_DIR="$LITELLMCTL_HOME"
+elif [ -f "$INSTALL_ROOT/config.yaml" ]; then
+  PROJECT_DIR="$INSTALL_ROOT"
+else
   PROJECT_DIR="$HOME/.litellm"
 fi
 
-VENV_DIR="$PROJECT_DIR/venv"
+VENV_DIR="$INSTALL_ROOT/venv"
 
 # Activate venv if it exists
 if [ -d "$VENV_DIR" ]; then
