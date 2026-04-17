@@ -33,8 +33,14 @@ run_with_timeout() {
 }
 
 # Check for local uncommitted changes, untracked files, or unpushed commits.
-# For submodules, compares HEAD against the parent-expected SHA instead of
-# the upstream tracking branch (which can diverge independently).
+#
+# Do NOT treat "submodule HEAD != parent-recorded gitlink" as dirty: after
+# `git pull` in the parent repo, the submodule pointer updates but the working
+# tree is still on the old commit until `submodule update` runs. That is normal
+# staleness, not user edits — flagging it caused a false "[L]ocal / [S]tash…"
+# prompt on every install after upstream bumps the litellm submodule.
+# Submodule checkout is aligned by sync_repo → submodule update, then
+# normalize_submodule_ref.
 has_local_changes() {
   local dir="$1"
   [ -d "$dir/.git" ] || [ -f "$dir/.git" ] || return 1
@@ -44,17 +50,8 @@ has_local_changes() {
   ! git -C "$dir" diff --quiet 2>/dev/null && return 0
   # Untracked files
   [ -n "$(git -C "$dir" ls-files --others --exclude-standard 2>/dev/null)" ] && return 0
-  # Unpushed commits — for submodules, compare against parent-expected SHA
-  local head_sha
-  head_sha=$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)
-  if [ -f "$dir/.git" ]; then
-    # This is a submodule (has .git file, not .git directory)
-    local expected_sha
-    expected_sha=$(git -C "$PROJECT_DIR" ls-tree HEAD -- litellm 2>/dev/null | awk '{print $3}')
-    if [ -n "$expected_sha" ] && [ "$head_sha" != "$expected_sha" ]; then
-      return 0
-    fi
-  else
+  # Unpushed commits (parent repo only; submodules follow parent-pinned SHA)
+  if [ ! -f "$dir/.git" ]; then
     local ahead
     ahead=$(git -C "$dir" rev-list --count @{u}..HEAD 2>/dev/null || echo "0")
     [ "$ahead" -gt 0 ] && return 0
