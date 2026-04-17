@@ -6,32 +6,8 @@ env_vars: []
 role: fallback
 
 models:
-  - model_name: codex/gpt-5.1
-    model: chatgpt/gpt-5.1
-    model_info:
-      mode: responses
-  - model_name: codex/gpt-5.1-codex
-    model: chatgpt/gpt-5.1-codex
-    model_info:
-      mode: responses
-  - model_name: codex/gpt-5.1-codex-mini
-    model: chatgpt/gpt-5.1-codex-mini
-    model_info:
-      mode: responses
-  - model_name: codex/gpt-5.2
-    model: chatgpt/gpt-5.2
-    model_info:
-      mode: responses
-  - model_name: codex/gpt-5.2-codex
-    model: chatgpt/gpt-5.2-codex
-    model_info:
-      mode: responses
   - model_name: codex/gpt-5.3-codex
     model: chatgpt/gpt-5.3-codex
-    model_info:
-      mode: responses
-  - model_name: codex/gpt-5.3-codex-spark
-    model: chatgpt/gpt-5.3-codex-spark
     model_info:
       mode: responses
   - model_name: codex/gpt-5.4
