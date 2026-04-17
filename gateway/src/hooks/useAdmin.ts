@@ -8,6 +8,10 @@ export interface UserRecord {
   role: 'admin' | 'user' | 'guest'
   createdAt: string
   approvedAt?: string
+  /** Total API requests recorded in usage_logs for this user (admin list only). */
+  requests?: number
+  /** Total tokens from usage_logs for this user (admin list only). */
+  tokens?: number
 }
 
 // ── Fetch helpers (internal) ─────────────────────────────────────────────────

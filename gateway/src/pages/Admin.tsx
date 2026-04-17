@@ -20,6 +20,7 @@ import {
 import { AdminErrorBoundary } from '@/components/AdminErrorBoundary'
 import { toast } from 'sonner'
 import { PrettyDate } from '@/components/PrettyDate'
+import { PrettyAmount } from '@/components/PrettyAmount'
 export function Admin() {
   const { user: currentUser } = useAuth()
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
@@ -359,7 +360,7 @@ export function Admin() {
               <CheckCircle className="w-5 h-5 text-green-500" />
               Approved Users ({approvedUsers.length})
             </CardTitle>
-            <CardDescription>Approved gateway users</CardDescription>
+            <CardDescription>Approved gateway users with request and token totals</CardDescription>
           </CardHeader>
           <CardContent>
             {approvedUsers.length === 0 ? (
@@ -371,6 +372,8 @@ export function Admin() {
                     <TableRow>
                       <TableHead>User</TableHead>
                       <TableHead>Role</TableHead>
+                      <TableHead className="text-right">Requests</TableHead>
+                      <TableHead className="text-right">Tokens</TableHead>
                       <TableHead>Approved</TableHead>
                       <TableHead></TableHead>
                     </TableRow>
@@ -394,6 +397,12 @@ export function Admin() {
                             >
                               {user.role}
                             </Badge>
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            <PrettyAmount amountFormatted={user.requests ?? 0} size="sm" />
+                          </TableCell>
+                          <TableCell className="text-right tabular-nums">
+                            <PrettyAmount amountFormatted={user.tokens ?? 0} size="sm" />
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                             {user.approvedAt ? <PrettyDate date={user.approvedAt} format="date" size="sm" /> : 'N/A'}

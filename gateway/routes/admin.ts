@@ -1,4 +1,4 @@
-import { accessRequests, apiKeys, validatedUsers, userProfileCache, apiKeyCache, requireAdmin } from "../lib/db";
+import { accessRequests, apiKeys, validatedUsers, usageLogs, userProfileCache, apiKeyCache, requireAdmin } from "../lib/db";
 
 // Admin: pending requests
 async function getPendingRequestsHandler(req: Request) {
@@ -24,14 +24,41 @@ async function approveUserHandler(req: Request) {
   return Response.json({ success: true });
 }
 
-// GET /api/admin/users
+// GET /api/admin/users (includes per-user request/token totals from usage_logs)
 async function adminListUsersHandler(req: Request) {
   const auth = await requireAdmin(req);
   if (auth instanceof Response) return auth;
   const users = await validatedUsers.find({}).sort({ createdAt: -1 }).toArray();
-  return Response.json({ users: users.map((u: any) => ({
-    email: u.email, role: u.role, createdAt: u.createdAt, approvedAt: u.approvedAt,
-  }))});
+  const emails = users.map((u: any) => String(u.email).toLowerCase());
+
+  const byEmail: Record<string, { requests: number; tokens: number }> = {};
+  if (emails.length > 0 && usageLogs) {
+    const tokensExpr = { $add: [{ $ifNull: ["$tokens", 0] }, { $ifNull: ["$totalTokens", 0] }] };
+    const statsAgg = await usageLogs.aggregate([
+      { $match: { email: { $in: emails } } },
+      { $group: {
+        _id: "$email",
+        requests: { $sum: 1 },
+        tokens: { $sum: tokensExpr },
+      }},
+    ]).toArray();
+    for (const s of statsAgg) {
+      byEmail[String(s._id).toLowerCase()] = { requests: s.requests, tokens: s.tokens };
+    }
+  }
+
+  return Response.json({ users: users.map((u: any) => {
+    const e = String(u.email).toLowerCase();
+    const st = byEmail[e] ?? { requests: 0, tokens: 0 };
+    return {
+      email: u.email,
+      role: u.role,
+      createdAt: u.createdAt,
+      approvedAt: u.approvedAt,
+      requests: st.requests,
+      tokens: st.tokens,
+    };
+  })});
 }
 
 // POST /api/admin/users  — create or update user
@@ -67,13 +94,30 @@ async function adminDeleteUserHandler(req: Request) {
   return Response.json({ success: true });
 }
 
-// POST /api/admin/reject — reset user back to guest
+// POST /api/admin/reject — remove a pending (guest) user; same outcome as one row of disapprove-all
 async function adminRejectUserHandler(req: Request) {
   const auth = await requireAdmin(req);
   if (auth instanceof Response) return auth;
   const { email } = await req.json();
-  await validatedUsers.updateOne({ email: email.toLowerCase() }, { $set: { role: "guest" } });
-  userProfileCache.delete(email.toLowerCase());
+  if (!email || typeof email !== "string") {
+    return Response.json({ error: "Email required" }, { status: 400 });
+  }
+  const normalized = email.toLowerCase();
+  if (normalized === auth.email) {
+    return Response.json({ error: "Cannot reject your own account" }, { status: 400 });
+  }
+  const existing = await validatedUsers.findOne({ email: normalized });
+  if (!existing) {
+    return Response.json({ error: "User not found" }, { status: 404 });
+  }
+  if (existing.role !== "guest") {
+    return Response.json({ error: "Only pending access requests (guests) can be rejected" }, { status: 400 });
+  }
+  await Promise.all([
+    validatedUsers.deleteOne({ email: normalized }),
+    apiKeys.updateMany({ email: normalized }, { $set: { revoked: true, revokedAt: new Date() } }),
+  ]);
+  userProfileCache.delete(normalized);
   return Response.json({ success: true });
 }
 
