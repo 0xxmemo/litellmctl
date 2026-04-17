@@ -473,8 +473,8 @@ def cmd_restart() -> None:
     if is_macos():
         launchd_install(port, config)
     elif is_linux() and has_systemd_user():
-        subprocess.call(["systemctl", "--user", "daemon-reload"])
-        subprocess.call(["systemctl", "--user", "start", SYSTEMD_UNIT])
+        # Rewrite unit + restart — same as cmd_start so upgrades (wrapper, env) apply.
+        systemd_install(port, config)
         info("Restarted.")
     else:
         nohup_start(port, config)

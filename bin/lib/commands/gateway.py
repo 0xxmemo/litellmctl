@@ -320,9 +320,24 @@ def gateway_start() -> None:
     _load_gateway_env()
     port = _gateway_port()
 
+    # Refresh launchd/systemd/nohup even when healthy so upgrades (wrapper, throttle,
+    # env) apply — same as re-running install on an old checkout.
     if gateway_is_running():
-        info(f"Gateway already running on port {port}")
-        return
+        info(f"Gateway already running on port {port} — refreshing supervisor config ...")
+        gateway_stop()
+        time.sleep(1)
+        # Stray bun after a partial stop (e.g. old nohup + manual run)
+        for pid in pids_on_port(port):
+            try:
+                result = subprocess.run(
+                    ["ps", "-p", str(pid), "-o", "command="],
+                    capture_output=True, text=True,
+                )
+                cmd = result.stdout or ""
+                if any(x in cmd for x in ("bun", "node")) and "index.ts" in cmd:
+                    os.kill(pid, 9)
+            except (ProcessLookupError, PermissionError):
+                pass
 
     bun = _bun_bin()
     if not bun:
