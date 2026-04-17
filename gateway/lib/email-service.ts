@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import { errorMessage } from './errors';
 
 // ProtonMail SMTP configuration via hydroxide bridge
 // Hydroxide runs locally and provides SMTP access to ProtonMail
@@ -26,7 +27,7 @@ function initTransporter(): boolean {
     });
     return true;
   } catch (error) {
-    console.error('❌ Failed to create transporter:', (error as Error).message);
+    console.error('❌ Failed to create transporter:', errorMessage(error));
     return false;
   }
 }
@@ -44,7 +45,7 @@ async function verifyConnection(): Promise<boolean> {
     smtpAvailable = true;
     return true;
   } catch (error) {
-    console.error('❌ ProtonMail SMTP connection failed:', (error as Error).message);
+    console.error('❌ ProtonMail SMTP connection failed:', errorMessage(error));
     console.log('💡 Make sure hydroxide is authenticated: hydroxide auth <username>');
     console.log('💡 OTP codes will be logged to console for testing');
     smtpAvailable = false;
@@ -123,7 +124,7 @@ If you didn't request this code, please ignore this email.
     console.log(`✅ OTP sent to ${email} (Message ID: ${result.messageId})`);
     return { success: true, messageId: result.messageId };
   } catch (error) {
-    console.error(`❌ Failed to send OTP to ${email}:`, (error as Error).message);
+    console.error(`❌ Failed to send OTP to ${email}:`, errorMessage(error));
     // Don't throw - still allow the flow to continue, just log the code
     console.log('\n🔢 OTP CODE (email failed - logged for testing):');
     console.log(`   To: ${email}`);
@@ -314,7 +315,7 @@ To approve this request:
     console.log(`✅ Admin notification sent to ${adminEmail} (Message ID: ${result.messageId})`);
     return { success: true, messageId: result.messageId };
   } catch (error) {
-    console.error(`❌ Failed to send admin notification to ${adminEmail}:`, (error as Error).message);
+    console.error(`❌ Failed to send admin notification to ${adminEmail}:`, errorMessage(error));
     console.log('\n📧 ADMIN NOTIFICATION (email failed - logged):');
     console.log(`   To: ${adminEmail}`);
     console.log(`   Requester: ${requesterEmail}\n`);

@@ -6,6 +6,7 @@
  */
 
 import { initConfig, PORT } from "./lib/config";
+import { errorMessage } from "./lib/errors";
 import { connectDB, initCliSecret, flushUsageQueue, rateLimitMap, otpRateLimitMap } from "./lib/db";
 import { authRoutes } from "./routes/auth";
 import { keysRoutes, handleKeyById } from "./routes/keys";
@@ -145,6 +146,18 @@ function getContentType(path: string): string {
 Bun.serve({
   port: PORT,
   idleTimeout: 30,
+
+  /** Catches handler throws so a bad value never becomes controller.error(null)-style crashes. */
+  error(err: unknown) {
+    console.error("[gateway]", errorMessage(err));
+    if (err instanceof Error && err.stack) {
+      console.error(err.stack);
+    }
+    return new Response(JSON.stringify({ error: "Internal server error" }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
+  },
 
   routes: {
     // Static files

@@ -21,6 +21,7 @@ import { AdminErrorBoundary } from '@/components/AdminErrorBoundary'
 import { toast } from 'sonner'
 import { PrettyDate } from '@/components/PrettyDate'
 import { PrettyAmount } from '@/components/PrettyAmount'
+import { errorMessage } from '@/lib/utils'
 export function Admin() {
   const { user: currentUser } = useAuth()
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
@@ -62,8 +63,8 @@ export function Admin() {
         showOpMessage('success', `${returnedEmail} approved successfully`)
         setActionInProgress(null)
       },
-      onError: (err: Error) => {
-        showOpMessage('error', `Failed to approve: ${err.message}`)
+      onError: (err: unknown) => {
+        showOpMessage('error', `Failed to approve: ${errorMessage(err)}`)
         setActionInProgress(null)
       },
     })
@@ -77,8 +78,8 @@ export function Admin() {
         showOpMessage('success', `${returnedEmail} rejected`)
         setActionInProgress(null)
       },
-      onError: (err: Error) => {
-        showOpMessage('error', `Failed to reject: ${err.message}`)
+      onError: (err: unknown) => {
+        showOpMessage('error', `Failed to reject: ${errorMessage(err)}`)
         setActionInProgress(null)
       },
     })
@@ -102,8 +103,8 @@ export function Admin() {
           setAddSuccess(null)
         }, 1500)
       },
-      onError: (err: Error) => {
-        setAddError(err.message || 'Failed to add user')
+      onError: (err: unknown) => {
+        setAddError(errorMessage(err) || 'Failed to add user')
       },
     })
   }
@@ -120,8 +121,8 @@ export function Admin() {
         showOpMessage('success', `${returnedEmail} removed successfully`)
         setActionInProgress(null)
       },
-      onError: (err: Error) => {
-        showOpMessage('error', `Failed to remove user: ${err.message}`)
+      onError: (err: unknown) => {
+        showOpMessage('error', `Failed to remove user: ${errorMessage(err)}`)
         setActionInProgress(null)
       },
     })
@@ -512,8 +513,8 @@ export function Admin() {
                       showOpMessage('success', `Rejected ${result.count} pending users. Approved users remain unaffected.`)
                       setShowDisapproveConfirm(false)
                     },
-                    onError: (err: Error) => {
-                      showOpMessage('error', err.message || 'Failed to disapprove users')
+                    onError: (err: unknown) => {
+                      showOpMessage('error', errorMessage(err) || 'Failed to disapprove users')
                       setShowDisapproveConfirm(false)
                     },
                   })}
@@ -559,8 +560,8 @@ export function Admin() {
                       showOpMessage('success', `Revoked ${result.count} API keys. Users will need to generate new keys.`)
                       setShowRevokeAllConfirm(false)
                     },
-                    onError: (err: Error) => {
-                      showOpMessage('error', err.message || 'Failed to revoke all keys')
+                    onError: (err: unknown) => {
+                      showOpMessage('error', errorMessage(err) || 'Failed to revoke all keys')
                       setShowRevokeAllConfirm(false)
                     },
                   })}

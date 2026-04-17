@@ -1,6 +1,7 @@
 import { MongoClient, type MongoClientOptions } from "mongodb";
 import { createHash, randomBytes } from "crypto";
 import { verifySession, getSessionCookie, extractApiKey } from "./auth";
+import { errorMessage } from "./errors";
 
 // ============================================================================
 // DATABASE CONNECTION
@@ -225,7 +226,7 @@ export async function flushUsageQueue() {
   try {
     await usageLogs.insertMany(batch, { ordered: false });
   } catch (err) {
-    console.error("⚠️ Usage batch insert failed:", (err as Error).message);
+    console.error("⚠️ Usage batch insert failed:", errorMessage(err));
   }
 }
 

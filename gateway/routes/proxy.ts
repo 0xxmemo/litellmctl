@@ -1,4 +1,5 @@
 import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
+import { errorMessage } from "../lib/errors";
 import { extractApiKey } from "../lib/auth";
 import {
   validateApiKey,
@@ -160,90 +161,95 @@ function trackFromSSE(
 
 // LiteLLM Proxy — requireUser (not guest), with fire-and-forget usage tracking
 async function proxyHandler(req: Request) {
-  const auth = await requireUser(req);
-  if (auth instanceof Response) return auth;
-
-  const url = new URL(req.url);
-  // Strip /v1 prefix (handle both /v1/... and /v1/v1/... gracefully)
-  let endpoint = url.pathname.replace(/^\/v1/, "");
-  // Handle double /v1/v1 prefix if client sends redundant /v1
-  if (endpoint.startsWith("/v1")) {
-    endpoint = endpoint.replace(/^\/v1/, "");
-  }
-  // Ensure endpoint starts with /
-  if (!endpoint.startsWith("/")) {
-    endpoint = "/" + endpoint;
-  }
-  const targetUrl = `${LITELLM_URL}/v1${endpoint}${url.search}`;
-
-  // Resolve keyHash for usage tracking (if authenticated via API key)
-  let keyHash: string | null = null;
-  const apiKey = extractApiKey(req);
-  if (apiKey) {
-    const keyRecord = await validateApiKey(apiKey);
-    if (keyRecord) keyHash = keyRecord.keyHash;
-  }
-
-  // Read body once to extract requested model and apply overrides
-  let body: ArrayBuffer = await req.arrayBuffer();
-  let requestedModel: string | null = null;
   try {
-    const text = new TextDecoder().decode(body);
-    const json = JSON.parse(text);
-    if (json !== null && typeof json === "object" && !Array.isArray(json)) {
-      requestedModel = typeof json.model === "string" ? json.model : null;
+    const auth = await requireUser(req);
+    if (auth instanceof Response) return auth;
 
-      if (requestedModel) {
-        const overrides = await getUserModelOverrides(auth.email);
-        if (overrides[requestedModel]) {
-          json.model = overrides[requestedModel];
-          body = new TextEncoder().encode(JSON.stringify(json)).buffer;
+    const url = new URL(req.url);
+    // Strip /v1 prefix (handle both /v1/... and /v1/v1/... gracefully)
+    let endpoint = url.pathname.replace(/^\/v1/, "");
+    // Handle double /v1/v1 prefix if client sends redundant /v1
+    if (endpoint.startsWith("/v1")) {
+      endpoint = endpoint.replace(/^\/v1/, "");
+    }
+    // Ensure endpoint starts with /
+    if (!endpoint.startsWith("/")) {
+      endpoint = "/" + endpoint;
+    }
+    const targetUrl = `${LITELLM_URL}/v1${endpoint}${url.search}`;
+
+    // Resolve keyHash for usage tracking (if authenticated via API key)
+    let keyHash: string | null = null;
+    const apiKey = extractApiKey(req);
+    if (apiKey) {
+      const keyRecord = await validateApiKey(apiKey);
+      if (keyRecord) keyHash = keyRecord.keyHash;
+    }
+
+    // Read body once to extract requested model and apply overrides
+    let body: ArrayBuffer = await req.arrayBuffer();
+    let requestedModel: string | null = null;
+    try {
+      const text = new TextDecoder().decode(body);
+      const json = JSON.parse(text);
+      if (json !== null && typeof json === "object" && !Array.isArray(json)) {
+        requestedModel = typeof json.model === "string" ? json.model : null;
+
+        if (requestedModel) {
+          const overrides = await getUserModelOverrides(auth.email);
+          if (overrides[requestedModel]) {
+            json.model = overrides[requestedModel];
+            body = new TextEncoder().encode(JSON.stringify(json)).buffer;
+          }
         }
       }
+    } catch {}
+
+    // Forward to LiteLLM — let Bun handle the proxy pipeline natively
+    const headers = new Headers(req.headers);
+    headers.set("Authorization", LITELLM_AUTH);
+    headers.delete("x-api-key");
+
+    const proxyRes = await fetch(targetUrl, {
+      method: req.method,
+      headers,
+      body: body.byteLength > 0 ? body : undefined,
+    });
+
+    // Usage tracking via Response.clone() — Bun streams the original to the
+    // client through its native pipeline; the clone is consumed in background.
+    if (proxyRes.ok) {
+      const litellmModelId = proxyRes.headers.get("x-litellm-model-id");
+      const contentType = proxyRes.headers.get("content-type") || "";
+      const isSSE = contentType.includes("text/event-stream");
+      const clone = proxyRes.clone();
+
+      if (isSSE) {
+        trackFromSSE(
+          clone,
+          auth.email,
+          requestedModel,
+          keyHash,
+          endpoint,
+          litellmModelId,
+        );
+      } else {
+        trackFromJson(
+          clone,
+          auth.email,
+          requestedModel,
+          keyHash,
+          endpoint,
+          litellmModelId,
+        );
+      }
     }
-  } catch {}
 
-  // Forward to LiteLLM — let Bun handle the proxy pipeline natively
-  const headers = new Headers(req.headers);
-  headers.set("Authorization", LITELLM_AUTH);
-  headers.delete("x-api-key");
-
-  const proxyRes = await fetch(targetUrl, {
-    method: req.method,
-    headers,
-    body: body.byteLength > 0 ? body : undefined,
-  });
-
-  // Usage tracking via Response.clone() — Bun streams the original to the
-  // client through its native pipeline; the clone is consumed in background.
-  if (proxyRes.ok) {
-    const litellmModelId = proxyRes.headers.get("x-litellm-model-id");
-    const contentType = proxyRes.headers.get("content-type") || "";
-    const isSSE = contentType.includes("text/event-stream");
-    const clone = proxyRes.clone();
-
-    if (isSSE) {
-      trackFromSSE(
-        clone,
-        auth.email,
-        requestedModel,
-        keyHash,
-        endpoint,
-        litellmModelId,
-      );
-    } else {
-      trackFromJson(
-        clone,
-        auth.email,
-        requestedModel,
-        keyHash,
-        endpoint,
-        litellmModelId,
-      );
-    }
+    return proxyRes;
+  } catch (err) {
+    console.error("[proxy]", errorMessage(err));
+    return Response.json({ error: "Proxy upstream error" }, { status: 502 });
   }
-
-  return proxyRes;
 }
 
 export const proxyRoutes = {

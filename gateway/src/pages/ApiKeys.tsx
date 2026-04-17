@@ -27,6 +27,7 @@ import {
 import { toast } from 'sonner'
 import { PrettyDate } from '@/components/PrettyDate'
 import { useKeys, useCreateKey, useUpdateKey, useRevokeKey } from '@/hooks/useKeys'
+import { errorMessage } from '@/lib/utils'
 
 export function ApiKeys() {
   const [page, setPage] = useState(1)
@@ -72,8 +73,8 @@ export function ApiKeys() {
         setPage(1)
         toast.success('API key created', { description: "Copy it now — it won't be shown again!" })
       },
-      onError: (err: Error) => {
-        toast.error('Failed to create key', { description: err.message })
+      onError: (err: unknown) => {
+        toast.error('Failed to create key', { description: errorMessage(err) })
       },
     })
   }
@@ -88,8 +89,8 @@ export function ApiKeys() {
         setSelectedKey(null)
         toast.success('API key updated')
       },
-      onError: (err: Error) => {
-        toast.error('Failed to update key', { description: err.message })
+      onError: (err: unknown) => {
+        toast.error('Failed to update key', { description: errorMessage(err) })
       },
     })
   }
@@ -104,8 +105,8 @@ export function ApiKeys() {
         setSelectedKey(null)
         toast.success('API key revoked')
       },
-      onError: (err: Error) => {
-        toast.error('Failed to revoke key', { description: err.message })
+      onError: (err: unknown) => {
+        toast.error('Failed to revoke key', { description: errorMessage(err) })
       },
     })
   }

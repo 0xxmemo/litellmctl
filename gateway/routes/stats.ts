@@ -1,4 +1,5 @@
 import { apiKeys, usageLogs, requireAuth, requireUser } from "../lib/db";
+import { errorMessage } from "../lib/errors";
 import { extractProvider } from "../lib/models";
 
 // GET /api/stats/user — requireUser (not guest)
@@ -89,7 +90,7 @@ async function userStatsHandler(req: Request) {
       }),
     });
   } catch (err) {
-    console.error("user-stats error:", (err as Error).message);
+    console.error("user-stats error:", errorMessage(err));
     return Response.json({ error: "Failed to fetch user stats" }, { status: 500 });
   }
 }
@@ -188,7 +189,7 @@ async function groupedRequestsHandler(req: Request) {
       },
     });
   } catch (err) {
-    console.error("grouped-requests error:", (err as Error).message);
+    console.error("grouped-requests error:", errorMessage(err));
     return Response.json({ error: "Failed to fetch grouped requests" }, { status: 500 });
   }
 }
@@ -246,7 +247,7 @@ async function groupItemsHandler(req: Request) {
       })),
     });
   } catch (err) {
-    console.error("group-items error:", (err as Error).message);
+    console.error("group-items error:", errorMessage(err));
     return Response.json({ error: "Failed to fetch group items" }, { status: 500 });
   }
 }

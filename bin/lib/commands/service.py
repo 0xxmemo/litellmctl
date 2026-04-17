@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
 from ..common.paths import (
-    PROJECT_DIR, VENV_DIR, PORT_FILE, LOG_DIR, CONFIG_FILE, PIDFILE,
+    PROJECT_DIR, BIN_DIR, VENV_DIR, PORT_FILE, LOG_DIR, CONFIG_FILE, PIDFILE,
     LAUNCHD_LABEL, LAUNCHD_PLIST, SYSTEMD_UNIT, SYSTEMD_DIR, SYSTEMD_FILE,
 )
 from ..common.env import load_env, patch_perf_defaults
@@ -47,6 +48,17 @@ def _ensure_log_dir() -> None:
     LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _ensure_proxy_launch_wrapper() -> None:
+    """Ensure the litellm-proxy-launch.sh shim is executable (e.g. after clone without +x)."""
+    path = BIN_DIR / "litellm-proxy-launch.sh"
+    if not path.exists():
+        return
+    try:
+        os.chmod(path, path.stat().st_mode | 0o111)
+    except OSError:
+        pass
+
+
 def _parse_env_for_plist() -> str:
     """Generate plist XML env block from .env."""
     env_file = PROJECT_DIR / ".env"
@@ -80,12 +92,14 @@ def _plist_perf_args() -> str:
 
 
 def launchd_install(port: int, config: str) -> None:
+    _ensure_proxy_launch_wrapper()
     _ensure_log_dir()
     LAUNCHD_PLIST.parent.mkdir(parents=True, exist_ok=True)
 
     env_block = _parse_env_for_plist()
     perf_args = _plist_perf_args()
 
+    launch_sh = BIN_DIR / "litellm-proxy-launch.sh"
     plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -94,6 +108,7 @@ def launchd_install(port: int, config: str) -> None:
   <string>{LAUNCHD_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
+    <string>{launch_sh}</string>
     <string>{VENV_DIR}/bin/litellm</string>
     <string>--config</string>
     <string>{config}</string>
@@ -108,11 +123,15 @@ def launchd_install(port: int, config: str) -> None:
     <string>{VENV_DIR}/bin:/usr/local/bin:/usr/bin:/bin</string>
     <key>VIRTUAL_ENV</key>
     <string>{VENV_DIR}</string>
-{env_block}  </dict>
+{env_block}    <key>LITELLM_SUPERVISOR</key>
+    <string>launchd</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
   <key>StandardOutPath</key>
   <string>{LOG_DIR}/proxy.log</string>
   <key>StandardErrorPath</key>
@@ -150,6 +169,8 @@ def launchd_stop() -> None:
 
 
 def launchd_is_running() -> bool:
+    if not shutil.which("launchctl"):
+        return False
     uid = os.getuid()
     return subprocess.call(
         ["launchctl", "print", f"gui/{uid}/{LAUNCHD_LABEL}"],
@@ -179,12 +200,14 @@ def _parse_env_for_systemd() -> str:
 
 
 def systemd_install(port: int, config: str) -> None:
+    _ensure_proxy_launch_wrapper()
     _ensure_log_dir()
     SYSTEMD_DIR.mkdir(parents=True, exist_ok=True)
 
     env_lines = _parse_env_for_systemd()
     perf = " ".join(_perf_flags())
 
+    launch_sh = BIN_DIR / "litellm-proxy-launch.sh"
     unit = f"""[Unit]
 Description=LiteLLM Proxy
 After=network.target
@@ -192,12 +215,13 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory={PROJECT_DIR}
-ExecStart={VENV_DIR}/bin/litellm --config {config} --port {port} {perf}
+ExecStart={launch_sh} {VENV_DIR}/bin/litellm --config {config} --port {port} {perf}
 Restart=on-failure
 RestartSec=5
 
 Environment=PATH={VENV_DIR}/bin:/usr/local/bin:/usr/bin:/bin
 Environment=VIRTUAL_ENV={VENV_DIR}
+Environment=LITELLM_SUPERVISOR=systemd
 {env_lines}
 StandardOutput=append:{LOG_DIR}/proxy.log
 StandardError=append:{LOG_DIR}/proxy-error.log
@@ -238,6 +262,8 @@ def systemd_stop() -> None:
 
 
 def systemd_is_running() -> bool:
+    if not shutil.which("systemctl"):
+        return False
     return subprocess.call(
         ["systemctl", "--user", "is-active", SYSTEMD_UNIT],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -255,21 +281,26 @@ def systemd_uninstall() -> None:
 
 
 def nohup_start(port: int, config: str) -> None:
+    _ensure_proxy_launch_wrapper()
     _ensure_log_dir()
     _activate_venv()
     load_env()
     PORT_FILE.write_text(str(port))
 
+    launch_sh = BIN_DIR / "litellm-proxy-launch.sh"
     cmd = [
+        str(launch_sh),
         str(VENV_DIR / "bin" / "litellm"),
         "--config", config,
         "--port", str(port),
         *_perf_flags(),
     ]
+    env = os.environ.copy()
+    env["LITELLM_SUPERVISOR"] = "nohup"
     log_out = open(LOG_DIR / "proxy.log", "a")
     log_err = open(LOG_DIR / "proxy-error.log", "a")
     proc = subprocess.Popen(cmd, stdout=log_out, stderr=log_err,
-                            start_new_session=True)
+                            start_new_session=True, env=env)
     PIDFILE.write_text(str(proc.pid))
     info(f"Proxy started in background (PID {proc.pid}, port {port})")
     info(f"Logs: {LOG_DIR}/proxy.log")
@@ -340,6 +371,18 @@ def cmd_start(port: int = 4040, config: str | None = None) -> None:
 
     _activate_venv()
     load_env()
+    # Stop launchd/systemd BEFORE kill_stale: SIGKILL while the job is still
+    # loaded makes KeepAlive restart the proxy once between kill and bootout,
+    # inflating proxy.log with spurious cold starts.
+    if is_macos() and launchd_is_running():
+        launchd_stop()
+    elif is_linux() and has_systemd_user() and systemd_is_running():
+        subprocess.call(["systemctl", "--user", "stop", SYSTEMD_UNIT],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    elif not (is_macos() or (is_linux() and has_systemd_user())):
+        if PIDFILE.exists():
+            nohup_stop()
+
     kill_stale(port)
     kill_other_instances(port)
 
@@ -456,17 +499,29 @@ def cmd_logs() -> None:
 
 
 def cmd_proxy(port: int = 4040, config: str | None = None, extra_args: list[str] | None = None) -> None:
+    _ensure_proxy_launch_wrapper()
     _activate_venv()
     load_env()
     # Unset DEBUG for foreground
     os.environ.pop("DEBUG", None)
 
     cfg = config or str(CONFIG_FILE)
+    if is_macos() and launchd_is_running():
+        launchd_stop()
+    elif is_linux() and has_systemd_user() and systemd_is_running():
+        subprocess.call(["systemctl", "--user", "stop", SYSTEMD_UNIT],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    elif not (is_macos() or (is_linux() and has_systemd_user())):
+        if PIDFILE.exists():
+            nohup_stop()
+
     kill_stale(port)
     PORT_FILE.write_text(str(port))
 
+    os.environ["LITELLM_SUPERVISOR"] = "foreground"
     info(f"Starting LiteLLM proxy on port {port} (foreground) ...")
     cmd = [
+        str(BIN_DIR / "litellm-proxy-launch.sh"),
         str(VENV_DIR / "bin" / "litellm"),
         "--config", cfg,
         "--port", str(port),

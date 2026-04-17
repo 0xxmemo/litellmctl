@@ -1,4 +1,5 @@
 import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
+import { errorMessage } from "../lib/errors";
 import { requireAuth, requireUser } from "../lib/db";
 import { buildExtendedModel } from "../lib/models";
 
@@ -48,7 +49,7 @@ async function getExtendedModelsHandler(req: Request) {
     const models = unique.map(buildExtendedModel);
     return Response.json({ models, count: models.length });
   } catch (err) {
-    console.error("GET /api/models/extended error:", (err as Error).message);
+    console.error("GET /api/models/extended error:", errorMessage(err));
     return Response.json({ models: [], error: "LiteLLM model info unavailable" }, { status: 502 });
   }
 }
@@ -63,7 +64,7 @@ async function publicModelsHandler(_req: Request) {
     if (!res.ok) return Response.json({ error: "Failed to fetch models" }, { status: 502 });
     return new Response(res.body, { status: res.status, headers: res.headers });
   } catch (err) {
-    console.error("Proxy error /v1/models:", (err as Error).message);
+    console.error("Proxy error /v1/models:", errorMessage(err));
     return Response.json({ error: "Failed to fetch models" }, { status: 502 });
   }
 }

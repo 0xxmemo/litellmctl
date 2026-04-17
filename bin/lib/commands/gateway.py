@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import time
 
 from ..common.paths import (
-    PROJECT_DIR, LOG_DIR, ENV_FILE,
+    PROJECT_DIR, BIN_DIR, LOG_DIR, ENV_FILE,
     GATEWAY_LAUNCHD_LABEL, GATEWAY_LAUNCHD_PLIST,
     GATEWAY_SYSTEMD_UNIT, GATEWAY_SYSTEMD_FILE,
     GATEWAY_PIDFILE, SYSTEMD_DIR,
@@ -30,7 +31,6 @@ def _ensure_bun_path() -> None:
 def _bun_bin() -> str | None:
     """Return full path to bun binary, or None."""
     _ensure_bun_path()
-    import shutil
     return shutil.which("bun")
 
 
@@ -65,6 +65,17 @@ def _parse_root_env_for_plist() -> str:
     return block
 
 
+def _ensure_gateway_launch_wrapper() -> None:
+    """Ensure gateway-launch.sh is executable (e.g. after clone without +x)."""
+    path = BIN_DIR / "gateway-launch.sh"
+    if not path.exists():
+        return
+    try:
+        os.chmod(path, path.stat().st_mode | 0o111)
+    except OSError:
+        pass
+
+
 def _parse_root_env_for_systemd() -> str:
     """Generate systemd env lines from root .env."""
     if not ENV_FILE.exists():
@@ -87,11 +98,13 @@ def gateway_is_running() -> bool:
 # ── launchd (macOS) ──────────────────────────────────────────────────────────
 
 def _gateway_launchd_install(bun: str, port: int) -> None:
+    _ensure_gateway_launch_wrapper()
     gateway_dir = PROJECT_DIR / "gateway"
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     GATEWAY_LAUNCHD_PLIST.parent.mkdir(parents=True, exist_ok=True)
 
     env_block = _parse_root_env_for_plist()
+    launch_sh = BIN_DIR / "gateway-launch.sh"
 
     plist = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -101,6 +114,7 @@ def _gateway_launchd_install(bun: str, port: int) -> None:
   <string>{GATEWAY_LAUNCHD_LABEL}</string>
   <key>ProgramArguments</key>
   <array>
+    <string>{launch_sh}</string>
     <string>{bun}</string>
     <string>--env-file=../.env</string>
     <string>run</string>
@@ -112,11 +126,15 @@ def _gateway_launchd_install(bun: str, port: int) -> None:
   <dict>
     <key>PATH</key>
     <string>{os.path.dirname(bun)}:/usr/local/bin:/usr/bin:/bin</string>
-{env_block}  </dict>
+{env_block}    <key>GATEWAY_SUPERVISOR</key>
+    <string>launchd</string>
+  </dict>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
   <true/>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
   <key>StandardOutPath</key>
   <string>{LOG_DIR}/gateway.log</string>
   <key>StandardErrorPath</key>
@@ -152,6 +170,8 @@ def _gateway_launchd_stop() -> None:
 
 
 def _gateway_launchd_is_running() -> bool:
+    if not shutil.which("launchctl"):
+        return False
     uid = os.getuid()
     return subprocess.call(
         ["launchctl", "print", f"gui/{uid}/{GATEWAY_LAUNCHD_LABEL}"],
@@ -162,11 +182,13 @@ def _gateway_launchd_is_running() -> bool:
 # ── systemd (Linux) ─────────────────────────────────────────────────────────
 
 def _gateway_systemd_install(bun: str, port: int) -> None:
+    _ensure_gateway_launch_wrapper()
     gateway_dir = PROJECT_DIR / "gateway"
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     SYSTEMD_DIR.mkdir(parents=True, exist_ok=True)
 
     env_lines = _parse_root_env_for_systemd()
+    launch_sh = BIN_DIR / "gateway-launch.sh"
 
     unit = f"""[Unit]
 Description=LiteLLM Gateway UI
@@ -175,11 +197,12 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory={gateway_dir}
-ExecStart={bun} --env-file=../.env run index.ts
+ExecStart={launch_sh} {bun} --env-file=../.env run index.ts
 Restart=on-failure
 RestartSec=3
 
 Environment=PATH={os.path.dirname(bun)}:/usr/local/bin:/usr/bin:/bin
+Environment=GATEWAY_SUPERVISOR=systemd
 {env_lines}
 StandardOutput=append:{LOG_DIR}/gateway.log
 StandardError=append:{LOG_DIR}/gateway-error.log
@@ -219,6 +242,8 @@ def _gateway_systemd_stop() -> None:
 
 
 def _gateway_systemd_is_running() -> bool:
+    if not shutil.which("systemctl"):
+        return False
     return subprocess.call(
         ["systemctl", "--user", "is-active", GATEWAY_SYSTEMD_UNIT],
         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -228,15 +253,20 @@ def _gateway_systemd_is_running() -> bool:
 # ── nohup fallback ───────────────────────────────────────────────────────────
 
 def _gateway_nohup_start(bun: str, port: int) -> None:
+    _ensure_gateway_launch_wrapper()
     gateway_dir = PROJECT_DIR / "gateway"
     LOG_DIR.mkdir(parents=True, exist_ok=True)
 
+    launch_sh = BIN_DIR / "gateway-launch.sh"
+    env = os.environ.copy()
+    env["GATEWAY_SUPERVISOR"] = "nohup"
     log_f = open(LOG_DIR / "gateway.log", "a")
     proc = subprocess.Popen(
-        [bun, "--env-file=../.env", "run", "index.ts"],
+        [str(launch_sh), bun, "--env-file=../.env", "run", "index.ts"],
         cwd=str(gateway_dir),
         stdout=log_f, stderr=log_f,
         start_new_session=True,
+        env=env,
     )
     GATEWAY_PIDFILE.write_text(str(proc.pid))
     info(f"Gateway started in background (PID {proc.pid}, port {port})")
@@ -362,7 +392,6 @@ def install_gateway() -> bool:
         return False
 
     _ensure_bun_path()
-    import shutil
     if not shutil.which("bun"):
         info("Bun not found — installing Bun ...")
         ret = subprocess.call(["bash", "-c", "curl -fsSL https://bun.sh/install | bash"])

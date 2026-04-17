@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { cn } from '@/lib/utils'
+import { cn, errorMessage } from '@/lib/utils'
 import { ModelSelector } from '@/components/ModelSelector'
 import type { UseAuthReturn } from '@/hooks/useAuth'
 import type { UseModelOverridesReturn, UseTierAliasesReturn, UseSaveModelOverridesReturn, UseSaveProfileReturn } from '@/hooks/useSettings'
@@ -135,7 +135,7 @@ export function SettingsPanel({ auth, modelOverrides, tierAliases, saveModelOver
         setTimeout(() => setMessage(null), 3000)
       },
       onError: (err: Error) => {
-        setMessage({ type: 'error', text: err.message || 'Failed to update profile' })
+        setMessage({ type: 'error', text: errorMessage(err) || 'Failed to update profile' })
         setTimeout(() => setMessage(null), 3000)
       },
     })
@@ -150,7 +150,7 @@ export function SettingsPanel({ auth, modelOverrides, tierAliases, saveModelOver
         setTimeout(() => setOverridesMessage(null), 3000)
       },
       onError: (err: Error) => {
-        setOverridesMessage({ type: 'error', text: err.message || 'Failed to save overrides' })
+        setOverridesMessage({ type: 'error', text: errorMessage(err) || 'Failed to save overrides' })
         setTimeout(() => setOverridesMessage(null), 3000)
       },
     })

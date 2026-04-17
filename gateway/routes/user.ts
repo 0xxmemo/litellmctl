@@ -1,4 +1,5 @@
 import { CONFIG_PATH } from "../lib/config";
+import { errorMessage } from "../lib/errors";
 import { validatedUsers, userProfileCache, requireUser } from "../lib/db";
 import { invalidateModelOverridesCache } from "./proxy";
 
@@ -18,7 +19,7 @@ async function userProfileHandler(req: Request) {
     }
     return Response.json({ success: true });
   } catch (err) {
-    console.error("PUT /api/user/profile error:", (err as Error).message);
+    console.error("PUT /api/user/profile error:", errorMessage(err));
     return Response.json({ error: "Failed to update profile" }, { status: 500 });
   }
 }
@@ -32,7 +33,7 @@ async function getUserModelOverridesHandler(req: Request) {
     const record = await validatedUsers.findOne({ email: auth.email }, { projection: { model_overrides: 1 } });
     return Response.json({ model_overrides: record?.model_overrides || {} });
   } catch (err) {
-    console.error("GET /api/user/model-overrides error:", (err as Error).message);
+    console.error("GET /api/user/model-overrides error:", errorMessage(err));
     return Response.json({ error: "Failed to fetch model overrides" }, { status: 500 });
   }
 }
@@ -57,7 +58,7 @@ async function putUserModelOverridesHandler(req: Request) {
     invalidateModelOverridesCache(auth.email);
     return Response.json({ success: true, model_overrides: overrides });
   } catch (err) {
-    console.error("PUT /api/user/model-overrides error:", (err as Error).message);
+    console.error("PUT /api/user/model-overrides error:", errorMessage(err));
     return Response.json({ error: "Failed to update model overrides" }, { status: 500 });
   }
 }
