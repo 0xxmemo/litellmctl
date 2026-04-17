@@ -1,12 +1,12 @@
-"""Install command — orchestrates base install + DB + local servers + gateway."""
+"""Install command — orchestrates base install + local servers + gateway."""
 
 from __future__ import annotations
 
 import os
 import subprocess
 
-from ..common.paths import PROJECT_DIR, BIN_DIR, ENV_FILE
-from ..common.env import load_env, patch_db_flags, patch_local_defaults, patch_perf_defaults
+from ..common.paths import PROJECT_DIR, BIN_DIR
+from ..common.env import load_env, patch_local_defaults, patch_perf_defaults
 from ..common.formatting import info, warn, console
 from ..common.platform import is_macos, is_linux, is_interactive
 from ..common.network import port_in_use
@@ -14,7 +14,6 @@ from ..common.network import port_in_use
 from .service import _activate_venv, cmd_restart
 from .service import launchd_is_running, systemd_is_running, nohup_is_running
 from .local import install_embedding, install_transcription, _ollama_is_running, _transcription_is_running
-from .db import ensure_db_ready
 from .gateway import install_gateway, gateway_is_running
 from .searxng import install_searxng
 from .protonmail import install_protonmail
@@ -59,7 +58,6 @@ def _resolve_install_mode(
 
 def cmd_install(
     *,
-    db_mode: str = "",
     embed_mode: str = "",
     transcr_mode: str = "",
     searxng_mode: str = "",
@@ -87,10 +85,6 @@ def cmd_install(
         if pre_sha and post_sha and pre_sha != post_sha:
             info("Repository updated during install. Reloading latest litellmctl ...")
             reexec = [str(PROJECT_DIR / "bin" / "litellmctl"), "install", "--_post-sync"]
-            if db_mode == "yes":
-                reexec.append("--with-db")
-            elif db_mode == "no":
-                reexec.append("--without-db")
             if embed_mode == "yes":
                 reexec.append("--with-embedding")
             elif embed_mode == "no":
@@ -115,28 +109,6 @@ def cmd_install(
 
     _activate_venv()
     load_env()
-
-    # ── DB setup ──────────────────────────────────────────────────────────
-    if not db_mode:
-        text = ENV_FILE.read_text() if ENV_FILE.exists() else ""
-        if "DATABASE_URL=" in text:
-            db_mode = "yes"
-        elif is_interactive():
-            if _confirm("Set up local PostgreSQL database for LiteLLM now?"):
-                db_mode = "yes"
-            else:
-                db_mode = "no"
-        else:
-            db_mode = "yes"
-
-    if db_mode == "yes":
-        if not ensure_db_ready():
-            warn("DB setup incomplete. Run 'litellmctl install --with-db' to retry.")
-        load_env()
-        patch_db_flags()
-    else:
-        warn("Skipped local DB setup.")
-        info("Run 'litellmctl install --with-db' to enable.")
 
     patch_local_defaults()
     patch_perf_defaults()

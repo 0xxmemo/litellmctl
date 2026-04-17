@@ -37,9 +37,6 @@ def routes_dir(tmp_path: Path) -> Path:
     """))
 
     (rd / "stats.ts").write_text(dedent("""\
-        // GET /api/stats/global — requireAuth (any authenticated user incl. guests)
-        async function globalStatsHandler(req: Request) {}
-
         // GET /api/stats/user — requireUser (not guest)
         async function userStatsHandler(req: Request) {}
 
@@ -50,7 +47,6 @@ def routes_dir(tmp_path: Path) -> Path:
         async function groupItemsHandler(req: Request) {}
 
         export const statsRoutes = {
-          "/api/stats/global":          { GET: globalStatsHandler },
           "/api/stats/user":            { GET: userStatsHandler },
           "/api/stats/requests":        { GET: groupedRequestsHandler },
           "/api/stats/requests/items":  { GET: groupItemsHandler },
@@ -136,7 +132,7 @@ class TestParseRouteExports:
         assert "GET" in methods
         assert "POST" in methods
         assert "/api/health" in paths
-        assert "/api/stats/global" in paths
+        assert "/api/stats/user" in paths
         assert "/api/keys" in paths
 
     def test_multi_method_routes(self, mock_project_dir):
@@ -150,8 +146,8 @@ class TestParseRouteExports:
     def test_extracts_descriptions_from_comments(self, mock_project_dir):
         from lib.commands.gateway import _parse_route_exports
         routes = _parse_route_exports()
-        global_stats = next(r for r in routes if r["path"] == "/api/stats/global")
-        assert "requireAuth" in global_stats["desc"]
+        user_stats = next(r for r in routes if r["path"] == "/api/stats/user")
+        assert "requireUser" in user_stats["desc"]
 
     def test_handles_wildcard_routes(self, mock_project_dir):
         from lib.commands.gateway import _parse_route_exports
@@ -175,7 +171,7 @@ class TestParseRouteExports:
 class TestPathToCmd:
     def test_strips_api_prefix(self):
         from lib.commands.gateway import _path_to_cmd
-        assert _path_to_cmd("/api/stats/global") == ["stats", "global"]
+        assert _path_to_cmd("/api/stats/user") == ["stats", "user"]
 
     def test_preserves_v1_prefix(self):
         from lib.commands.gateway import _path_to_cmd
@@ -243,7 +239,6 @@ class TestCompletableSegments:
     def test_second_level(self, mock_project_dir):
         from lib.commands.gateway import _completable_segments
         segs = _completable_segments(["stats"])
-        assert "global" in segs
         assert "user" in segs
         assert "requests" in segs
 
@@ -292,13 +287,13 @@ class TestGatewayApi:
             assert req.get_method() == "GET"
             assert "/api/health" in req.full_url
 
-    def test_stats_global_sends_get(self, mock_project_dir):
+    def test_stats_user_sends_get(self, mock_project_dir):
         from lib.commands.gateway import gateway_api
         with mock.patch("lib.commands.gateway.gateway_is_running", return_value=True), \
              self._mock_urlopen() as mock_open:
-            gateway_api(["stats", "global"])
+            gateway_api(["stats", "user"])
             req = mock_open.call_args[0][0]
-            assert "/api/stats/global" in req.full_url
+            assert "/api/stats/user" in req.full_url
 
     def test_data_flag_triggers_write_method(self, mock_project_dir):
         from lib.commands.gateway import gateway_api
@@ -315,8 +310,8 @@ class TestGatewayApi:
              self._mock_urlopen() as mock_open:
             # health is GET-only, kv should become query params
             # But health doesn't accept params — let's use a route we know
-            # stats/global is GET, kv becomes query params
-            gateway_api(["stats", "global", "page=1"])
+            # stats/user is GET, kv becomes query params
+            gateway_api(["stats", "user", "page=1"])
             req = mock_open.call_args[0][0]
             assert "page=1" in req.full_url
 
@@ -659,15 +654,15 @@ class TestLinuxProcess:
 
 class TestLinuxDbSetup:
     def test_linux_socket_host_appended(self, monkeypatch):
-        monkeypatch.setattr("lib.commands.db.is_linux", lambda: True)
-        from lib.commands.db import append_linux_socket_host_param
+        monkeypatch.setattr("lib.common.db_url.is_linux", lambda: True)
+        from lib.common.db_url import append_linux_socket_host_param
         url = "postgresql://user:pass@localhost/litellm"
         result = append_linux_socket_host_param(url)
         assert "host=" in result or result == url  # Either appends or passthrough
 
     def test_linux_socket_host_not_appended_on_mac(self, monkeypatch):
-        monkeypatch.setattr("lib.commands.db.is_linux", lambda: False)
-        from lib.commands.db import append_linux_socket_host_param
+        monkeypatch.setattr("lib.common.db_url.is_linux", lambda: False)
+        from lib.common.db_url import append_linux_socket_host_param
         url = "postgresql://user:pass@localhost/litellm"
         assert append_linux_socket_host_param(url) == url
 

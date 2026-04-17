@@ -78,7 +78,7 @@ litellmctl gateway routes
 
 # Call endpoints using path segments as commands
 litellmctl gateway api health
-litellmctl gateway api stats global
+litellmctl gateway api stats user
 litellmctl gateway api admin users
 litellmctl gateway api models extended
 litellmctl gateway api search q=hello
@@ -89,13 +89,13 @@ Tab completion discovers commands from route source files (no gateway needed):
 
 ```bash
 litellmctl gateway api <TAB>          # health, stats, admin, keys, ...
-litellmctl gateway api stats <TAB>    # global, requests, user
+litellmctl gateway api stats <TAB>    # user, requests, ...
 litellmctl gateway api admin <TAB>    # users, approve, reject, ...
 ```
 
 ### How it works
 
-- Path segments become CLI arguments: `/api/stats/global` → `stats global`
+- Path segments become CLI arguments: `/api/stats/user` → `stats user`
 - HTTP method is auto-inferred: GET by default, POST/PUT/PATCH when `-d` or `key=val` is given
 - Action words override the method: `delete` → DELETE, `create` → POST, `update` → PUT
 - `key=value` args become query params (GET) or JSON body (POST)
@@ -106,7 +106,7 @@ litellmctl gateway api admin <TAB>    # users, approve, reject, ...
 | Command prefix | Examples                                                           |
 | -------------- | ------------------------------------------------------------------ |
 | `health`       | `gateway api health`                                               |
-| `stats`        | `gateway api stats global`, `stats user`, `stats requests`         |
+| `stats`        | `gateway api stats user`, `stats requests`, `stats requests items` |
 | `keys`         | `gateway api keys`, `keys delete <id>`                             |
 | `models`       | `gateway api models`, `models extended`                            |
 | `user`         | `gateway api user aliases`, `user model-overrides`                 |

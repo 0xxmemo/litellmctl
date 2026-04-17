@@ -17,7 +17,6 @@ from .service import (
     _activate_venv, launchd_is_running, systemd_is_running, nohup_is_running,
 )
 from .local import local_status
-from .db import db_status
 from .gateway import gateway_status
 from .searxng import searxng_status
 from .protonmail import protonmail_status
@@ -111,7 +110,6 @@ def cmd_status() -> None:
             console.print("  [yellow]Not running[/]\n")
 
     local_status()
-    db_status()
     searxng_status()
     gateway_status()
     protonmail_status()

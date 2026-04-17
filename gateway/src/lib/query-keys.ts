@@ -17,7 +17,6 @@ export const queryKeys = {
   keys: (page: number) => ['keys', page] as const,
 
   // Dashboard / Stats
-  globalStats: ['dashboard', 'global-stats'] as const,
   userStats: ['dashboard', 'user-stats'] as const,
   userStatsAnalytics: ['dashboard', 'user-stats-analytics'] as const,
 
@@ -27,7 +26,6 @@ export const queryKeys = {
 
   // Admin
   adminUsers: ['admin', 'users'] as const,
-  adminTopUsers: ['admin', 'top-users'] as const,
 
   // Config
   configAliases: ['config', 'aliases'] as const,

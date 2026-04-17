@@ -10,7 +10,6 @@ import { AlertCircle, AlertTriangle, CheckCircle, XCircle, UserPlus, Trash2, Use
 import { useAuth } from '@/hooks/useAuth'
 import {
   useAdminUsers,
-  useAdminTopUsers,
   useApproveUser,
   useRejectUser,
   useAddUser,
@@ -21,7 +20,6 @@ import {
 import { AdminErrorBoundary } from '@/components/AdminErrorBoundary'
 import { toast } from 'sonner'
 import { PrettyDate } from '@/components/PrettyDate'
-import { PrettyAmount } from '@/components/PrettyAmount'
 export function Admin() {
   const { user: currentUser } = useAuth()
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
@@ -41,7 +39,6 @@ export function Admin() {
   const [showRevokeAllConfirm, setShowRevokeAllConfirm] = useState(false)
 
   const { data: users = [], isLoading: loading, error: usersError, refetch: refetchUsers } = useAdminUsers()
-  const { data: topUsers = [], isLoading: topUsersLoading } = useAdminTopUsers()
 
   const error = usersError ? (usersError instanceof Error ? usersError.message : 'Failed to load users') : null
 
@@ -362,7 +359,7 @@ export function Admin() {
               <CheckCircle className="w-5 h-5 text-green-500" />
               Approved Users ({approvedUsers.length})
             </CardTitle>
-            <CardDescription>Users with their API usage stats</CardDescription>
+            <CardDescription>Approved gateway users</CardDescription>
           </CardHeader>
           <CardContent>
             {approvedUsers.length === 0 ? (
@@ -374,15 +371,12 @@ export function Admin() {
                     <TableRow>
                       <TableHead>User</TableHead>
                       <TableHead>Role</TableHead>
-                      <TableHead>Requests</TableHead>
-                      <TableHead>Tokens</TableHead>
                       <TableHead>Approved</TableHead>
                       <TableHead></TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
                     {approvedUsers.map(user => {
-                      const usage = topUsers.find(u => u.email === user.email)
                       return (
                         <TableRow key={user.email}>
                           <TableCell className="font-medium">
@@ -400,20 +394,6 @@ export function Admin() {
                             >
                               {user.role}
                             </Badge>
-                          </TableCell>
-                          <TableCell>
-                            {topUsersLoading ? (
-                              <span className="text-muted-foreground text-xs">...</span>
-                            ) : (
-                              <PrettyAmount amountFormatted={usage?.requests ?? 0} size="sm" normalPrecision={0} />
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {topUsersLoading ? (
-                              <span className="text-muted-foreground text-xs">...</span>
-                            ) : (
-                              <PrettyAmount amountFormatted={usage?.tokens ?? 0} size="sm" normalPrecision={0} />
-                            )}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                             {user.approvedAt ? <PrettyDate date={user.approvedAt} format="date" size="sm" /> : 'N/A'}

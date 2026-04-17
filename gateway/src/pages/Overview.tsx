@@ -1,14 +1,13 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { StatCard } from '@/components/StatCard'
-import { Activity, Key, Zap, Users, Globe, TrendingUp, RefreshCw } from 'lucide-react'
+import { Activity, Key, Zap, TrendingUp, RefreshCw } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { PrettyAmount } from '@/components/PrettyAmount'
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ModelUsagePieChart } from '@/components/ModelUsagePieChart'
 import { RequestsTable } from '@/components/RequestsTable'
 import { getDisplayName, formatProviderName, getProviderColor, extractProvider, resolveProvider } from '@lib/models'
-import { useGlobalStats, useUserStats } from '@/hooks/useStats'
+import { useUserStats } from '@/hooks/useStats'
 import { useAuth } from '@/hooks/useAuth'
 import { useRequestsTable } from '@/hooks/useRequests'
 import {
@@ -107,62 +106,27 @@ export function Overview() {
   const { user: currentUser, loading: authLoading } = useAuth()
   const authChecked = !authLoading
   const isLoggedIn = !!currentUser
+  const isGuest = currentUser?.role === 'guest'
+  const canSeeUsage = isLoggedIn && !isGuest
   const requestsTable = useRequestsTable()
-
-  const {
-    globalStats,
-    globalStatsLoading,
-    globalStatsUpdatedAt,
-    globalStatsSpinning,
-    refreshGlobalStats,
-  } = useGlobalStats({ enabled: authChecked })
 
   const {
     userStats,
     userStatsLoading,
     userStatsUpdatedAt,
     userStatsSpinning,
-    refreshUserStats,
-  } = useUserStats({ enabled: authChecked && isLoggedIn && currentUser.role !== 'guest' })
+  } = useUserStats({ enabled: authChecked && canSeeUsage })
 
   const rateLimited = false // react-query retry handles backoff
-
-  const [activeTab, setActiveTab] = useState<string>('global')
-
-  // Tracks which tabs have had their initial fetch triggered
-  const globalFetchedRef = useRef(false)
-  const userFetchedRef = useRef(false)
-
-  // Lazy fetch: only load a tab's data when that tab is first visited
-  useEffect(() => {
-    if (!authChecked) return
-
-    if (activeTab === 'global' && !globalFetchedRef.current) {
-      globalFetchedRef.current = true
-      refreshGlobalStats()
-    } else if (activeTab === 'my-usage' && !userFetchedRef.current) {
-      userFetchedRef.current = true
-      refreshUserStats()
-    }
-  }, [activeTab, authChecked]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Auto-switch to "my-usage" tab when user logs in
-  useEffect(() => {
-    if (isLoggedIn && authChecked) {
-      setActiveTab('my-usage')
-    }
-  }, [isLoggedIn, authChecked])
 
   const userChartData = buildUserChart(userStats)
 
   return (
     <div className="space-y-6">
-      {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Overview</h1>
       </div>
 
-      {/* Rate-limit banner */}
       {rateLimited && (
         <div className="flex items-center gap-2 rounded-md border border-yellow-400/40 bg-yellow-400/10 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-300">
           <RefreshCw className="w-4 h-4 shrink-0" />
@@ -170,55 +134,52 @@ export function Overview() {
         </div>
       )}
 
-      {/* Tabs */}
-      <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList>
-          {isLoggedIn && (
-            <TabsTrigger value="my-usage" className="flex items-center gap-1.5">
-              <Activity className="w-3.5 h-3.5" />
-              My Usage
-            </TabsTrigger>
-          )}
-          <TabsTrigger value="global" className="flex items-center gap-1.5">
-            <Globe className="w-3.5 h-3.5" />
-            Global
-          </TabsTrigger>
-        </TabsList>
+      {/* Guest: pending access */}
+      {authChecked && isLoggedIn && isGuest && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">Access pending</CardTitle>
+            <CardDescription>
+              An administrator needs to approve your account before you can view usage and create API keys.
+            </CardDescription>
+          </CardHeader>
+        </Card>
+      )}
 
-        {/* ── Global Tab ── */}
-        <TabsContent value="global" className="space-y-6 mt-4">
-          {/* Last updated indicator */}
+      {/* Signed-in user / admin: personal usage */}
+      {authChecked && canSeeUsage && (
+        <div className="space-y-6">
           <div className="flex justify-end">
-            <LastUpdated ts={globalStatsUpdatedAt} spinning={globalStatsSpinning} />
+            <LastUpdated ts={userStatsUpdatedAt} spinning={userStatsSpinning} />
           </div>
 
-          {/* Global stat cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             <StatCard
-              title="Total Users"
-              value={<PrettyAmount amountFormatted={globalStatsLoading ? '...' : (globalStats?.totalUsers ?? 0)} size="2xl" normalPrecision={0} />}
-              icon={Users}
+              title="Your Keys"
+              value={<PrettyAmount amountFormatted={userStatsLoading ? '...' : (userStats?.keys ?? 0)} size="2xl" normalPrecision={0} />}
+              icon={Key}
             />
             <StatCard
-              title="Total Requests"
-              value={<PrettyAmount amountFormatted={globalStatsLoading ? '...' : (globalStats?.totalRequests ?? 0)} size="2xl" />}
+              title="Your Requests"
+              value={<PrettyAmount amountFormatted={userStatsLoading ? '...' : (userStats?.requests ?? 0)} size="2xl" />}
               icon={Activity}
             />
             <StatCard
-              title="Total Tokens"
-              value={<PrettyAmount amountFormatted={globalStatsLoading ? '...' : (globalStats?.totalTokens ?? 0)} size="2xl" />}
+              title="Your Tokens"
+              value={<PrettyAmount amountFormatted={userStatsLoading ? '...' : (userStats?.tokens ?? 0)} size="2xl" />}
               icon={Zap}
             />
           </div>
 
-          {/* Model Usage */}
-          {!globalStatsLoading && globalStats?.modelUsage && globalStats.modelUsage.length > 0 ? (
+          <UsageChart data={userChartData} loading={userStatsLoading} />
+
+          {!userStatsLoading && userStats?.modelUsage && userStats.modelUsage.length > 0 ? (
             <ModelUsagePieChart
-              data={globalStats.modelUsage.map(m => {
-                const provider = extractProvider(m.model_name) || resolveProvider(m.model_name, m.provider || '')
+              data={userStats.modelUsage.map(m => {
+                const provider = extractProvider(m.model_name) || resolveProvider(m.model_name, '')
                 return {
                   name: getDisplayName(m.model_name),
-                  value: m.tokens ?? m.requests ?? 0,
+                  value: m.requests ?? 0,
                   percentage: m.percentage || '0',
                   provider,
                   colorClass: getProviderColor(provider),
@@ -226,92 +187,25 @@ export function Overview() {
                 }
               })}
             />
-          ) : !globalStatsLoading ? (
+          ) : !userStatsLoading ? (
             <Card>
               <CardHeader>
-                <CardTitle className="text-lg">Model Usage Distribution</CardTitle>
+                <CardTitle className="text-lg">Your Model Usage</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="text-center text-muted-foreground py-8">
                   <Activity className="w-12 h-12 mx-auto mb-3 opacity-20" />
                   <p className="text-sm">No model usage data yet</p>
+                  <p className="text-xs mt-1">Model statistics appear here after your first API request</p>
                 </div>
               </CardContent>
             </Card>
-          ) : (
-            <Card>
-              <CardContent className="py-8 text-center text-muted-foreground">Loading model data...</CardContent>
-            </Card>
-          )}
-        </TabsContent>
+          ) : null}
 
-        {/* ── My Usage Tab ── */}
-        {isLoggedIn && (
-          <TabsContent value="my-usage" className="space-y-6 mt-4">
-            {/* Last updated indicator */}
-            <div className="flex justify-end">
-              <LastUpdated ts={userStatsUpdatedAt} spinning={userStatsSpinning} />
-            </div>
+          <RequestsTable requestsTable={requestsTable} />
+        </div>
+      )}
 
-            {/* Personal stat cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              <StatCard
-                title="Your Keys"
-                value={<PrettyAmount amountFormatted={userStatsLoading ? '...' : (userStats?.keys ?? 0)} size="2xl" normalPrecision={0} />}
-                icon={Key}
-              />
-              <StatCard
-                title="Your Requests"
-                value={<PrettyAmount amountFormatted={userStatsLoading ? '...' : (userStats?.requests ?? 0)} size="2xl" />}
-                icon={Activity}
-              />
-              <StatCard
-                title="Your Tokens"
-                value={<PrettyAmount amountFormatted={userStatsLoading ? '...' : (userStats?.tokens ?? 0)} size="2xl" />}
-                icon={Zap}
-              />
-            </div>
-
-            {/* Usage Chart */}
-            <UsageChart data={userChartData} loading={userStatsLoading} />
-
-            {/* My Model Breakdown */}
-            {!userStatsLoading && userStats?.modelUsage && userStats.modelUsage.length > 0 ? (
-              <ModelUsagePieChart
-                data={userStats.modelUsage.map(m => {
-                  const provider = extractProvider(m.model_name) || resolveProvider(m.model_name, '')
-                  return {
-                    name: getDisplayName(m.model_name),
-                    value: m.requests ?? 0,
-                    percentage: m.percentage || '0',
-                    provider,
-                    colorClass: getProviderColor(provider),
-                    providerName: formatProviderName(provider),
-                  }
-                })}
-              />
-            ) : !userStatsLoading ? (
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Your Model Usage</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-center text-muted-foreground py-8">
-                    <Activity className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                    <p className="text-sm">No model usage data yet</p>
-                    <p className="text-xs mt-1">Model statistics appear here after your first API request</p>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : null}
-
-            {/* Recent Requests Table */}
-            <RequestsTable requestsTable={requestsTable} />
-          </TabsContent>
-        )}
-      </Tabs>
-
-      {/* CTA for public users */}
       {!isLoggedIn && authChecked && (
         <Card className="border-dashed">
           <CardContent className="flex flex-col items-center justify-center py-8 gap-3">

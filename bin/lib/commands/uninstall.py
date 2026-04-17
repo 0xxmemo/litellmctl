@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 
-from ..common.env import load_env, remove_db_env_config
+from ..common.env import load_env
 from ..common.formatting import console, info, warn, error
 from ..common.platform import is_macos, is_linux, is_interactive
 from ..common.process import get_proxy_port
@@ -14,7 +14,7 @@ from .service import launchd_uninstall, systemd_uninstall, nohup_stop
 from .gateway import uninstall_gateway, gateway_is_running
 from .searxng import uninstall_searxng
 from .protonmail import uninstall_protonmail
-from ..common.paths import PROJECT_DIR, PIDFILE, PORT_FILE, SYSTEMD_FILE, ENV_FILE
+from ..common.paths import PROJECT_DIR, PIDFILE, PORT_FILE, SYSTEMD_FILE
 
 
 def _uninstall_service() -> None:
@@ -27,25 +27,6 @@ def _uninstall_service() -> None:
         PIDFILE.unlink(missing_ok=True)
         PORT_FILE.unlink(missing_ok=True)
         info("Cleaned up nohup-managed proxy.")
-
-
-def _uninstall_db() -> None:
-    from .db import db_name_from_url
-    if not ENV_FILE.exists():
-        info("No database configuration found in .env.")
-        return
-    text = ENV_FILE.read_text()
-    if "DATABASE_URL=" not in text:
-        info("No database configuration found in .env.")
-        return
-    db_url = os.environ.get("DATABASE_URL", "postgresql://localhost/litellm")
-    db_name = db_name_from_url(db_url)
-    remove_db_env_config()
-    os.environ.pop("DATABASE_URL", None)
-    os.environ.pop("DISABLE_SCHEMA_UPDATE", None)
-    info("Removed database config from .env.")
-    console.print(f"  The database '{db_name}' was not dropped. To remove it:\n")
-    console.print(f"      dropdb {db_name}\n")
 
 
 def _uninstall_embedding() -> None:
@@ -122,7 +103,6 @@ def _uninstall_transcription() -> None:
 
 UNINSTALL_TARGETS = [
     ("service", "Stop and remove proxy service"),
-    ("db", "Remove database config from .env"),
     ("embedding", "Ollama stop/uninstall guide"),
     ("transcription", "faster-whisper-server stop/uninstall guide"),
     ("searxng", "SearXNG search server stop/remove"),
@@ -147,7 +127,6 @@ def cmd_uninstall(target: str | None = None) -> None:
 
     handlers = {
         "service": _uninstall_service,
-        "db": _uninstall_db,
         "embedding": _uninstall_embedding,
         "transcription": _uninstall_transcription,
         "searxng": uninstall_searxng,
@@ -158,9 +137,6 @@ def cmd_uninstall(target: str | None = None) -> None:
     if target == "all":
         info("Stopping and removing proxy service ...")
         _uninstall_service()
-        console.print()
-        info("Removing database config ...")
-        _uninstall_db()
         console.print("\n[bold]Local inference servers[/]")
         _uninstall_embedding()
         _uninstall_transcription()
@@ -174,4 +150,4 @@ def cmd_uninstall(target: str | None = None) -> None:
         handlers[target]()
     else:
         error(f"Unknown target: {target}")
-        console.print("  Usage: litellmctl uninstall [service|db|embedding|transcription|searxng|gateway|protonmail]")
+        console.print("  Usage: litellmctl uninstall [service|embedding|transcription|searxng|gateway|protonmail]")

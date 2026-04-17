@@ -601,7 +601,7 @@ def _parse_route_exports() -> list[dict]:
 
 
 def _path_to_cmd(path: str) -> list[str]:
-    """Convert API path to command segments: /api/stats/global → ['stats','global']."""
+    """Convert API path to command segments: /api/stats/user → ['stats','user']."""
     parts = path.strip("/").split("/")
     if parts[0] == "api":
         parts = parts[1:]
@@ -682,7 +682,7 @@ def gateway_api(args: list[str], data: str | None = None) -> None:
 
     Examples:
         gateway api health
-        gateway api stats global
+        gateway api stats requests
         gateway api admin users
         gateway api admin approve email=user@example.com
         gateway api keys delete abc123

@@ -53,7 +53,7 @@ Existing hooks:
 - `useAuth.ts` — `useAuth()`, `useAuthStatus()`, `useLogout()`
 - `useKeys.ts` — `useKeys()`, `useCreateKey()`, `useRevokeKey()`
 - `useAdmin.ts` — `useAdminUsers()`, `useApproveUser()`, `useRejectUser()`, `useAddUser()`, `useDeleteUser()`, ...
-- `useStats.ts` — `useGlobalStats()`, `useUserStats()`, `useUserStatsAnalytics()`
+- `useStats.ts` — `useUserStats()`, `useUserStatsAnalytics()`
 - `useSettings.ts` — `useModelOverrides()`, `useSaveModelOverrides()`, `useTierAliases()`, `useSaveProfile()`
 - `useRequests.ts` — `useGroupedRequests()`, `useGroupItems()`
 

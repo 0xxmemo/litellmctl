@@ -108,39 +108,6 @@ class TestUpsertEnvVar:
         changed = upsert_env_var("X", "1", env_file=tmp_path / "missing.env")
         assert changed is False
 
-
-class TestPatchDbFlags:
-    def test_adds_all_flags(self, empty_env_file: Path):
-        from lib.common.env import patch_db_flags
-        dirty = patch_db_flags(env_file=empty_env_file)
-        assert dirty is True
-        text = empty_env_file.read_text()
-        assert "LITELLM_LOCAL_MODEL_COST_MAP=true" in text
-        assert "DISABLE_SCHEMA_UPDATE=true" in text
-        assert "STORE_MODEL_IN_DB=true" in text
-
-    def test_idempotent(self, empty_env_file: Path):
-        from lib.common.env import patch_db_flags
-        patch_db_flags(env_file=empty_env_file)
-        dirty2 = patch_db_flags(env_file=empty_env_file)
-        assert dirty2 is False
-
-
-class TestRemoveDbEnvConfig:
-    def test_removes_db_keys(self, tmp_env_file: Path):
-        from lib.common.env import remove_db_env_config
-        remove_db_env_config(env_file=tmp_env_file)
-        text = tmp_env_file.read_text()
-        assert "DATABASE_URL" not in text
-        # Non-DB keys preserved
-        assert "LITELLM_MASTER_KEY" in text
-
-    def test_noop_if_missing_file(self, tmp_path: Path):
-        from lib.common.env import remove_db_env_config
-        # Should not raise
-        remove_db_env_config(env_file=tmp_path / "nofile.env")
-
-
 # ---------------------------------------------------------------------------
 # platform.py
 # ---------------------------------------------------------------------------

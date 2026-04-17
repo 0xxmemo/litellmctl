@@ -70,27 +70,6 @@ def upsert_env_var(var: str, val: str, env_file: Path | None = None) -> bool:
     return True
 
 
-def patch_db_flags(env_file: Path | None = None) -> bool:
-    """Write DB usage-collection env vars. Returns True if any changed."""
-    ef = env_file or ENV_FILE
-    dirty = False
-    flags = {
-        "LITELLM_LOCAL_MODEL_COST_MAP": "true",
-        "DISABLE_SCHEMA_UPDATE": "true",
-        "STORE_MODEL_IN_DB": "true",
-        "PROXY_BATCH_WRITE_AT": "10",
-        "STORE_PROMPTS_IN_SPEND_LOGS": "true",
-    }
-    text = ef.read_text() if ef.exists() else ""
-    for var, val in flags.items():
-        if f"\n{var}=" not in f"\n{text}" and not text.startswith(f"{var}="):
-            with ef.open("a") as f:
-                f.write(f"{var}={val}\n")
-            dirty = True
-            text = ef.read_text()
-    return dirty
-
-
 def patch_local_defaults(env_file: Path | None = None) -> bool:
     """Write LOCAL_EMBEDDING_API_BASE and LOCAL_TRANSCRIPTION_API_BASE defaults."""
     ef = env_file or ENV_FILE
@@ -129,15 +108,3 @@ def patch_perf_defaults(env_file: Path | None = None) -> bool:
             dirty = True
             text = ef.read_text()
     return dirty
-
-
-def remove_db_env_config(env_file: Path | None = None) -> None:
-    """Remove DATABASE_URL and related DB flags from .env."""
-    ef = env_file or ENV_FILE
-    if not ef.exists():
-        return
-    remove_keys = {"DATABASE_URL", "DISABLE_SCHEMA_UPDATE", "STORE_MODEL_IN_DB",
-                   "PROXY_BATCH_WRITE_AT", "STORE_PROMPTS_IN_SPEND_LOGS"}
-    lines = ef.read_text().splitlines()
-    filtered = [l for l in lines if not any(l.strip().startswith(f"{k}=") for k in remove_keys)]
-    ef.write_text("\n".join(filtered) + "\n")

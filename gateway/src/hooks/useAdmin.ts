@@ -10,14 +10,6 @@ export interface UserRecord {
   approvedAt?: string
 }
 
-export interface TopUser {
-  email: string
-  role: string
-  requests: number
-  tokens: number
-  keys: number
-}
-
 // ── Fetch helpers (internal) ─────────────────────────────────────────────────
 
 async function fetchAdminUsers(): Promise<UserRecord[]> {
@@ -39,16 +31,6 @@ async function fetchAdminUsers(): Promise<UserRecord[]> {
   return data.users || []
 }
 
-async function fetchTopUsers(): Promise<TopUser[]> {
-  const res = await fetch('/api/stats/global', {
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
-  })
-  if (!res.ok) return []
-  const data = await res.json()
-  return data.topUsers || []
-}
-
 // ── Hooks ────────────────────────────────────────────────────────────────────
 
 export function useAdminUsers(enabled = true) {
@@ -56,13 +38,6 @@ export function useAdminUsers(enabled = true) {
     queryKey: queryKeys.adminUsers,
     queryFn: fetchAdminUsers,
     enabled,
-  })
-}
-
-export function useAdminTopUsers() {
-  return useQuery({
-    queryKey: queryKeys.adminTopUsers,
-    queryFn: fetchTopUsers,
   })
 }
 
@@ -186,7 +161,6 @@ export function useRevokeAllKeys() {
 }
 
 export type UseAdminUsersReturn = ReturnType<typeof useAdminUsers>
-export type UseAdminTopUsersReturn = ReturnType<typeof useAdminTopUsers>
 export type UseApproveUserReturn = ReturnType<typeof useApproveUser>
 export type UseRejectUserReturn = ReturnType<typeof useRejectUser>
 export type UseAddUserReturn = ReturnType<typeof useAddUser>

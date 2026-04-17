@@ -15,7 +15,6 @@ def tmp_env_file(tmp_path: Path) -> Path:
     ef.write_text(
         "# LiteLLM config\n"
         "LITELLM_MASTER_KEY=sk-test-1234\n"
-        'DATABASE_URL=postgresql://user:pass@localhost/litellm\n'
         "PROXY_PORT=4000\n"
     )
     return ef

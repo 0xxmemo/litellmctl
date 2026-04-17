@@ -13,7 +13,7 @@ Works on **macOS** and **Ubuntu/Debian**. Safe to re-run.
 ```bash
 source ~/.zshrc              # or ~/.bashrc
 litellmctl wizard            # generate config.yaml (providers, tiers, fallbacks)
-litellmctl install           # set up DB, local servers, gateway, search
+litellmctl install           # local servers, gateway, search
 litellmctl start             # start proxy (auto-starts on boot)
 ```
 
@@ -27,7 +27,7 @@ litellmctl stop                   Stop proxy
 litellmctl restart                Restart proxy
 litellmctl logs                   Tail proxy logs
 litellmctl proxy [--port N]       Start proxy in foreground (debug)
-litellmctl status                 Auth + proxy + gateway + local servers + DB status
+litellmctl status                 Auth + proxy + gateway + local servers
 ```
 
 ### Auth (OAuth providers)
@@ -61,7 +61,7 @@ Every gateway endpoint is callable using path segments as commands — no HTTP m
 
 ```bash
 litellmctl gateway api health
-litellmctl gateway api stats global
+litellmctl gateway api stats user
 litellmctl gateway api admin users
 litellmctl gateway api models extended
 litellmctl gateway api search q=hello
@@ -76,7 +76,7 @@ Tab completion discovers commands from route source files (works offline):
 
 ```bash
 litellmctl gateway api <TAB>          # health, stats, admin, keys, ...
-litellmctl gateway api stats <TAB>    # global, requests, user
+litellmctl gateway api stats <TAB>    # user, requests, ...
 ```
 
 Use `litellmctl gateway routes` to see all endpoints with descriptions.
@@ -94,7 +94,6 @@ litellmctl setup-completions      Add litellmctl alias + tab completion to shell
 #### Install flags
 
 ```
---with-db / --without-db                   PostgreSQL for usage tracking
 --with-local / --without-local             Ollama + faster-whisper
 --with-embedding / --without-embedding     Ollama embedding server
 --with-transcription / --without-transcription  faster-whisper-server
@@ -119,7 +118,7 @@ litellmctl protonmail auth        Show authentication instructions
 litellmctl uninstall [target]     Remove components
 ```
 
-Targets: `service`, `db`, `embedding`, `transcription`, `searxng`, `gateway`, `protonmail`
+Targets: `service`, `embedding`, `transcription`, `searxng`, `gateway`, `protonmail`
 
 ## Features
 
@@ -211,7 +210,7 @@ ssh -L 1455:localhost:1455 server   # ChatGPT
 ├── litellm/              Git submodule (LiteLLM fork)
 ├── config.yaml           Proxy model routing config
 ├── searxng/              SearXNG settings
-└── .env                  API keys, DB URL, env vars (git-ignored)
+└── .env                  API keys and env vars (git-ignored)
 ```
 
 ## Running Tests

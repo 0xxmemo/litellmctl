@@ -17,7 +17,7 @@ BASH_COMPLETIONS = r"""_litellmctl_completions() {
 
   commands="auth wizard install init-env start stop restart r logs proxy status local gateway protonmail uninstall toggle-claude setup-completions help"
   auth_cmds="chatgpt gemini qwen kimi codex status refresh export import"
-  uninstall_cmds="service db embedding transcription searxng gateway protonmail"
+  uninstall_cmds="service embedding transcription searxng gateway protonmail"
   gateway_cmds="status logs set-role users routes api"
   protonmail_cmds="start stop restart status auth"
   # gateway api <cmd...> → dynamic completions from route source files
@@ -67,7 +67,7 @@ print(' '.join(_completable_segments([s for s in '''$segs'''.split() if s])))" 2
       COMPREPLY=( $(compgen -W "--port --config" -- "$cur") )
       return ;;
     install)
-      COMPREPLY=( $(compgen -W "--with-db --without-db --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription --with-searxng --without-searxng --with-gateway --without-gateway --with-protonmail --without-protonmail" -- "$cur") )
+      COMPREPLY=( $(compgen -W "--with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription --with-searxng --without-searxng --with-gateway --without-gateway --with-protonmail --without-protonmail" -- "$cur") )
       return ;;
     gateway)
       COMPREPLY=( $(compgen -W "$gateway_cmds" -- "$cur") )
@@ -147,7 +147,7 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
       start) compadd proxy gateway searxng protonmail embedding transcription -- --port --config ;;
       stop|restart|r) compadd proxy gateway searxng protonmail embedding transcription ;;
       proxy) compadd -- --port --config ;;
-      install) compadd -- --with-db --without-db --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription --with-searxng --without-searxng --with-gateway --without-gateway --with-protonmail --without-protonmail ;;
+      install) compadd -- --with-local --without-local --with-embedding --without-embedding --with-transcription --without-transcription --with-searxng --without-searxng --with-gateway --without-gateway --with-protonmail --without-protonmail ;;
       gateway) _describe 'gateway command' gateway_cmds ;;
       protonmail) _describe 'protonmail command' protonmail_cmds ;;
     esac

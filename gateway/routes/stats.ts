@@ -1,74 +1,5 @@
-import { apiKeys, validatedUsers, usageLogs, requireAuth, requireUser } from "../lib/db";
+import { apiKeys, usageLogs, requireAuth, requireUser } from "../lib/db";
 import { extractProvider } from "../lib/models";
-
-// GET /api/stats/global — requireAuth (any authenticated user incl. guests)
-async function globalStatsHandler(req: Request) {
-  const auth = await requireAuth(req);
-  if (auth instanceof Response) return auth;
-
-  try {
-    const tokensExpr = { $add: [{ $ifNull: ["$tokens", 0] }, { $ifNull: ["$totalTokens", 0] }] };
-
-    const [users, keys, modelAgg, usageByEmail] = await Promise.all([
-      validatedUsers.find({}, { projection: { email: 1, role: 1 } }).toArray(),
-      apiKeys.find({ revoked: false }, { projection: { email: 1, keyHash: 1 } }).toArray(),
-      usageLogs.aggregate([
-        { $group: {
-          _id: "$model",
-          requests: { $sum: 1 },
-          tokens: { $sum: tokensExpr },
-          promptTokens: { $sum: { $ifNull: ["$promptTokens", 0] } },
-          completionTokens: { $sum: { $ifNull: ["$completionTokens", 0] } },
-        }},
-        { $sort: { tokens: -1 } },
-      ], { maxTimeMS: 8000 }).toArray(),
-      usageLogs.aggregate([
-        { $group: {
-          _id: "$email",
-          requests: { $sum: 1 },
-          tokens: { $sum: tokensExpr },
-        }},
-        { $sort: { requests: -1 } },
-      ], { maxTimeMS: 8000 }).toArray(),
-    ]);
-
-    const totalTokensAgg = modelAgg.reduce((s: number, r: any) => s + Number(r.tokens || 0), 0);
-    const totalRequests = modelAgg.reduce((s: number, r: any) => s + Number(r.requests || 0), 0);
-
-    const modelUsage = modelAgg.map((r: any) => {
-      const tok = Number(r.tokens || 0);
-      return {
-        model_name: r._id || "unknown",
-        requests: Number(r.requests || 0),
-        tokens: tok,
-        percentage: totalTokensAgg > 0 ? ((tok / totalTokensAgg) * 100).toFixed(1) : "0.0",
-      };
-    });
-
-    // Build top users
-    const userKeyMap: Record<string, number> = {};
-    for (const k of keys) {
-      if (k.email) userKeyMap[k.email] = (userKeyMap[k.email] || 0) + 1;
-    }
-    const emailUsageMap: Record<string, { requests: number; tokens: number }> = {};
-    for (const row of usageByEmail) {
-      if (row._id) emailUsageMap[row._id] = { requests: Number(row.requests || 0), tokens: Number(row.tokens || 0) };
-    }
-    const topUsers = users
-      .filter((u: any) => u.email)
-      .map((u: any) => {
-        const usage = emailUsageMap[u.email] || { requests: 0, tokens: 0 };
-        return { email: u.email, role: u.role || "user", requests: usage.requests, tokens: usage.tokens, keys: userKeyMap[u.email] || 0 };
-      })
-      .filter((u: any) => u.keys > 0 || u.requests > 0)
-      .sort((a: any, b: any) => (b.requests - a.requests) || (b.keys - a.keys));
-
-    return Response.json({ totalUsers: users.length, activeKeys: keys.length, totalRequests, totalTokens: totalTokensAgg, modelUsage, topUsers });
-  } catch (err) {
-    console.error("global-stats error:", (err as Error).message);
-    return Response.json({ error: "Failed to fetch global stats" }, { status: 500 });
-  }
-}
 
 // GET /api/stats/user — requireUser (not guest)
 async function userStatsHandler(req: Request) {
@@ -321,7 +252,6 @@ async function groupItemsHandler(req: Request) {
 }
 
 export const statsRoutes = {
-  "/api/stats/global":          { GET: globalStatsHandler },
   "/api/stats/user":            { GET: userStatsHandler },
   "/api/stats/requests":        { GET: groupedRequestsHandler },
   "/api/stats/requests/items":  { GET: groupItemsHandler },

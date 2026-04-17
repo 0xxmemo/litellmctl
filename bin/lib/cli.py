@@ -202,8 +202,6 @@ def wizard() -> None:
 
 @app.command()
 def install(
-    with_db: bool = typer.Option(False, "--with-db", help="Enable DB setup"),
-    without_db: bool = typer.Option(False, "--without-db", help="Skip DB setup"),
     with_embedding: bool = typer.Option(False, "--with-embedding"),
     without_embedding: bool = typer.Option(False, "--without-embedding"),
     with_transcription: bool = typer.Option(False, "--with-transcription"),
@@ -228,7 +226,6 @@ def install(
             return "no"
         return ""
 
-    db_mode = _mode(with_db, without_db)
     embed_mode = _mode(with_embedding, without_embedding)
     transcr_mode = _mode(with_transcription, without_transcription)
 
@@ -241,7 +238,6 @@ def install(
 
     try:
         cmd_install(
-            db_mode=db_mode,
             embed_mode=embed_mode,
             transcr_mode=transcr_mode,
             searxng_mode=_mode(with_searxng, without_searxng),
@@ -359,7 +355,7 @@ def gateway_api_cmd(ctx: typer.Context) -> None:
 
     Examples:
         gateway api health
-        gateway api stats global
+        gateway api stats requests
         gateway api admin users
         gateway api keys delete abc123
         gateway api search q=hello
@@ -426,7 +422,7 @@ def _show_help() -> None:
 
 [bold]Commands:[/]
   wizard               Interactive config.yaml generator (providers, tiers, fallbacks)
-  install [options]     Install / rebuild LiteLLM (prompts for DB + local server setup)
+  install [options]     Install / rebuild LiteLLM (local servers, gateway, etc.)
   init-env             Detect auth files and update .env with correct paths
   auth chatgpt         Login to ChatGPT / Codex (browser PKCE)
   auth gemini          Login to Gemini CLI (browser PKCE)
@@ -448,7 +444,7 @@ def _show_help() -> None:
                        Manage LLM API Gateway UI (web dashboard)
   gateway routes       List all API endpoints (parsed from source)
   gateway api health   Call gateway endpoints using human commands
-  gateway api stats global
+  gateway api stats requests
   gateway api admin approve email=user@example.com
   gateway api keys delete <id>
   protonmail [start|stop|restart|status|auth]

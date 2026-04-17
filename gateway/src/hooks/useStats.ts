@@ -3,23 +3,6 @@ import { queryKeys } from '@/lib/query-keys'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
-export interface GlobalStats {
-  totalRequests: number | null
-  totalTokens: number | null
-  totalUsers: number
-  activeKeys: number
-  modelUsage: Array<{
-    model_name: string
-    provider?: string
-    health?: string
-    mode?: string
-    requests: number | null
-    tokens: number | null
-    percentage: string | null
-  }>
-  topUsers: Array<{ email: string; role: string; requests: number; tokens: number; keys: number }>
-}
-
 export interface UserStats {
   requests: number
   tokens: number
@@ -38,15 +21,6 @@ export interface UserStats {
 }
 
 // ── Fetch helpers (internal) ─────────────────────────────────────────────────
-
-async function fetchGlobalStats(): Promise<GlobalStats> {
-  const r = await fetch('/api/stats/global', { credentials: 'include' })
-  if (r.status === 429) throw Object.assign(new Error('Rate limited'), { status: 429 })
-  if (!r.ok) throw new Error(`HTTP ${r.status}`)
-  const data = await r.json()
-  if (data.error) throw new Error(data.error)
-  return data
-}
 
 async function fetchUserStats(): Promise<UserStats> {
   const res = await fetch('/api/stats/user', {
@@ -67,32 +41,6 @@ async function fetchUserStats(): Promise<UserStats> {
 }
 
 // ── Hooks ────────────────────────────────────────────────────────────────────
-
-export function useGlobalStats(options?: { staleTime?: number; enabled?: boolean }) {
-  const queryClient = useQueryClient()
-  const query = useQuery({
-    queryKey: queryKeys.globalStats,
-    queryFn: fetchGlobalStats,
-    enabled: options?.enabled,
-    staleTime: options?.staleTime ?? 30_000,
-    refetchInterval: 60_000,
-    refetchIntervalInBackground: false,
-  })
-
-  const refresh = async () => {
-    await queryClient.invalidateQueries({ queryKey: queryKeys.globalStats })
-  }
-
-  return {
-    ...query,
-    globalStats: query.data ?? null,
-    globalStatsLoading: query.isLoading,
-    globalStatsError: query.error ? (query.error instanceof Error ? query.error.message : 'Error') : null,
-    globalStatsUpdatedAt: query.dataUpdatedAt || null,
-    globalStatsSpinning: query.isFetching && !query.isLoading,
-    refreshGlobalStats: refresh,
-  }
-}
 
 export function useUserStats(options?: { refetchInterval?: number | false; staleTime?: number; enabled?: boolean }) {
   const queryClient = useQueryClient()
@@ -127,6 +75,5 @@ export function useUserStatsAnalytics() {
   })
 }
 
-export type UseGlobalStatsReturn = ReturnType<typeof useGlobalStats>
 export type UseUserStatsReturn = ReturnType<typeof useUserStats>
 export type UseUserStatsAnalyticsReturn = ReturnType<typeof useUserStatsAnalytics>
