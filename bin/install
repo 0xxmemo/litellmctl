@@ -34,20 +34,20 @@ run_with_timeout() {
 
 # Check for local uncommitted changes, untracked files, or unpushed commits.
 #
-# Do NOT treat "submodule HEAD != parent-recorded gitlink" as dirty: after
-# `git pull` in the parent repo, the submodule pointer updates but the working
-# tree is still on the old commit until `submodule update` runs. That is normal
-# staleness, not user edits — flagging it caused a false "[L]ocal / [S]tash…"
-# prompt on every install after upstream bumps the litellm submodule.
+# Submodule drift (both directions):
+# - In the **child** submodule: HEAD != parent's gitlink (fixed by submodule update).
+# - In the **parent** repo: `git diff` shows `litellm | 2 +-` when the submodule
+#   checkout does not match the parent's index/HEAD — even when `litellm/` is
+#   clean inside. That is not user edits; use `--ignore-submodules=all` on diffs.
 # Submodule checkout is aligned by sync_repo → submodule update, then
 # normalize_submodule_ref.
 has_local_changes() {
   local dir="$1"
   [ -d "$dir/.git" ] || [ -f "$dir/.git" ] || return 1
-  # Staged changes
-  ! git -C "$dir" diff --cached --quiet 2>/dev/null && return 0
+  # Staged changes (ignore submodule gitlink-only noise in parent repo)
+  ! git -C "$dir" diff --cached --ignore-submodules=all --quiet 2>/dev/null && return 0
   # Unstaged changes
-  ! git -C "$dir" diff --quiet 2>/dev/null && return 0
+  ! git -C "$dir" diff --ignore-submodules=all --quiet 2>/dev/null && return 0
   # Untracked files
   [ -n "$(git -C "$dir" ls-files --others --exclude-standard 2>/dev/null)" ] && return 0
   # Unpushed commits (parent repo only; submodules follow parent-pinned SHA)
