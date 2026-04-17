@@ -111,11 +111,13 @@ async function sessionMeHandler(req: Request) {
   if (!sessionToken) return Response.json({ authenticated: false });
   const session = await verifySession(sessionToken);
   if (!session) return Response.json({ authenticated: false });
-  const user = await loadUser(session.email);
+  const sessionEmail = typeof session.email === "string" ? session.email : null;
+  if (!sessionEmail) return Response.json({ authenticated: false });
+  const user = await loadUser(sessionEmail);
   if (!user) return Response.json({ authenticated: false });
   return Response.json({
     authenticated: true,
-    user: { email: session.email, role: user.role, name: user.name, company: user.company },
+    user: { email: sessionEmail, role: user.role, name: user.name, company: user.company },
   });
 }
 

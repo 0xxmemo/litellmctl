@@ -81,6 +81,7 @@ function trackFromJson(
   clone
     .json()
     .then(async (data) => {
+      if (data === null || typeof data !== "object") return;
       const usage = data.usage;
       if (!usage) return;
       let actualModel = data.model || requestedModel || "unknown";
@@ -123,6 +124,7 @@ function trackFromSSE(
         if (!line.startsWith("data: ")) continue;
         try {
           const evt = JSON.parse(line.slice(6));
+          if (evt == null || typeof evt !== "object") continue;
           if (evt.usage) {
             usage = evt.usage;
             model = model || evt.model;
@@ -188,13 +190,15 @@ async function proxyHandler(req: Request) {
   try {
     const text = new TextDecoder().decode(body);
     const json = JSON.parse(text);
-    requestedModel = json.model || null;
+    if (json !== null && typeof json === "object" && !Array.isArray(json)) {
+      requestedModel = typeof json.model === "string" ? json.model : null;
 
-    if (requestedModel) {
-      const overrides = await getUserModelOverrides(auth.email);
-      if (overrides[requestedModel]) {
-        json.model = overrides[requestedModel];
-        body = new TextEncoder().encode(JSON.stringify(json)).buffer;
+      if (requestedModel) {
+        const overrides = await getUserModelOverrides(auth.email);
+        if (overrides[requestedModel]) {
+          json.model = overrides[requestedModel];
+          body = new TextEncoder().encode(JSON.stringify(json)).buffer;
+        }
       }
     }
   } catch {}

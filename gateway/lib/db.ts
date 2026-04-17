@@ -58,6 +58,7 @@ export const userProfileCache = new Map<string, { user: any; timestamp: number }
 export const apiKeyCache = new Map<string, { keyRecord: any; timestamp: number }>();
 
 export async function loadUser(email: string) {
+  if (email == null || typeof email !== "string") return null;
   const normalized = email.toLowerCase();
   const cached = userProfileCache.get(normalized);
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
@@ -144,7 +145,9 @@ export async function getAuthenticatedUser(req: Request): Promise<{ email: strin
   if (!sessionToken) return null;
   const session = await verifySession(sessionToken);
   if (!session) return null;
-  return await loadUser(session.email);
+  const sessionEmail = (session as { email?: unknown }).email;
+  if (typeof sessionEmail !== "string" || !sessionEmail) return null;
+  return await loadUser(sessionEmail);
 }
 
 // ── Standardized role gates ─────────────────────────────────────────────────
