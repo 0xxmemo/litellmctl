@@ -258,21 +258,14 @@ def install_transcription() -> None:
             os.environ["PATH"] = f"{os.path.expanduser('~/.local/bin')}:{os.path.expanduser('~/.cargo/bin')}:{os.environ.get('PATH', '')}"
 
         if shutil.which("uv"):
-            # Try speaches first (newer, actively maintained), fall back to faster-whisper-server
-            for pkg in ("speaches", "faster-whisper-server"):
-                info(f"Installing {pkg} (transcription server) ...")
-                ret = subprocess.call(["uv", "tool", "install", pkg])
-                if ret == 0:
-                    if pkg == "faster-whisper-server":
-                        _fws_patch_pyproject()
-                    elif pkg == "speaches":
-                        _speaches_patch_pyproject()
-                    transcr_bin = _find_transcription_bin()
-                    if transcr_bin:
-                        break
-                    warn(f"{pkg} install failed")
-                else:
-                    warn(f"{pkg} install failed")
+            # Single supported stack: speaches (actively maintained OpenAI-compatible server)
+            info("Installing speaches (transcription server) ...")
+            ret = subprocess.call(["uv", "tool", "install", "speaches"])
+            if ret == 0:
+                _speaches_patch_pyproject()
+                transcr_bin = _find_transcription_bin()
+            if not transcr_bin:
+                warn("speaches install failed or no working binary — see https://github.com/speaches-ai/speaches")
         elif shutil.which("docker"):
             info("Starting transcription server via Docker ...")
             subprocess.call([

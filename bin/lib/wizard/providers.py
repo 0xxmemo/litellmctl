@@ -167,7 +167,7 @@ def check_provider_ready(pid: str, prov: dict, env: dict,
             if embed_ok:
                 return True, (
                     f"Ollama OK ({embed_base}); transcription offline ({transcr_base}) "
-                    "— embeddings will work; run litellmctl local setup for whisper"
+                    "— embeddings will work; run litellmctl install --with-transcription for speaches"
                 ) + search_hint
             if transcr_ok:
                 return True, (
@@ -198,7 +198,7 @@ def check_provider_ready(pid: str, prov: dict, env: dict,
             if prov.get("role") == "supplemental":
                 return True, (
                     f"transcription not detected ({transcr_base}) — transcription entries will still be written; "
-                    "start faster-whisper-server before calling the API"
+                    "start speaches before calling the API"
                 ) + search_hint
             return False, (
                 f"transcription offline ({transcr_base}) — run: litellmctl local setup"

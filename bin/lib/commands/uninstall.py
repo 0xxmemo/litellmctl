@@ -104,7 +104,7 @@ def _uninstall_transcription() -> None:
 UNINSTALL_TARGETS = [
     ("service", "Stop and remove proxy service"),
     ("embedding", "Ollama stop/uninstall guide"),
-    ("transcription", "faster-whisper-server stop/uninstall guide"),
+    ("transcription", "speaches stop/uninstall guide"),
     ("searxng", "SearXNG search server stop/remove"),
     ("gateway", "Gateway UI stop/remove guide"),
     ("protonmail", "ProtonMail bridge (hydroxide) stop/uninstall guide"),

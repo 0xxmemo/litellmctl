@@ -116,7 +116,7 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
     'service:Stop and remove the proxy service'
     'db:Remove database config from .env'
     'embedding:Show Ollama stop and uninstall commands'
-    'transcription:Show faster-whisper-server stop and uninstall commands'
+    'transcription:Show speaches stop and uninstall commands'
     'searxng:Show SearXNG search server stop and remove commands'
     'gateway:Show gateway UI stop and uninstall commands'
     'protonmail:Show ProtonMail bridge (hydroxide) stop and uninstall commands'

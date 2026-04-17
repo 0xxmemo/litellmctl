@@ -187,7 +187,7 @@ def _embedding_stop() -> None:
         info("Ollama stopped")
 
 
-# Transcription (faster-whisper / speaches)
+# Transcription (speaches; legacy faster-whisper-server still detected if installed)
 def _transcription_installed() -> bool:
     from ..commands.local import _find_transcription_bin
     return bool(_find_transcription_bin())

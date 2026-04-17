@@ -308,8 +308,28 @@ def help() -> None:
 
 
 # Gateway subcommands
-# Note: start/stop/restart are handled by the generic feature dispatch
-# (litellmctl start gateway, litellmctl stop gateway, etc.)
+# start/stop/restart also exist here (same as litellmctl start gateway, etc.)
+
+@gateway_app.command("start")
+def gateway_start_cmd() -> None:
+    """Start the gateway UI server."""
+    from .commands.gateway import cmd_gateway
+    cmd_gateway("start")
+
+
+@gateway_app.command("stop")
+def gateway_stop_cmd() -> None:
+    """Stop the gateway UI server."""
+    from .commands.gateway import cmd_gateway
+    cmd_gateway("stop")
+
+
+@gateway_app.command("restart")
+def gateway_restart_cmd() -> None:
+    """Rebuild (if needed) and restart the gateway UI server."""
+    from .commands.gateway import cmd_gateway
+    cmd_gateway("restart")
+
 
 @gateway_app.command("status")
 def gateway_status_cmd() -> None:

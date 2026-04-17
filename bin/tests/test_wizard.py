@@ -238,7 +238,11 @@ class TestCheckProviderReadyLocal:
         monkeypatch.setattr(
             p,
             "probe_local_services",
-            lambda _env: (True, False, "http://127.0.0.1:11434", "http://127.0.0.1:10300/v1"),
+            lambda _env: (
+                True, False, False,
+                "http://127.0.0.1:11434", "http://127.0.0.1:10300/v1",
+                "http://localhost:8888",
+            ),
         )
         prov = {
             "auth": "none",
@@ -255,7 +259,11 @@ class TestCheckProviderReadyLocal:
         monkeypatch.setattr(
             p,
             "probe_local_services",
-            lambda _env: (False, False, "http://127.0.0.1:11434", "http://127.0.0.1:10300/v1"),
+            lambda _env: (
+                False, False, False,
+                "http://127.0.0.1:11434", "http://127.0.0.1:10300/v1",
+                "http://localhost:8888",
+            ),
         )
         prov = {
             "auth": "none",
@@ -272,7 +280,11 @@ class TestCheckProviderReadyLocal:
         monkeypatch.setattr(
             p,
             "probe_local_services",
-            lambda _env: (False, False, "http://127.0.0.1:11434", "http://127.0.0.1:10300/v1"),
+            lambda _env: (
+                False, False, False,
+                "http://127.0.0.1:11434", "http://127.0.0.1:10300/v1",
+                "http://localhost:8888",
+            ),
         )
         prov = {
             "auth": "none",
