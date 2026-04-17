@@ -120,6 +120,19 @@ litellmctl uninstall [target]     Remove components
 
 Targets: `service`, `embedding`, `transcription`, `searxng`, `gateway`, `protonmail`
 
+#### Legacy PostgreSQL cleanup (migration)
+
+If you installed when `litellmctl` set up PostgreSQL (or you still have `DATABASE_URL` / related keys in `.env`), run this once to **stop the proxy service** and **strip DB-related environment variables** from `.env`. It does not drop PostgreSQL databases.
+
+Works on **macOS** (LaunchAgent `com.litellm.proxy`) and **Linux** (systemd user unit `litellm-proxy`), and cleans **nohup** + `.proxy.pid` if used.
+
+```bash
+~/.litellm/bin/uninstall-legacy-db
+# Custom install path:  LITELLM_HOME=/path/to/.litellm ~/.litellm/bin/uninstall-legacy-db
+```
+
+Then start the proxy again: `litellmctl start`.
+
 ## Features
 
 ### Web Gateway
