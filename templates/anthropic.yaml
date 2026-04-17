@@ -9,8 +9,8 @@ models:
   - model_name: anthropic/claude-haiku-4-5
     model: anthropic/claude-haiku-4-5
     api_key: os.environ/ANTHROPIC_API_KEY
-  - model_name: anthropic/claude-opus-4-6
-    model: anthropic/claude-opus-4-6
+  - model_name: anthropic/claude-opus-4-7
+    model: anthropic/claude-opus-4-7
     api_key: os.environ/ANTHROPIC_API_KEY
   - model_name: anthropic/claude-sonnet-4-6
     model: anthropic/claude-sonnet-4-6
