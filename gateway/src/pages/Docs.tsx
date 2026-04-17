@@ -170,44 +170,6 @@ curl ${baseUrl}/v1/audio/transcriptions \\
         "Includes a sample 1-second 440Hz test tone MP3 (base64). Replace the file value with your own audio. Available models: local/whisper, local/whisper-large-v3, local/whisper-large-v3-turbo, local/distil-whisper-large-v3.",
     },
     {
-      method: "POST",
-      path: "/v1/audio/speech",
-      description:
-        "Text-to-speech — requires a TTS model configured in /v1/models",
-      requiresAuth: true,
-      curlExample: `curl ${baseUrl}/v1/audio/speech \\
-  -H "Authorization: Bearer YOUR_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "model": "tts-1",
-    "input": "Hello, world!",
-    "voice": "alloy"
-  }' \\
-  --output speech.mp3`,
-      bodyNote:
-        'Endpoint is live. Replace "tts-1" with a TTS model alias from /v1/models. No TTS models are currently configured by default.',
-    },
-    {
-      method: "GET",
-      path: "/v1/balance",
-      description: "Check your API key balance and metadata",
-      requiresAuth: true,
-      curlExample: `curl ${baseUrl}/v1/balance \\
-  -H "Authorization: Bearer YOUR_API_KEY"`,
-      bodyNote:
-        "GET request — no body needed. Returns your current API key metadata and balance.",
-    },
-    {
-      method: "GET",
-      path: "/v1/usage",
-      description: "Retrieve usage statistics for your API key",
-      requiresAuth: true,
-      curlExample: `curl ${baseUrl}/v1/usage \\
-  -H "Authorization: Bearer YOUR_API_KEY"`,
-      bodyNote:
-        "GET request — no body needed. Returns request and token usage details.",
-    },
-    {
       method: "GET",
       path: "/api/health",
       description:
