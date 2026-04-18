@@ -20,6 +20,16 @@ import { healthRoutes } from "./routes/health";
 import { setupRoutes } from "./routes/setup";
 import { skillsRoutes } from "./routes/skills";
 
+// Last-resort handlers — any throw that escapes a request handler, an
+// interval callback, or a detached promise lands here. We log and keep the
+// process alive; Bun's per-request error() still runs for handler throws.
+process.on("uncaughtException", (err) => {
+  console.error("[gateway][uncaughtException]", err);
+});
+process.on("unhandledRejection", (reason) => {
+  console.error("[gateway][unhandledRejection]", reason);
+});
+
 // ============================================================================
 // CONFIGURATION
 // ============================================================================
@@ -81,17 +91,22 @@ const routeManifest = buildRouteManifest();
 // ============================================================================
 
 setInterval(() => {
-  flushUsageQueue().catch(() => {});
+  flushUsageQueue().catch((err) =>
+    console.error("[gateway][flushUsageQueue]", err),
+  );
 }, 2000).unref();
 
-// Cleanup rate limit maps periodically
 setInterval(() => {
-  const now = Date.now();
-  for (const [ip, record] of rateLimitMap.entries()) {
-    if (now - record.startTime > 3600000) rateLimitMap.delete(ip);
-  }
-  for (const [email, record] of otpRateLimitMap.entries()) {
-    if (now - record.startTime > 3600000) otpRateLimitMap.delete(email);
+  try {
+    const now = Date.now();
+    for (const [ip, record] of rateLimitMap.entries()) {
+      if (now - record.startTime > 3600000) rateLimitMap.delete(ip);
+    }
+    for (const [email, record] of otpRateLimitMap.entries()) {
+      if (now - record.startTime > 3600000) otpRateLimitMap.delete(email);
+    }
+  } catch (err) {
+    console.error("[gateway][rateLimitCleanup]", err);
   }
 }, 60000).unref();
 
