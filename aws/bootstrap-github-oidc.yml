@@ -26,11 +26,24 @@ Parameters:
     Default: litellm-gateway
     Description: Must match the AppName in cloudformation.yml.
 
+  ExistingOidcProviderArn:
+    Type: String
+    Default: ""
+    Description: >
+      ARN of an existing `token.actions.githubusercontent.com` OIDC provider
+      in this AWS account. Leave blank to create a new one. The deploy.sh
+      onboarding script detects this automatically.
+
+Conditions:
+  CreateOidcProvider: !Equals [!Ref ExistingOidcProviderArn, ""]
+
 Resources:
   # OIDC provider (shared across any GHA role in this account).
-  # If you already have one, set `CreateOidcProvider: false` and reuse it.
+  # Only created if ExistingOidcProviderArn is blank — AWS only allows one
+  # provider per issuer URL per account.
   GithubOidcProvider:
     Type: AWS::IAM::OIDCProvider
+    Condition: CreateOidcProvider
     DeletionPolicy: Retain
     Properties:
       Url: https://token.actions.githubusercontent.com
@@ -47,7 +60,11 @@ Resources:
         Version: "2012-10-17"
         Statement:
           - Effect: Allow
-            Principal: { Federated: !Ref GithubOidcProvider }
+            Principal:
+              Federated: !If
+                - CreateOidcProvider
+                - !Ref GithubOidcProvider
+                - !Ref ExistingOidcProviderArn
             Action: sts:AssumeRoleWithWebIdentity
             Condition:
               StringEquals:

@@ -299,6 +299,15 @@ def setup_completions() -> None:
     cmd_setup_completions()
 
 
+@app.command()
+def deploy(
+    target: str = typer.Argument("aws", help="Deploy target (aws)"),
+) -> None:
+    """Interactive one-shot onboarding for a container target (AWS EC2 today)."""
+    from .commands.deploy import cmd_deploy
+    cmd_deploy(target)
+
+
 @app.command(hidden=True)
 def help() -> None:
     """Show help."""
@@ -458,6 +467,7 @@ def _show_help() -> None:
   proxy [--port N]              Start proxy in foreground (for debugging)
   local [status]                Check local inference server reachability
   toggle-claude                 Toggle Claude Code between direct API and proxy
+  deploy [target]               One-shot AWS onboarding + deploy (target: aws)
   setup-completions             Add litellmctl to your shell
   help                          Show this help
 

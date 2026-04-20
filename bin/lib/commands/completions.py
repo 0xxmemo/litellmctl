@@ -15,7 +15,7 @@ _TOP_COMMANDS = (
     "auth "
     "start stop restart status logs proxy local "
     "users set-role routes api migrate-from-mongo "
-    "toggle-claude setup-completions help"
+    "toggle-claude deploy setup-completions help"
 )
 _FEATURES = "proxy gateway searxng protonmail embedding transcription"
 _STATUS_TARGETS = "proxy gateway searxng protonmail embedding transcription auth"
@@ -23,6 +23,7 @@ _LOGS_TARGETS = "proxy gateway protonmail searxng"
 _AUTH_PROVIDERS = "chatgpt gemini qwen kimi protonmail"
 _AUTH_COMMANDS = f"{_AUTH_PROVIDERS} refresh export import status providers"
 _UNINSTALL_TARGETS = "service embedding transcription searxng gateway protonmail"
+_DEPLOY_TARGETS = "aws"
 _ROLES = "guest user admin"
 _INSTALL_FLAGS = (
     "--with-local --without-local "
@@ -105,6 +106,9 @@ print(' '.join(_completable_segments([s for s in '''$segs'''.split() if s])))" 2
     migrate-from-mongo)
       COMPREPLY=( $(compgen -W "--mongo-uri --force" -- "$cur") )
       return ;;
+    deploy)
+      COMPREPLY=( $(compgen -W "__DEPLOY_TARGETS__" -- "$cur") )
+      return ;;
   esac
 
   # `set-role <email> <role>` — role completion (third word)
@@ -137,6 +141,7 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
     'api:Call a gateway API endpoint (bypasses auth)'
     'migrate-from-mongo:One-shot migration from legacy MongoDB to SQLite'
     'toggle-claude:Toggle Claude Code between direct API and proxy'
+    'deploy:One-shot AWS onboarding + deploy'
     'setup-completions:Add litellmctl to your shell'
     'help:Show help'
   )
@@ -173,6 +178,7 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
       proxy)          compadd -- --port --config ;;
       install)        compadd -- __INSTALL_FLAGS__ ;;
       migrate-from-mongo) compadd -- --mongo-uri --force ;;
+      deploy)         compadd __DEPLOY_TARGETS__ ;;
       api)
         local -a segs
         segs=(${(f)"$(python3 -c "
@@ -217,6 +223,7 @@ def _substitute(template: str) -> str:
         .replace("__AUTH_COMMANDS__", _AUTH_COMMANDS)
         .replace("__AUTH_PROVIDERS__", _AUTH_PROVIDERS)
         .replace("__UNINSTALL_TARGETS__", _UNINSTALL_TARGETS)
+        .replace("__DEPLOY_TARGETS__", _DEPLOY_TARGETS)
         .replace("__ROLES__", _ROLES)
         .replace("__INSTALL_FLAGS__", _INSTALL_FLAGS)
     )

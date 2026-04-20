@@ -19,60 +19,38 @@ No Fargate, no ALB, no NAT gateway — exactly one instance.
 2. **AWS CLI installed locally** and logged in: `brew install awscli && aws configure` (or the equivalent on Linux). You need this exactly once — after this doc, everything runs from GitHub Actions.
 3. **A GitHub fork** of this repo.
 
-## Step 1 — Bootstrap the GitHub OIDC deploy role (one-time, 1 min)
-
-This creates the IAM role that GitHub Actions assumes to deploy on your behalf. You never need long-lived AWS keys in GitHub.
+## One-command onboarding
 
 ```bash
-# Replace these two values:
-GITHUB_ORG=your-org-or-username
-GITHUB_REPO=litellmctl
-
-aws cloudformation deploy \
-  --stack-name litellm-gateway-oidc \
-  --template-file aws/bootstrap-github-oidc.yml \
-  --capabilities CAPABILITY_NAMED_IAM \
-  --parameter-overrides \
-    GithubOrg="${GITHUB_ORG}" \
-    GithubRepo="${GITHUB_REPO}"
+litellmctl deploy aws
 ```
 
-When it finishes, grab the role ARN:
+`litellmctl` walks you through the whole setup interactively:
 
-```bash
-aws cloudformation describe-stacks \
-  --stack-name litellm-gateway-oidc \
-  --query 'Stacks[0].Outputs[?OutputKey==`RoleArn`].OutputValue' \
-  --output text
-```
+1. Verifies the `aws` + `gh` CLIs are installed and authenticated (prompts you to log in if not).
+2. Auto-discovers your GitHub org/repo from the git remote and your email from `git config`.
+3. Prompts for region, stack name, admin emails, allowed branches — each with a sensible default you can accept with `Enter`.
+4. Detects any pre-existing GitHub OIDC provider in the account and reuses it (AWS only allows one per issuer URL).
+5. Deploys the OIDC CloudFormation stack, grabs the role ARN.
+6. Generates a `LITELLM_MASTER_KEY` if one isn't already set on the repo.
+7. Pushes all five secrets to the repo via `gh secret set`.
+8. Offers to dispatch the `deploy` workflow and tail it with `gh run watch`.
 
-Copy that ARN — you'll paste it into GitHub next.
+Safe to re-run — every step is idempotent.
 
-## Step 2 — Add five GitHub secrets (2 min)
+### What's under the hood
 
-Open your repo → **Settings → Secrets and variables → Actions → New repository secret**, and add these five:
+If you prefer to do it by hand (or need to script around it), the five secrets are:
 
-| Name                      | Value                                                     | Where it comes from                                    |
-|---------------------------|-----------------------------------------------------------|--------------------------------------------------------|
-| `AWS_DEPLOY_ROLE_ARN`     | The ARN from Step 1                                       | Output of the bootstrap stack.                         |
-| `AWS_REGION`              | e.g. `us-east-1`                                          | Pick one close to you.                                 |
-| `APP_NAME`                | `litellm-gateway`                                         | Keep default unless you deploy multiple instances.      |
-| `LITELLM_MASTER_KEY`      | `sk-$(openssl rand -hex 24)` — generate yourself          | Long random string. You don't need to remember it.     |
-| `GATEWAY_ADMIN_EMAILS`    | `you@example.com`                                         | Comma-separated. Only these emails can log in as admin. |
+| Name                   | Source                                                      |
+|------------------------|-------------------------------------------------------------|
+| `AWS_DEPLOY_ROLE_ARN`  | Output of `aws/bootstrap-github-oidc.yml`                   |
+| `AWS_REGION`           | Any region — `us-east-1` is the default                     |
+| `APP_NAME`             | Stack name; default `litellm-gateway`                       |
+| `LITELLM_MASTER_KEY`   | `sk-$(openssl rand -hex 24)`                                |
+| `GATEWAY_ADMIN_EMAILS` | Comma-separated list of admin-role emails                   |
 
-Generate the master key:
-
-```bash
-echo "sk-$(openssl rand -hex 24)"
-```
-
-## Step 3 — Push to main (0 min)
-
-```bash
-git push origin main
-```
-
-Watch the **Actions** tab. The `deploy` workflow:
+Then push to a whitelisted branch (`main` + whatever you supplied to `AllowedBranches`) and watch the **Actions** tab. The `deploy` workflow:
 
 1. Deploys the main CloudFormation stack (ECR repo, EC2 instance, EIP, security group, IAM role — all idempotent)
 2. Builds the ARM64 Docker image and pushes it to your ECR
@@ -81,7 +59,7 @@ Watch the **Actions** tab. The `deploy` workflow:
 
 First run takes ~8 min (EC2 launch + initial pull). Every subsequent deploy takes ~2 min.
 
-When it finishes, the workflow summary prints the public IP. Open `http://<public-ip>:14041` and log in with the email you set in `GATEWAY_ADMIN_EMAILS`.
+When the workflow finishes, its summary prints the public IP. Open `http://<public-ip>:14041` and log in with the email you set in `GATEWAY_ADMIN_EMAILS`.
 
 ## Step 4 — Add a domain + HTTPS (optional, 2 min)
 
