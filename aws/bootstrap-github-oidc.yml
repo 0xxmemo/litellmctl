@@ -47,6 +47,22 @@ Resources:
         - 6938fd4d98bab03faadb97b34396831e3780aea1
         - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
 
+  # ── ECR repo — long-lived image store ──────────────────────────────────
+  # Lives in the bootstrap stack (not the main stack) so recreating the
+  # main stack doesn't collide with a retained repo and so ECR images
+  # survive tear-downs of the EC2 infrastructure.
+  EcrRepo:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Ref AppName
+      ImageTagMutability: MUTABLE
+      ImageScanningConfiguration: { ScanOnPush: true }
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 10 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}
+
   DeployRole:
     Type: AWS::IAM::Role
     Properties:
@@ -105,6 +121,10 @@ Outputs:
   RoleArn:
     Description: "Paste this into GitHub secret AWS_DEPLOY_ROLE_ARN"
     Value: !GetAtt DeployRole.Arn
+  EcrRepositoryUri:
+    Description: "Docker image destination — consumed by the deploy workflow"
+    Value: !GetAtt EcrRepo.RepositoryUri
+    Export: { Name: !Sub "${AppName}-ecr-uri" }
   Instructions:
     Value: !Sub |
       Now set these GitHub Actions secrets on your repo:

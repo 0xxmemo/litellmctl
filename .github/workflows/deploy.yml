@@ -122,11 +122,15 @@ jobs:
       - name: Capture stack outputs
         id: stack
         run: |
-          out=$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" \
+          # ECR repo lives in the long-lived OIDC/bootstrap stack; everything
+          # else is in the main (recreatable) stack.
+          ecr_out=$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}-oidc" \
             --query 'Stacks[0].Outputs' --output json)
-          echo "ecr_uri=$(echo "$out" | jq -r '.[] | select(.OutputKey=="EcrRepositoryUri") | .OutputValue')" >> "$GITHUB_OUTPUT"
-          echo "instance_id=$(echo "$out" | jq -r '.[] | select(.OutputKey=="InstanceId") | .OutputValue')" >> "$GITHUB_OUTPUT"
-          echo "public_ip=$(echo "$out" | jq -r '.[] | select(.OutputKey=="PublicIp") | .OutputValue')" >> "$GITHUB_OUTPUT"
+          main_out=$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" \
+            --query 'Stacks[0].Outputs' --output json)
+          echo "ecr_uri=$(echo "$ecr_out" | jq -r '.[] | select(.OutputKey=="EcrRepositoryUri") | .OutputValue')" >> "$GITHUB_OUTPUT"
+          echo "instance_id=$(echo "$main_out" | jq -r '.[] | select(.OutputKey=="InstanceId") | .OutputValue')" >> "$GITHUB_OUTPUT"
+          echo "public_ip=$(echo "$main_out" | jq -r '.[] | select(.OutputKey=="PublicIp") | .OutputValue')" >> "$GITHUB_OUTPUT"
 
       # ── Build + push ARM64 image ──────────────────────────────────────────
       - name: Log in to ECR

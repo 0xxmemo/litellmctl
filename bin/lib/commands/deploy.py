@@ -437,8 +437,9 @@ def _aws_deploy() -> None:
     console.print(f"  [dim]First deploy takes ~8 min (EC2 launch + initial image pulls).[/]")
     console.print(f"  [dim]Auto deploy:  cut a release from `main` — `gh release create vX.Y.Z --generate-notes`[/]")
     console.print(f"  [dim]Manual:       gh workflow run deploy.yml -R {repo} -r <branch>  (any branch with the workflow file)[/]")
-    console.print(f"  [dim]Tear down:    aws cloudformation delete-stack --stack-name {app_name} --region {region}[/]")
-    console.print(f"  [dim]Tear OIDC:    aws cloudformation delete-stack --stack-name {oidc_stack} --region {region}[/]")
+    console.print(f"  [dim]Tear main:    aws cloudformation delete-stack --stack-name {app_name} --region {region}[/]")
+    console.print(f"  [dim]Tear OIDC:    aws cloudformation delete-stack --stack-name {oidc_stack} --region {region}  (also destroys ECR + images)[/]")
+    console.print(f"  [dim]              aws ecr delete-repository --repository-name {app_name} --region {region} --force  # needed if ECR isn't empty[/]")
 
 
 # ── Dispatcher ───────────────────────────────────────────────────────────────

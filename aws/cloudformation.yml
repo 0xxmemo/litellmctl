@@ -73,18 +73,9 @@ Conditions:
   HasSshKey: !Not [!Equals [!Ref SshKeyName, ""]]
 
 Resources:
-  # ── ECR repo — image target for the docker-build workflow ────────────────
-  EcrRepo:
-    Type: AWS::ECR::Repository
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      RepositoryName: !Ref AppName
-      ImageTagMutability: MUTABLE
-      ImageScanningConfiguration: { ScanOnPush: true }
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {"rules":[{"rulePriority":1,"description":"Keep last 10 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}
+  # Note: the ECR repo lives in the OIDC bootstrap stack (aws/bootstrap-github-oidc.yml)
+  # so it survives re-creates of THIS stack. Recreating the main stack on a
+  # retained ECR would hit "Resource already exists" here otherwise.
 
   # ── Security group: 80/443/14041 open; 22 conditional ────────────────────
   Sg:
@@ -232,9 +223,6 @@ Outputs:
   PublicIp:
     Description: "Connect to http://<PublicIp>:14041 initially, then configure Caddy."
     Value: !Ref Eip
-  EcrRepositoryUri:
-    Value: !GetAtt EcrRepo.RepositoryUri
-    Export: { Name: !Sub "${AppName}-ecr-uri" }
   InstanceId:
     Value: !Ref Instance
     Export: { Name: !Sub "${AppName}-instance-id" }
