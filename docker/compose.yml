@@ -34,6 +34,12 @@ services:
       LOCAL_EMBEDDING_API_BASE: http://ollama:11434
       LOCAL_TRANSCRIPTION_API_BASE: http://whisper:8000/v1
       SEARXNG_URL: http://searxng:8080
+      # Optional OTP email delivery via ProtonMail. Leave blank to make the
+      # gateway log OTPs to stdout instead (visible in `docker compose logs main`).
+      GATEWAY_PROTON_EMAIL: ${GATEWAY_PROTON_EMAIL:-}
+      GATEWAY_PROTON_USERNAME: ${GATEWAY_PROTON_USERNAME:-}
+      GATEWAY_PROTON_PASSWORD: ${GATEWAY_PROTON_PASSWORD:-}
+      GATEWAY_PROTON_2FA_SECRET: ${GATEWAY_PROTON_2FA_SECRET:-}
     volumes:
       - data:/data
     depends_on:

@@ -36,9 +36,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       git curl ca-certificates unzip xz-utils \
       build-essential pkg-config python3-dev \
       libsqlite3-dev libssl-dev libffi-dev \
+      golang-go \
  && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://bun.sh/install | bash -s "bun-v${BUN_VERSION}"
+
+# hydroxide (ProtonMail SMTP bridge) — built in the builder stage so the
+# runtime image doesn't carry the Go toolchain. The `litellmctl auth protonmail`
+# + `litellmctl start protonmail` automation in bin/lib/commands/protonmail.py
+# handles auth + bridge-start non-interactively using GATEWAY_PROTON_* env vars.
+RUN go install github.com/emersion/hydroxide/cmd/hydroxide@latest
 
 RUN python -m venv /opt/venv \
  && /opt/venv/bin/pip install --upgrade pip wheel setuptools
@@ -115,11 +122,14 @@ RUN curl -fsSL "https://github.com/caddyserver/caddy/releases/download/v${CADDY_
 # ── Copy build artifacts ─────────────────────────────────────────────────────
 COPY --from=builder /opt/venv /opt/venv
 COPY --from=builder /root/.bun /root/.bun
+COPY --from=builder /root/go/bin/hydroxide /usr/local/bin/hydroxide
 COPY --from=builder /app /app
 
-# Entrypoint (kept as a file for easy auditing/editing)
-COPY docker/entrypoint.sh /app/docker/entrypoint.sh
+# Entrypoint + helper scripts (kept as files for easy auditing/editing)
+COPY docker/entrypoint.sh       /app/docker/entrypoint.sh
+COPY docker/protonmail-setup.sh /app/docker/protonmail-setup.sh
 RUN chmod +x /app/docker/entrypoint.sh \
+             /app/docker/protonmail-setup.sh \
  && chmod +x /app/bin/litellmctl \
              /app/bin/gateway-launch.sh \
              /app/bin/litellm-proxy-launch.sh
@@ -131,12 +141,12 @@ RUN chmod +x /app/docker/entrypoint.sh \
 
 RUN <<'SH'
 set -eux
-for svc in litellm-proxy gateway caddy init-data; do
+for svc in litellm-proxy gateway caddy init-data protonmail-setup protonmail-smtp; do
   mkdir -p "/etc/s6-overlay/s6-rc.d/${svc}"
   mkdir -p "/etc/s6-overlay/s6-rc.d/${svc}/dependencies.d"
 done
 mkdir -p /etc/s6-overlay/s6-rc.d/user/contents.d
-for svc in litellm-proxy gateway caddy init-data; do
+for svc in litellm-proxy gateway caddy init-data protonmail-setup protonmail-smtp; do
   : > "/etc/s6-overlay/s6-rc.d/user/contents.d/${svc}"
 done
 
@@ -145,13 +155,28 @@ done
 echo oneshot > /etc/s6-overlay/s6-rc.d/init-data/type
 printf '/app/docker/entrypoint.sh\n' > /etc/s6-overlay/s6-rc.d/init-data/up
 
+# protonmail-setup — oneshot, authenticates hydroxide BEFORE the gateway
+# starts so GATEWAY_PROTON_BRIDGE_PASS is already in /data/.env when bun
+# reads it. No-op if GATEWAY_PROTON_PASSWORD isn't provided.
+echo oneshot > /etc/s6-overlay/s6-rc.d/protonmail-setup/type
+: > /etc/s6-overlay/s6-rc.d/protonmail-setup/dependencies.d/init-data
+printf '/app/docker/protonmail-setup.sh\n' > /etc/s6-overlay/s6-rc.d/protonmail-setup/up
+
+# protonmail-smtp — longrun, bridge itself. Sleeps (no-op) if hydroxide
+# wasn't authenticated (missing creds, auth failure, etc.) so s6 won't
+# thrash trying to restart a failing service.
+echo longrun > /etc/s6-overlay/s6-rc.d/protonmail-smtp/type
+: > /etc/s6-overlay/s6-rc.d/protonmail-smtp/dependencies.d/protonmail-setup
+
 # litellm-proxy — :4040, internal
 echo longrun > /etc/s6-overlay/s6-rc.d/litellm-proxy/type
 : > /etc/s6-overlay/s6-rc.d/litellm-proxy/dependencies.d/init-data
 
-# gateway — :14041, fronted by Caddy
+# gateway — :14041, fronted by Caddy. Depends on protonmail-setup so the
+# bridge password lands in /data/.env before bun opens it.
 echo longrun > /etc/s6-overlay/s6-rc.d/gateway/type
 : > /etc/s6-overlay/s6-rc.d/gateway/dependencies.d/litellm-proxy
+: > /etc/s6-overlay/s6-rc.d/gateway/dependencies.d/protonmail-setup
 
 # caddy — :80 + :443, reverse proxy to gateway
 echo longrun > /etc/s6-overlay/s6-rc.d/caddy/type
@@ -184,6 +209,26 @@ mkdir -p /data/caddy
 exec /usr/local/bin/caddy run --config /data/Caddyfile --adapter caddyfile
 RUN
 chmod +x /etc/s6-overlay/s6-rc.d/caddy/run
+
+cat > /etc/s6-overlay/s6-rc.d/protonmail-smtp/run <<'RUN'
+#!/command/with-contenv bash
+set -eu
+export PATH=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin
+
+# No creds + no prior auth state → nothing to run. `sleep infinity` keeps
+# the service "up" from s6's perspective so it isn't constantly retried.
+auth_dir="${HOME:-/root}/.config/hydroxide"
+if [ -z "${GATEWAY_PROTON_PASSWORD:-}" ] && { [ ! -d "$auth_dir" ] || [ -z "$(ls -A "$auth_dir" 2>/dev/null)" ]; }; then
+  echo "[protonmail-smtp] not configured — idle"
+  exec sleep infinity
+fi
+
+# Auth exists → start the bridge in the foreground. Binds to 127.0.0.1:1025
+# inside the main container; the gateway's nodemailer transporter reaches it
+# via localhost (same net namespace).
+exec /usr/local/bin/hydroxide smtp
+RUN
+chmod +x /etc/s6-overlay/s6-rc.d/protonmail-smtp/run
 SH
 
 # ── Shell profile for the admin console ─────────────────────────────────────

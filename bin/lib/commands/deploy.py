@@ -254,6 +254,25 @@ def _aws_deploy() -> None:
 
     admin_emails = ask("Admin email(s), comma-separated", default=git_email or "you@example.com")
 
+    # ── Optional: ProtonMail SMTP for OTP delivery ───────────────────────
+    # If skipped, the gateway logs OTP codes to stdout (readable via
+    # `docker compose logs main` or the admin web console). That's enough
+    # for the first admin login.
+    proton_email = proton_user = proton_pass = proton_totp = ""
+    if confirm("Wire ProtonMail SMTP for OTP emails? (say no to read OTPs from container logs instead)", default=False):
+        # Try to seed from /data/.env on the local machine if present.
+        env_file = PROJECT_DIR / ".env"
+        seeded: dict[str, str] = {}
+        if env_file.exists():
+            for line in env_file.read_text().splitlines():
+                if "=" in line and not line.strip().startswith("#"):
+                    k, _, v = line.partition("=")
+                    seeded[k.strip()] = v.strip()
+        proton_email = ask("GATEWAY_PROTON_EMAIL", default=seeded.get("GATEWAY_PROTON_EMAIL", ""))
+        proton_user  = ask("GATEWAY_PROTON_USERNAME", default=seeded.get("GATEWAY_PROTON_USERNAME", proton_email.split("@")[0] if "@" in proton_email else ""))
+        proton_pass  = ask("GATEWAY_PROTON_PASSWORD (account password)", default=seeded.get("GATEWAY_PROTON_PASSWORD", ""))
+        proton_totp  = ask("GATEWAY_PROTON_2FA_SECRET (TOTP seed, blank if no 2FA)", default=seeded.get("GATEWAY_PROTON_2FA_SECRET", ""))
+
     repo = f"{gh_org}/{gh_repo}"
     oidc_stack = f"{app_name}-oidc"
 
@@ -369,6 +388,17 @@ def _aws_deploy() -> None:
     if not reuse_key:
         set_secret("LITELLM_MASTER_KEY", master_key)
         console.print("  [dim]   master key saved only to GitHub secrets — store it yourself if you want a copy.[/]")
+
+    # Only overwrite Proton secrets if the user provided values. Empty string
+    # would clobber an existing secret — skip instead so re-runs don't wipe.
+    if proton_email:
+        set_secret("GATEWAY_PROTON_EMAIL", proton_email)
+    if proton_user:
+        set_secret("GATEWAY_PROTON_USERNAME", proton_user)
+    if proton_pass:
+        set_secret("GATEWAY_PROTON_PASSWORD", proton_pass)
+    if proton_totp:
+        set_secret("GATEWAY_PROTON_2FA_SECRET", proton_totp)
 
     # ── Trigger workflow ─────────────────────────────────────────────────
     # `workflow_dispatch` can target any branch that has the workflow file

@@ -148,6 +148,8 @@ The admin console is a full `bash -l` inside the container. `litellmctl` and
 | Log into a provider       | `litellmctl auth chatgpt` (or gemini, qwen, kimi)          |
 | Restart the proxy         | `litellmctl restart proxy`                                  |
 | Ask Claude Code for help  | `claude` (aliased to `claude --dangerously-skip-permissions`) |
+| Enable ProtonMail OTP     | `litellmctl auth protonmail && litellmctl start protonmail` (auto-auths when Proton secrets are set) |
+| Read an OTP from logs     | `docker compose -f /opt/litellm/compose.yml logs main --tail=100 \| grep -i 'OTP CODE'` |
 | Pull a new embedding model| `docker exec litellm-ollama ollama pull nomic-embed-text`   |
 | Tail logs                 | `litellmctl logs gateway`                                   |
 | Stop everything           | `docker compose -f /opt/litellm/compose.yml down`          |

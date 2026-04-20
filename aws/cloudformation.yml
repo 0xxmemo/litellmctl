@@ -53,6 +53,28 @@ Parameters:
       its requests to the proxy). Generate with `openssl rand -hex 24` and
       prefix with `sk-`. Leave blank to auto-generate on first boot.
 
+  # Optional: ProtonMail credentials for OTP email delivery via hydroxide SMTP
+  # bridge. If left blank, the gateway logs OTP codes to the container stdout —
+  # admins can read them with `docker compose logs main | grep -i 'otp code'`.
+  ProtonEmail:
+    Type: String
+    Default: ""
+    Description: "Optional — your ProtonMail address (used as From header)."
+  ProtonUsername:
+    Type: String
+    Default: ""
+    Description: "Optional — ProtonMail username (used for SMTP auth)."
+  ProtonPassword:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: "Optional — ProtonMail account password."
+  Proton2faSecret:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: "Optional — ProtonMail TOTP secret if 2FA is enabled."
+
   SshKeyName:
     Type: String
     Default: ""
@@ -205,6 +227,10 @@ Resources:
           LITELLM_DATA_DIR=/opt/litellm/data
           LITELLM_MASTER_KEY=${LitellmMasterKey}
           GATEWAY_ADMIN_EMAILS=${AdminEmails}
+          GATEWAY_PROTON_EMAIL=${ProtonEmail}
+          GATEWAY_PROTON_USERNAME=${ProtonUsername}
+          GATEWAY_PROTON_PASSWORD=${ProtonPassword}
+          GATEWAY_PROTON_2FA_SECRET=${Proton2faSecret}
           ENV
           chmod 600 .env
 
