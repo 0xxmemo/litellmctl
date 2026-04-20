@@ -830,6 +830,71 @@ def cmd_gateway(subcmd: str = "status") -> None:
             pass
     elif subcmd == "routes":
         gateway_routes()
+    elif subcmd == "migrate-from-mongo":
+        gateway_migrate_from_mongo()
     else:
         error(f"Unknown gateway subcommand: {subcmd}")
-        console.print("  Usage: litellmctl gateway [start|stop|restart|status|logs|routes|api]")
+        console.print(
+            "  Usage: litellmctl gateway "
+            "[start|stop|restart|status|logs|routes|api|migrate-from-mongo]"
+        )
+
+
+def gateway_migrate_from_mongo(mongo_uri: str | None = None, force: bool = False) -> None:
+    """One-shot migration of old MongoDB data into the new SQLite DB.
+
+    Temporarily installs the `mongodb` package, runs the migration script,
+    then prompts to remove it.
+    """
+    load_env()
+    gateway_dir = PROJECT_DIR / "gateway"
+    script = gateway_dir / "script" / "migrate-mongo-to-sqlite.ts"
+
+    if not script.exists():
+        error(f"Migration script not found at {script}")
+        return
+
+    uri = mongo_uri or os.environ.get("GATEWAY_MONGODB_URI")
+    if not uri:
+        error("GATEWAY_MONGODB_URI not set — pass --mongo-uri=... or set the env var")
+        return
+
+    _ensure_bun_path()
+    if not shutil.which("bun"):
+        error("bun not found — install with: curl -fsSL https://bun.sh/install | bash")
+        return
+
+    # Ensure mongodb package is available (removed as a runtime dep after refactor)
+    pkg_json = gateway_dir / "package.json"
+    has_mongo = False
+    try:
+        import json as _json
+        has_mongo = "mongodb" in _json.loads(pkg_json.read_text()).get("dependencies", {})
+    except Exception:
+        pass
+
+    if not has_mongo:
+        info("Installing mongodb package temporarily ...")
+        ret = subprocess.call(["bun", "add", "mongodb"], cwd=str(gateway_dir))
+        if ret != 0:
+            error("Failed to install mongodb package")
+            return
+
+    info(f"Migrating from {uri} → SQLite ...")
+    env = os.environ.copy()
+    env["GATEWAY_MONGODB_URI"] = uri
+    args = ["bun", "run", str(script)]
+    if force:
+        args.append("--force")
+    ret = subprocess.call(args, cwd=str(gateway_dir), env=env)
+
+    if not has_mongo:
+        info("Removing temporary mongodb package ...")
+        subprocess.call(["bun", "remove", "mongodb"], cwd=str(gateway_dir),
+                        stdout=subprocess.DEVNULL)
+
+    if ret == 0:
+        info("Migration finished successfully.")
+        info("Restart the gateway to pick up the new data: litellmctl gateway restart")
+    else:
+        error(f"Migration exited with code {ret}")
