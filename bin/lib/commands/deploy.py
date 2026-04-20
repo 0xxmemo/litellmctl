@@ -371,19 +371,36 @@ def _aws_deploy() -> None:
         console.print("  [dim]   master key saved only to GitHub secrets — store it yourself if you want a copy.[/]")
 
     # ── Trigger workflow ─────────────────────────────────────────────────
-    # Release-driven afterwards, but the first deploy needs a manual kick so
-    # the AWS resources exist before cutting any release.
+    # `workflow_dispatch` can target any branch that has the workflow file
+    # committed. Releases, by contrast, only auto-deploy when cut from `main`.
     info("Deploy workflow")
     console.print(
-        "  [dim]Subsequent deploys are triggered by publishing a GitHub Release on `main`.[/]"
+        "  [dim]Dispatch works on any branch — only auto-deploys from published releases[/]"
     )
     console.print(
-        "  [dim]This one-time dispatch bootstraps the EC2 instance + ECR repo.[/]"
+        "  [dim]are restricted to `main`. GitHub rejects dispatches against refs that[/]"
     )
-    run_branch = ask("Branch to deploy (for this one-time bootstrap)", default="main")
+    console.print(
+        "  [dim]don't have .github/workflows/deploy.yml yet (HTTP 422).[/]"
+    )
+    run_branch = ask("Branch to deploy", default=current_branch or "main")
 
     if confirm(f"Dispatch deploy.yml on {run_branch} now?", default=True):
-        _run(["gh", "workflow", "run", "deploy.yml", "-R", repo, "-r", run_branch])
+        dispatch = _run(
+            ["gh", "workflow", "run", "deploy.yml", "-R", repo, "-r", run_branch],
+            check=False, capture=True,
+        )
+        if dispatch.returncode != 0:
+            msg = (dispatch.stderr or dispatch.stdout or "").strip()
+            error(f"gh workflow run failed: {msg}")
+            if "workflow_dispatch" in msg or "HTTP 422" in msg:
+                console.print(
+                    f"  [dim]The `{run_branch}` ref on GitHub doesn't have .github/workflows/deploy.yml yet.[/]"
+                )
+                console.print("  [dim]Push this branch first, then retry:[/]")
+                console.print(f"  [dim]   git push origin {current_branch}[/]")
+                console.print(f"  [dim]   gh workflow run deploy.yml -R {repo} -r {current_branch}[/]")
+            sys.exit(1)
         console.print("  [green]✓[/] workflow dispatched")
 
         time.sleep(3)
@@ -418,10 +435,10 @@ def _aws_deploy() -> None:
 
     info("Done")
     console.print(f"  [dim]First deploy takes ~8 min (EC2 launch + initial image pulls).[/]")
-    console.print(f"  [dim]Next deploys:  cut a release from main (`gh release create vX.Y.Z --generate-notes`).[/]")
-    console.print(f"  [dim]Manual deploy: gh workflow run deploy.yml -R {repo} -r main[/]")
-    console.print(f"  [dim]Tear down:     aws cloudformation delete-stack --stack-name {app_name} --region {region}[/]")
-    console.print(f"  [dim]Tear OIDC:     aws cloudformation delete-stack --stack-name {oidc_stack} --region {region}[/]")
+    console.print(f"  [dim]Auto deploy:  cut a release from `main` — `gh release create vX.Y.Z --generate-notes`[/]")
+    console.print(f"  [dim]Manual:       gh workflow run deploy.yml -R {repo} -r <branch>  (any branch with the workflow file)[/]")
+    console.print(f"  [dim]Tear down:    aws cloudformation delete-stack --stack-name {app_name} --region {region}[/]")
+    console.print(f"  [dim]Tear OIDC:    aws cloudformation delete-stack --stack-name {oidc_stack} --region {region}[/]")
 
 
 # ── Dispatcher ───────────────────────────────────────────────────────────────

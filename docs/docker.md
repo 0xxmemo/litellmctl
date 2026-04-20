@@ -52,8 +52,8 @@ If you prefer to do it by hand (or need to script around it), the five secrets a
 
 **Triggering a deploy.** The workflow only runs on:
 
-- **Published GitHub Releases** cut from `main` — the normal path. Release from any other branch is ignored.
-- **Manual `workflow_dispatch`** — from the Actions tab or `gh workflow run deploy.yml -r main`. Used for the first-time bootstrap and ad-hoc test deploys.
+- **Published GitHub Releases** cut from `main` — the production path. Releases from any other branch are ignored by the job-level `if`.
+- **Manual `workflow_dispatch`** — from the Actions tab or `gh workflow run deploy.yml -r <branch>`. Works on **any branch** that has `.github/workflows/deploy.yml` committed. Use for ad-hoc deploys of a feature branch, or to ship a hotfix from `main` without tagging.
 
 Branch pushes are intentionally NOT a trigger — iterate as much as you want without any AWS churn.
 
