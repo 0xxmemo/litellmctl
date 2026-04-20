@@ -201,7 +201,7 @@ Resources:
           cd /opt/litellm
           IMAGE_BASE=${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AppName}
           cat > .env <<ENV
-          LITELLM_IMAGE=$${IMAGE_BASE}:latest
+          LITELLM_IMAGE=${!IMAGE_BASE}:latest
           LITELLM_DATA_DIR=/opt/litellm/data
           LITELLM_MASTER_KEY=${LitellmMasterKey}
           GATEWAY_ADMIN_EMAILS=${AdminEmails}
@@ -211,8 +211,8 @@ Resources:
           aws ecr get-login-password --region ${AWS::Region} \
             | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
 
-          docker pull "$${IMAGE_BASE}:latest"
-          container=$(docker create "$${IMAGE_BASE}:latest")
+          docker pull "${!IMAGE_BASE}:latest"
+          container=$(docker create "${!IMAGE_BASE}:latest")
           docker cp $container:/app/docker/compose.yml /opt/litellm/compose.yml || true
           docker rm -v $container
 
