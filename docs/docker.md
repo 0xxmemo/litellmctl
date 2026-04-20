@@ -50,9 +50,18 @@ If you prefer to do it by hand (or need to script around it), the five secrets a
 | `LITELLM_MASTER_KEY`   | `sk-$(openssl rand -hex 24)`                                |
 | `GATEWAY_ADMIN_EMAILS` | Comma-separated list of admin-role emails                   |
 
-Then push to a whitelisted branch (`main` + whatever you supplied to `AllowedBranches`) and watch the **Actions** tab. The `deploy` workflow:
+**Triggering a deploy.** The workflow only runs on:
 
-1. Deploys the main CloudFormation stack (ECR repo, EC2 instance, EIP, security group, IAM role — all idempotent)
+- **Published GitHub Releases** cut from `main` — the normal path. Release from any other branch is ignored.
+- **Manual `workflow_dispatch`** — from the Actions tab or `gh workflow run deploy.yml -r main`. Used for the first-time bootstrap and ad-hoc test deploys.
+
+Branch pushes are intentionally NOT a trigger — iterate as much as you want without any AWS churn.
+
+To ship: `git tag v0.1.0 && git push origin v0.1.0 && gh release create v0.1.0 --generate-notes`. The workflow fires on publish, builds `:v0.1.0` / `:<sha>` / `:latest` tags, and rolls the EC2 instance over via SSM.
+
+Each run:
+
+1. Deploys the main CloudFormation stack (ECR repo, EC2 instance, EIP, security group, IAM role — all idempotent; auto-recovers from `ROLLBACK_COMPLETE`)
 2. Builds the ARM64 Docker image and pushes it to your ECR
 3. SSH-free: uses AWS Systems Manager to run `docker compose pull && up -d` on the instance
 4. Curls `/api/health` to confirm the gateway is up

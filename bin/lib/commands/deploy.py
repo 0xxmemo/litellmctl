@@ -7,12 +7,14 @@ Currently one target:
 What it does, interactively:
     1. Verifies `aws`, `gh`, `git` are installed and authenticated.
     2. Auto-discovers defaults from the git remote + `git config user.email`.
-    3. Prompts for region, stack name, admin emails, allowed branches.
+    3. Prompts for region, stack name, admin emails.
     4. Detects any pre-existing GitHub OIDC provider and reuses it.
     5. Deploys aws/bootstrap-github-oidc.yml to create the deploy role.
     6. Generates a LITELLM_MASTER_KEY (or reuses the one already on the repo).
     7. Pushes all 5 secrets to the repo via `gh secret set`.
-    8. Offers to dispatch `deploy.yml` and tail it with `gh run watch`.
+    8. Offers to dispatch `deploy.yml` once (workflow_dispatch) to bootstrap
+       the AWS resources. Subsequent deploys happen automatically when you
+       publish a GitHub Release cut from `main`.
 
 Every step is idempotent. Safe to re-run.
 """
@@ -369,8 +371,16 @@ def _aws_deploy() -> None:
         console.print("  [dim]   master key saved only to GitHub secrets — store it yourself if you want a copy.[/]")
 
     # ── Trigger workflow ─────────────────────────────────────────────────
+    # Release-driven afterwards, but the first deploy needs a manual kick so
+    # the AWS resources exist before cutting any release.
     info("Deploy workflow")
-    run_branch = ask("Branch to deploy", default=current_branch)
+    console.print(
+        "  [dim]Subsequent deploys are triggered by publishing a GitHub Release on `main`.[/]"
+    )
+    console.print(
+        "  [dim]This one-time dispatch bootstraps the EC2 instance + ECR repo.[/]"
+    )
+    run_branch = ask("Branch to deploy (for this one-time bootstrap)", default="main")
 
     if confirm(f"Dispatch deploy.yml on {run_branch} now?", default=True):
         _run(["gh", "workflow", "run", "deploy.yml", "-R", repo, "-r", run_branch])
@@ -408,8 +418,10 @@ def _aws_deploy() -> None:
 
     info("Done")
     console.print(f"  [dim]First deploy takes ~8 min (EC2 launch + initial image pulls).[/]")
-    console.print(f"  [dim]Tear down:   aws cloudformation delete-stack --stack-name {app_name} --region {region}[/]")
-    console.print(f"  [dim]Tear OIDC:   aws cloudformation delete-stack --stack-name {oidc_stack} --region {region}[/]")
+    console.print(f"  [dim]Next deploys:  cut a release from main (`gh release create vX.Y.Z --generate-notes`).[/]")
+    console.print(f"  [dim]Manual deploy: gh workflow run deploy.yml -R {repo} -r main[/]")
+    console.print(f"  [dim]Tear down:     aws cloudformation delete-stack --stack-name {app_name} --region {region}[/]")
+    console.print(f"  [dim]Tear OIDC:     aws cloudformation delete-stack --stack-name {oidc_stack} --region {region}[/]")
 
 
 # ── Dispatcher ───────────────────────────────────────────────────────────────

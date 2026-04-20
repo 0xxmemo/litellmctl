@@ -77,20 +77,13 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              # ECR: push image + describe repos (create-repository is handled by CFN)
+              # ECR — repo create/update + image push. ecr:* is broad but matches
+              # the ec2:*/iam:* scope already granted below; tighten once the
+              # resource tree stabilises.
               - Effect: Allow
                 Resource: "*"
                 Action:
-                  - ecr:GetAuthorizationToken
-                  - ecr:BatchCheckLayerAvailability
-                  - ecr:GetDownloadUrlForLayer
-                  - ecr:BatchGetImage
-                  - ecr:PutImage
-                  - ecr:InitiateLayerUpload
-                  - ecr:UploadLayerPart
-                  - ecr:CompleteLayerUpload
-                  - ecr:DescribeRepositories
-                  - ecr:CreateRepository
+                  - ecr:*
               # CloudFormation: deploy the main stack
               - Effect: Allow
                 Resource: "*"

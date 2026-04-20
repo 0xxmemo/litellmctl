@@ -1,19 +1,11 @@
 name: deploy
 
 on:
-  push:
-    branches: [main, "feat/ec2-express"]
-    paths:
-      - "Dockerfile"
-      - ".dockerignore"
-      - "docker/**"
-      - "bin/**"
-      - "gateway/**"
-      - "litellm"
-      - "templates/**"
-      - "plugins/**"
-      - "aws/cloudformation.yml"
-      - ".github/workflows/deploy.yml"
+  # Deploy on published GitHub Releases — cut a release to ship to prod.
+  # Pushes to any branch are intentionally NOT a trigger; iterate locally
+  # and use `workflow_dispatch` for ad-hoc test deploys.
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       instance_type:
@@ -36,6 +28,12 @@ concurrency:
 
 jobs:
   deploy:
+    # Release events: only deploy releases cut from `main`. Manual
+    # workflow_dispatch runs are unrestricted (useful for first-time
+    # bootstrap + ad-hoc test deploys).
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'release' && github.event.release.target_commitish == 'main')
     runs-on: ubuntu-latest
     env:
       APP_NAME: ${{ secrets.APP_NAME }}
@@ -79,6 +77,21 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       # ── Stack (creates ECR, EC2, EIP, SG, IAM on first run; updates otherwise) ──
+      # Self-heals the classic CFN footgun: an initial CREATE that failed
+      # leaves the stack in ROLLBACK_COMPLETE, and `deploy` can't move it out
+      # of that state — the stack has to be deleted and re-created.
+      - name: Recover wedged stack if needed
+        run: |
+          status=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo MISSING)
+          echo "stack=${STACK_NAME} status=${status}"
+          if [ "$status" = "ROLLBACK_COMPLETE" ] || [ "$status" = "CREATE_FAILED" ]; then
+            echo "::warning::stack is in $status — deleting so we can re-create"
+            aws cloudformation delete-stack --stack-name "${STACK_NAME}"
+            aws cloudformation wait stack-delete-complete --stack-name "${STACK_NAME}"
+          fi
+
       - name: Deploy CloudFormation stack
         run: |
           aws cloudformation deploy \
@@ -92,6 +105,15 @@ jobs:
               AdminEmails="${{ secrets.GATEWAY_ADMIN_EMAILS }}" \
               LitellmMasterKey="${{ secrets.LITELLM_MASTER_KEY }}" \
               ImageTag="${GITHUB_SHA::12}"
+
+      - name: On-failure stack diagnostics
+        if: failure()
+        run: |
+          echo "### Last 20 stack events" >> "$GITHUB_STEP_SUMMARY"
+          aws cloudformation describe-stack-events \
+            --stack-name "${STACK_NAME}" \
+            --query 'StackEvents[?ResourceStatus==`CREATE_FAILED` || ResourceStatus==`UPDATE_FAILED`].[LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
+            --output table | tee -a "$GITHUB_STEP_SUMMARY" || true
 
       - name: Capture stack outputs
         id: stack
