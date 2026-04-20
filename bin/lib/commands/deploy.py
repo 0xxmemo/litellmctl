@@ -340,17 +340,32 @@ def _aws_deploy() -> None:
         "--stack-name", oidc_stack, "--region", region,
         "--query", "Stacks[0].Outputs[?OutputKey==`RoleArn`].OutputValue",
         "--output", "text",
-    ])
+    ]).strip()
+
+    # Validate — the aws-actions/configure-aws-credentials action needs a full
+    # IAM role ARN, not a name. A blank or malformed value here silently turns
+    # into "Source Account ID is needed if the Role Name is provided ..." on
+    # the workflow side.
+    import re
+    if not re.fullmatch(r"arn:aws:iam::\d{12}:role/[\w+=,.@-]+", role_arn):
+        error(f"CFN returned an unexpected role ARN: {role_arn!r}")
+        error("Expected format: arn:aws:iam::<account>:role/<name>")
+        sys.exit(1)
     console.print(f"  [green]✓[/] deploy role: [cyan]{role_arn}[/]")
 
     # ── GitHub secrets ───────────────────────────────────────────────────
     info(f"Writing GitHub Actions secrets to {repo}")
 
     def set_secret(name: str, value: str) -> None:
-        _run(
-            ["gh", "secret", "set", name, "-R", repo, "--body", "-"],
-            input_=value,
-        )
+        # Always strip — `gh secret set --body -` used to preserve trailing
+        # newlines from stdin, which then broke tools that do strict ARN
+        # validation (e.g. aws-actions/configure-aws-credentials). Pass via
+        # --body directly instead of stdin to avoid the issue entirely.
+        clean = value.strip()
+        if not clean:
+            error(f"refusing to set empty secret {name}")
+            sys.exit(1)
+        _run(["gh", "secret", "set", name, "-R", repo, "--body", clean])
         console.print(f"  [green]✓[/] set {name}")
 
     set_secret("AWS_DEPLOY_ROLE_ARN", role_arn)
