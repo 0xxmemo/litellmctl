@@ -309,7 +309,45 @@ def _gateway_nohup_stop() -> None:
 
 # ── Public start/stop ────────────────────────────────────────────────────────
 
+def gateway_start_foreground() -> None:
+    """Replace the current process with `bun run index.ts` in the gateway dir.
+
+    Used by the docker harness where s6-overlay is the supervisor. No PID
+    files, no launchd/systemd, no health polling — the caller owns lifecycle.
+    """
+    from ..common.harness import is_docker
+    gateway_dir = PROJECT_DIR / "gateway"
+    if not gateway_dir.exists():
+        error(f"Gateway directory not found at {gateway_dir}")
+        raise SystemExit(1)
+
+    _load_gateway_env()
+    bun = _bun_bin()
+    if not bun:
+        error("Bun not found. Install with: curl -fsSL https://bun.sh/install | bash")
+        raise SystemExit(1)
+
+    os.environ["GATEWAY_SUPERVISOR"] = "foreground"
+    if is_docker():
+        os.environ.setdefault("LITELLM_HARNESS", "docker")
+
+    env_file = PROJECT_DIR / ".env"
+    argv = [bun]
+    if env_file.exists():
+        argv.append(f"--env-file={env_file}")
+    argv += ["run", "index.ts"]
+
+    os.chdir(gateway_dir)
+    info(f"Starting gateway on port {_gateway_port()} (foreground) ...")
+    os.execvp(argv[0], argv)
+
+
 def gateway_start() -> None:
+    from ..common.harness import is_docker
+    if is_docker():
+        gateway_start_foreground()
+        return
+
     gateway_dir = PROJECT_DIR / "gateway"
 
     if not gateway_dir.exists():

@@ -9,8 +9,9 @@ async function searchHandler(req: Request) {
   if (auth instanceof Response) return auth;
 
   const url = new URL(req.url);
-  const port = parseInt(process.env.SEARXNG_PORT || "8888");
-  const target = new URL(`http://localhost:${port}/search`);
+  const base = (process.env.SEARXNG_URL
+    || `http://localhost:${process.env.SEARXNG_PORT || "8888"}`).replace(/\/$/, "");
+  const target = new URL(`${base}/search`);
 
   // Copy all query params from the request
   url.searchParams.forEach((v, k) => target.searchParams.set(k, v));

@@ -29,6 +29,13 @@ import { skillsRoutes } from "./routes/skills";
 import { vectorDbRoutes, handleVectorDbByName } from "./routes/vectordb";
 import { pluginsRoutes } from "./routes/plugins";
 import { pluginStatsRoutes } from "./routes/pluginStats";
+import { consoleRoutes } from "./routes/console";
+import {
+  attachPty,
+  detachPty,
+  handleClientMessage,
+  type ConsoleSocketData,
+} from "./lib/pty";
 
 // Last-resort handlers — any throw that escapes a request handler, an
 // interval callback, or a detached promise lands here. We log and keep the
@@ -78,7 +85,7 @@ await initCliSecret();
 const allRoutes = [
   authRoutes, keysRoutes, modelsRoutes, statsRoutes,
   userRoutes, adminRoutes, proxyRoutes, searchRoutes, healthRoutes, setupRoutes, skillsRoutes,
-  vectorDbRoutes, pluginsRoutes, pluginStatsRoutes,
+  vectorDbRoutes, pluginsRoutes, pluginStatsRoutes, consoleRoutes,
 ];
 
 function buildRouteManifest() {
@@ -236,6 +243,7 @@ Bun.serve({
     ...vectorDbRoutes,
     ...pluginsRoutes,
     ...pluginStatsRoutes,
+    ...consoleRoutes,
 
     // Icons (served from /public/)
     "/favicon.ico": async () => (await serveStaticFile("/public/favicon.ico")) || new Response("Not found", { status: 404 }),
@@ -251,6 +259,7 @@ Bun.serve({
     "/keys": { GET: serveFrontend },
     "/settings": { GET: serveFrontend },
     "/admin": { GET: serveFrontend },
+    "/console": { GET: serveFrontend },
     "/docs": { GET: serveFrontend },
 
     // Root → Overview
@@ -274,6 +283,29 @@ Bun.serve({
     }
 
     return new Response("Not found", { status: 404 });
+  },
+
+  websocket: {
+    maxPayloadLength: 1 << 20, // 1 MiB — PTY traffic is tiny
+    idleTimeout: 0,
+    open(ws) {
+      try {
+        attachPty(ws as unknown as import("bun").ServerWebSocket<ConsoleSocketData>);
+      } catch (err) {
+        console.error("[console][open]", errorMessage(err));
+        try { ws.send(`\r\n[error starting console: ${errorMessage(err)}]\r\n`); } catch {}
+        try { ws.close(1011, "pty-failed"); } catch {}
+      }
+    },
+    message(ws, message) {
+      handleClientMessage(
+        ws as unknown as import("bun").ServerWebSocket<ConsoleSocketData>,
+        message,
+      );
+    },
+    close(ws) {
+      detachPty(ws as unknown as import("bun").ServerWebSocket<ConsoleSocketData>);
+    },
   },
 
   development: {

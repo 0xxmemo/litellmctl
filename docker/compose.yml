@@ -1,0 +1,94 @@
+# LiteLLM Gateway — docker compose stack for single-host deployment.
+#
+# Designed to run on a single EC2 Graviton (ARM64) instance provisioned by
+# aws/cloudformation.yml. The CloudFormation user-data installs Docker +
+# compose, sets up 32GB swap, mounts 120GB EBS at /opt/litellm/data, and
+# runs `docker compose pull && docker compose up -d` against this file.
+#
+# Sidecar images are public and pulled on boot in parallel with the main
+# image (which comes from the repo's ECR). This keeps the main image under
+# ~1 GB and first-boot under ~5 min on a cold host.
+
+name: litellm-gateway
+
+x-restart: &restart-policy
+  restart: unless-stopped
+
+services:
+  # ── Main container: litellm proxy + gateway UI + Caddy reverse proxy ──────
+  main:
+    image: ${LITELLM_IMAGE:-litellm-gw:dev}
+    container_name: litellm-main
+    <<: *restart-policy
+    platform: linux/arm64
+    ports:
+      - "80:80"        # Caddy HTTP
+      - "443:443"      # Caddy HTTPS (auto-TLS once a domain is configured)
+      - "14041:14041"  # Gateway direct (bootstrap + fallback)
+    environment:
+      LITELLM_HARNESS: docker
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
+      GATEWAY_ADMIN_EMAILS: ${GATEWAY_ADMIN_EMAILS:-}
+      GATEWAY_SESSION_SECRET: ${GATEWAY_SESSION_SECRET:-}
+      # Route the gateway and proxy at the sidecars by hostname.
+      LOCAL_EMBEDDING_API_BASE: http://ollama:11434
+      LOCAL_TRANSCRIPTION_API_BASE: http://whisper:8000/v1
+      SEARXNG_URL: http://searxng:8080
+    volumes:
+      - data:/data
+    depends_on:
+      - ollama
+      - searxng
+      - whisper
+    cap_add:
+      - NET_BIND_SERVICE       # let Caddy bind :80 + :443 as a non-root process
+
+  # ── Ollama (local embeddings) ─────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    container_name: litellm-ollama
+    <<: *restart-policy
+    platform: linux/arm64
+    environment:
+      OLLAMA_HOST: 0.0.0.0:11434
+      OLLAMA_MODELS: /models
+    volumes:
+      - ollama-models:/models
+
+  # ── SearXNG (privacy search) ──────────────────────────────────────────────
+  searxng:
+    image: searxng/searxng:latest
+    container_name: litellm-searxng
+    <<: *restart-policy
+    platform: linux/arm64
+    environment:
+      SEARXNG_BASE_URL: ${SEARXNG_BASE_URL:-http://localhost/search/}
+    volumes:
+      - searxng-config:/etc/searxng
+
+  # ── faster-whisper / speaches (local transcription) ───────────────────────
+  whisper:
+    image: ghcr.io/speaches-ai/speaches:latest-cpu
+    container_name: litellm-whisper
+    <<: *restart-policy
+    platform: linux/arm64
+    environment:
+      WHISPER__MODEL: ${WHISPER_MODEL:-Systran/faster-whisper-large-v3-turbo}
+      UVICORN_HOST: 0.0.0.0
+      UVICORN_PORT: "8000"
+    volumes:
+      - whisper-cache:/root/.cache
+
+volumes:
+  # `data` is the single critical volume — back this up (user DB, API keys,
+  # OAuth tokens, config.yaml, Caddyfile). In the AWS deployment it is an
+  # EBS volume bind-mounted at /opt/litellm/data on the host.
+  data:
+    driver: local
+    driver_opts:
+      type: none
+      device: ${LITELLM_DATA_DIR:-/opt/litellm/data}
+      o: bind
+  ollama-models:
+  searxng-config:
+  whisper-cache:

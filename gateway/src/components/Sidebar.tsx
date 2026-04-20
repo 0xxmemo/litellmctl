@@ -6,8 +6,10 @@ import {
   Settings,
   BookOpen,
   Shield,
+  Terminal,
 } from 'lucide-react'
 import type { UseAuthReturn } from '@/hooks/useAuth'
+import { useHealth } from '@/hooks/useHealth'
 
 const base = 'w-full flex items-center gap-3 px-3 py-2 rounded-md transition-colors text-left'
 const sharedLinkProps = {
@@ -22,6 +24,8 @@ interface SidebarProps {
 
 export function Sidebar({ auth }: SidebarProps) {
   const { user } = auth
+  const { data: health } = useHealth()
+  const showConsole = user?.role === 'admin' && health?.features.console === true
   return (
     <nav className="space-y-2">
       <Link to="/" {...sharedLinkProps} activeOptions={{ exact: true }}>
@@ -44,6 +48,12 @@ export function Sidebar({ auth }: SidebarProps) {
         <Link to="/admin" {...sharedLinkProps}>
           <Shield className="w-5 h-5" />
           <span>Admin</span>
+        </Link>
+      )}
+      {showConsole && (
+        <Link to="/console" {...sharedLinkProps}>
+          <Terminal className="w-5 h-5" />
+          <span>Console</span>
         </Link>
       )}
     </nav>

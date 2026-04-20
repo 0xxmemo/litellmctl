@@ -1,4 +1,5 @@
 import { dbHealthy } from "../lib/db";
+import { consoleEnabled } from "../lib/pty";
 
 /** Try an HTTP probe, return true if response is ok within timeout. */
 async function httpProbe(url: string, timeoutMs = 1000): Promise<boolean> {
@@ -35,16 +36,20 @@ function dbProbe(): boolean {
  * All probes run in parallel — worst-case latency is ~1s, not 5s.
  */
 async function healthHandler() {
-  const searxngPort = parseInt(process.env.SEARXNG_PORT || "8888");
-  const embeddingPort = parseInt(process.env.LOCAL_EMBEDDING_API_BASE?.split(":").pop() || "11434");
-  const transcriptionPort = parseInt(process.env.LOCAL_TRANSCRIPTION_API_BASE?.split(":").pop() || "10300");
+  // Full URLs let sidecars be reached by hostname in docker compose, while
+  // keeping `localhost:PORT` working on VPC installs. Never reconstruct from
+  // a split(":") of a URL — it drops the scheme and hostname.
+  const searxngUrl = process.env.SEARXNG_URL
+    || `http://localhost:${process.env.SEARXNG_PORT || "8888"}`;
+  const embeddingUrl = process.env.LOCAL_EMBEDDING_API_BASE || "http://localhost:11434";
+  const transcriptionUrl = process.env.LOCAL_TRANSCRIPTION_API_BASE || "http://localhost:10300/v1";
   const protonHost = process.env.GATEWAY_PROTON_SMTP_HOST || "127.0.0.1";
   const protonPort = parseInt(process.env.GATEWAY_PROTON_SMTP_PORT || "1025");
 
   const [search, embedding, transcription, proton] = await Promise.all([
-    httpProbe(`http://localhost:${searxngPort}/`),
-    httpProbe(`http://localhost:${embeddingPort}/api/tags`),
-    httpProbe(`http://localhost:${transcriptionPort}/api/health`),
+    httpProbe(`${searxngUrl.replace(/\/$/, "")}/`),
+    httpProbe(`${embeddingUrl.replace(/\/$/, "")}/api/tags`),
+    httpProbe(`${transcriptionUrl.replace(/\/v1\/?$/, "").replace(/\/$/, "")}/api/health`),
     tcpProbe(protonHost, protonPort),
   ]);
   const database = dbProbe();
@@ -52,7 +57,7 @@ async function healthHandler() {
   return Response.json({
     status: "ok",
     uptime: process.uptime(),
-    features: { search, embedding, transcription, proton, database },
+    features: { search, embedding, transcription, proton, database, console: consoleEnabled() },
   });
 }
 

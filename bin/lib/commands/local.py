@@ -336,6 +336,55 @@ def install_transcription() -> None:
         warn("Transcription server unavailable — re-run: litellmctl install --with-transcription")
 
 
+def ollama_start_foreground() -> None:
+    """Replace current process with `ollama serve` (docker harness)."""
+    import shutil
+    ollama = shutil.which("ollama")
+    if not ollama:
+        from ..common.formatting import error
+        error("ollama binary not found in PATH")
+        raise SystemExit(1)
+
+    models_dir = os.environ.get("OLLAMA_MODELS", "/data/ollama-models")
+    try:
+        os.makedirs(models_dir, exist_ok=True)
+    except OSError:
+        pass
+    os.environ["OLLAMA_MODELS"] = models_dir
+    os.environ.setdefault("OLLAMA_HOST", "0.0.0.0:11434")
+
+    info(f"Starting Ollama (models in {models_dir}) ...")
+    os.execvp(ollama, [ollama, "serve"])
+
+
+def transcription_start_foreground() -> None:
+    """Replace current process with the speaches / faster-whisper server."""
+    transcr_bin = _find_transcription_bin()
+    if not transcr_bin:
+        from ..common.formatting import error
+        error("No transcription binary found (speaches or faster-whisper-server)")
+        raise SystemExit(1)
+
+    import re
+    transcr_base = os.environ.get("LOCAL_TRANSCRIPTION_API_BASE", "http://localhost:10300/v1")
+    port_match = re.search(r":(\d+)", transcr_base)
+    port = port_match.group(1) if port_match else "10300"
+
+    model = os.environ.get("LOCAL_TRANSCRIPTION_MODEL", "Systran/faster-whisper-large-v3-turbo")
+
+    cache_dir = os.environ.get("WHISPER_CACHE_DIR", "/data/whisper-cache")
+    try:
+        os.makedirs(cache_dir, exist_ok=True)
+    except OSError:
+        pass
+    os.environ.setdefault("HF_HOME", cache_dir)
+    os.environ.setdefault("XDG_CACHE_HOME", cache_dir)
+
+    cmd = _build_transcription_cmd(transcr_bin, port, model)
+    info(f"Starting {transcr_bin} on port {port} (model={model}) ...")
+    os.execvp(cmd[0], cmd)
+
+
 def cmd_local(subcmd: str = "status") -> None:
     load_env()
     if subcmd == "status":

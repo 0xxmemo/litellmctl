@@ -1,0 +1,201 @@
+# Deploying LiteLLM Gateway on AWS
+
+Click-by-click walkthrough that assumes **no prior AWS knowledge**. Total
+hands-on time: ~10 minutes. After that, every `git push` auto-deploys.
+
+## What you end up with
+
+- One ARM Graviton EC2 instance (`c7g.xlarge` — 4 vCPU / 8 GB / 120 GB EBS / 32 GB swap)
+- A stable public IP (Elastic IP)
+- Ports `80`, `443`, `14041` open; Caddy handles the first two once you point a domain at it
+- Automatic rollout on every push to `main`: build ARM image → push to ECR → `docker compose pull && up -d` on the instance via SSM
+
+Running cost: **~$60/month** on-demand, ~$36/month with a 1-year Savings Plan.
+No Fargate, no ALB, no NAT gateway — exactly one instance.
+
+## Prerequisites
+
+1. **An AWS account.** Free tier is fine; you'll pay for the instance only.
+2. **AWS CLI installed locally** and logged in: `brew install awscli && aws configure` (or the equivalent on Linux). You need this exactly once — after this doc, everything runs from GitHub Actions.
+3. **A GitHub fork** of this repo.
+
+## Step 1 — Bootstrap the GitHub OIDC deploy role (one-time, 1 min)
+
+This creates the IAM role that GitHub Actions assumes to deploy on your behalf. You never need long-lived AWS keys in GitHub.
+
+```bash
+# Replace these two values:
+GITHUB_ORG=your-org-or-username
+GITHUB_REPO=litellmctl
+
+aws cloudformation deploy \
+  --stack-name litellm-gateway-oidc \
+  --template-file aws/bootstrap-github-oidc.yml \
+  --capabilities CAPABILITY_NAMED_IAM \
+  --parameter-overrides \
+    GithubOrg="${GITHUB_ORG}" \
+    GithubRepo="${GITHUB_REPO}"
+```
+
+When it finishes, grab the role ARN:
+
+```bash
+aws cloudformation describe-stacks \
+  --stack-name litellm-gateway-oidc \
+  --query 'Stacks[0].Outputs[?OutputKey==`RoleArn`].OutputValue' \
+  --output text
+```
+
+Copy that ARN — you'll paste it into GitHub next.
+
+## Step 2 — Add five GitHub secrets (2 min)
+
+Open your repo → **Settings → Secrets and variables → Actions → New repository secret**, and add these five:
+
+| Name                      | Value                                                     | Where it comes from                                    |
+|---------------------------|-----------------------------------------------------------|--------------------------------------------------------|
+| `AWS_DEPLOY_ROLE_ARN`     | The ARN from Step 1                                       | Output of the bootstrap stack.                         |
+| `AWS_REGION`              | e.g. `us-east-1`                                          | Pick one close to you.                                 |
+| `APP_NAME`                | `litellm-gateway`                                         | Keep default unless you deploy multiple instances.      |
+| `LITELLM_MASTER_KEY`      | `sk-$(openssl rand -hex 24)` — generate yourself          | Long random string. You don't need to remember it.     |
+| `GATEWAY_ADMIN_EMAILS`    | `you@example.com`                                         | Comma-separated. Only these emails can log in as admin. |
+
+Generate the master key:
+
+```bash
+echo "sk-$(openssl rand -hex 24)"
+```
+
+## Step 3 — Push to main (0 min)
+
+```bash
+git push origin main
+```
+
+Watch the **Actions** tab. The `deploy` workflow:
+
+1. Deploys the main CloudFormation stack (ECR repo, EC2 instance, EIP, security group, IAM role — all idempotent)
+2. Builds the ARM64 Docker image and pushes it to your ECR
+3. SSH-free: uses AWS Systems Manager to run `docker compose pull && up -d` on the instance
+4. Curls `/api/health` to confirm the gateway is up
+
+First run takes ~8 min (EC2 launch + initial pull). Every subsequent deploy takes ~2 min.
+
+When it finishes, the workflow summary prints the public IP. Open `http://<public-ip>:14041` and log in with the email you set in `GATEWAY_ADMIN_EMAILS`.
+
+## Step 4 — Add a domain + HTTPS (optional, 2 min)
+
+Inside the gateway UI, go to **Admin → Console** (real shell in the container) and edit the Caddyfile:
+
+```bash
+cat > /data/Caddyfile <<'CADDY'
+your.domain.com {
+  reverse_proxy localhost:14041
+}
+CADDY
+
+caddy reload --config /data/Caddyfile --adapter caddyfile
+```
+
+Point an A record at the public IP — Caddy obtains a Let's Encrypt certificate automatically. Now your gateway is on `https://your.domain.com`.
+
+## What lives where
+
+Inside the container (read-only baked in the image):
+
+```
+/app/                    Repo code, venv at /opt/venv, bun at /root/.bun
+/etc/s6-overlay/         Process supervisor config (inlined from Dockerfile)
+```
+
+On the EBS volume (`/opt/litellm/data` on the host, mounted as `/data` inside the container):
+
+```
+/data/.env               API keys, LITELLM_MASTER_KEY, GATEWAY_SESSION_SECRET
+/data/config.yaml        Proxy routing (created by the wizard)
+/data/auth.*.json        OAuth tokens per provider
+/data/gateway/gateway.db SQLite: users, keys, usage, sessions, vectors
+/data/plugins/           User-installed gateway plugins
+/data/Caddyfile          Reverse proxy config
+/data/logs/              proxy.log, gateway.log, ...
+```
+
+Sidecar containers (`ollama`, `searxng`, `whisper`) keep their own named Docker volumes. Ollama models persist across deploys — they only re-download when you blow away the volume.
+
+## Day-2 operations (from the web console)
+
+The admin console is a full `bash -l` inside the container. `litellmctl` and
+`claude` (Claude Code, pre-wired to the local proxy) are both on `$PATH`.
+
+| Task                      | Command                                                    |
+|---------------------------|-------------------------------------------------------------|
+| Create `config.yaml`      | `litellmctl wizard`                                         |
+| Log into a provider       | `litellmctl auth chatgpt` (or gemini, qwen, kimi)          |
+| Restart the proxy         | `litellmctl restart proxy`                                  |
+| Ask Claude Code for help  | `claude` (aliased to `claude --dangerously-skip-permissions`) |
+| Pull a new embedding model| `docker exec litellm-ollama ollama pull nomic-embed-text`   |
+| Tail logs                 | `litellmctl logs gateway`                                   |
+| Stop everything           | `docker compose -f /opt/litellm/compose.yml down`          |
+| Start everything          | `docker compose -f /opt/litellm/compose.yml up -d`         |
+
+### Claude Code
+
+The container ships Claude Code CLI configured to route through the local
+LiteLLM proxy — no separate Anthropic API key required, no network path off
+the instance for model calls.
+
+Installed via the official native installer (`claude.ai/install.sh`) — a
+per-platform binary with no Node/runtime dependency. Version is pinned per
+image; the in-process auto-updater is disabled because the container is
+immutable. To move to a new Claude Code release, rebuild the image (the
+`CLAUDE_CODE_CHANNEL` build arg accepts `latest`, `stable`, or a version
+like `2.1.89`).
+
+What's wired up:
+
+- `ANTHROPIC_BASE_URL=http://localhost:4040` (the in-container proxy)
+- `ANTHROPIC_AUTH_TOKEN=$LITELLM_MASTER_KEY` (inherited from compose env)
+- Tier aliases match the existing `litellmctl` convention: opus→`ultra`,
+  sonnet→`plus`, haiku→`lite`. Override via `ANTHROPIC_DEFAULT_*_MODEL` env
+  vars in `/data/.env`.
+- `alias claude='claude --dangerously-skip-permissions'` — inside the
+  container the admin role already bypasses the host security boundary, and
+  interactive approval prompts break automation. Disable by removing the
+  alias from `/root/.bashrc` if you prefer the prompts.
+- Claude's state (`/root/.claude`) is symlinked to `/data/claude` so
+  conversation history survives container rebuilds.
+
+## Troubleshooting
+
+**Workflow fails at "Deploy CloudFormation stack".** Usually the OIDC role is missing a permission — check the CloudFormation console → stack events. The role created by `bootstrap-github-oidc.yml` has `cloudformation:*` + `ec2:*` + `iam:*` + `ecr:*` + `ssm:*` in V1; tighten after your stack stabilises.
+
+**Instance starts but `/api/health` times out.** SSH in via SSM Session Manager:
+
+```bash
+aws ssm start-session --target $(aws cloudformation describe-stacks \
+  --stack-name litellm-gateway \
+  --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue' \
+  --output text)
+```
+
+Then `sudo docker compose -f /opt/litellm/compose.yml logs -f main` to see the main container logs.
+
+**"No space left on device".** Ollama models are big (~5–10 GB each). 120 GB is usually plenty, but blow away unused models: `docker exec litellm-ollama ollama rm <model>`.
+
+**Need to change the instance size.** Rerun the workflow with `workflow_dispatch` and the `instance_type` input, or edit `.github/workflows/deploy.yml`. CloudFormation handles the resize (brief downtime).
+
+## Local development
+
+The same image runs locally. From the repo root:
+
+```bash
+docker build --platform linux/arm64 -t litellm-gw:dev .
+
+mkdir -p .data
+docker compose -f docker/compose.yml up
+```
+
+Sidecars pull automatically. Open `http://localhost:14041`.
+
+The VPC install path (`install.sh` + `litellmctl` with launchd/systemd) is
+completely independent of this. Don't run both on the same host.

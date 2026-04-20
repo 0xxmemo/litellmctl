@@ -1,0 +1,246 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  LiteLLM Gateway — single-host ARM64 deployment. Provisions an EC2
+  instance, 120GB EBS data volume, 32GB swap file, security group,
+  Elastic IP, and ECR repository. Idempotent — re-deploy to update
+  the instance's user-data or size.
+
+Parameters:
+  AppName:
+    Type: String
+    Default: litellm-gateway
+    Description: Prefix for all created resources.
+
+  InstanceType:
+    Type: String
+    Default: c7g.xlarge
+    AllowedValues:
+      - c7g.xlarge       # 4 vCPU / 8 GB   (default — matches spec)
+      - c7g.2xlarge      # 8 vCPU / 16 GB
+      - m7g.xlarge       # 4 vCPU / 16 GB  (more RAM if needed)
+      - t4g.xlarge       # 4 vCPU / 16 GB  burstable (cheaper when idle)
+    Description: Graviton (ARM64) instance. c7g.xlarge matches the 4 vCPU / 8 GB spec.
+
+  DataVolumeSizeGb:
+    Type: Number
+    Default: 120
+    MinValue: 40
+    MaxValue: 1000
+
+  SwapSizeGb:
+    Type: Number
+    Default: 32
+    MinValue: 0
+    MaxValue: 128
+
+  ImageTag:
+    Type: String
+    Default: latest
+    Description: ECR image tag to run. Updated by the deploy workflow on each push.
+
+  AdminEmails:
+    Type: String
+    Default: ""
+    Description: Comma-separated admin emails — seeds GATEWAY_ADMIN_EMAILS.
+
+  LitellmMasterKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: >
+      Master key for the LiteLLM proxy (used by the gateway to authenticate
+      its requests to the proxy). Generate with `openssl rand -hex 24` and
+      prefix with `sk-`. Leave blank to auto-generate on first boot.
+
+  SshKeyName:
+    Type: String
+    Default: ""
+    Description: (Optional) EC2 key pair name. Leave blank to disable SSH entirely — admin console inside the UI is the intended access path.
+
+  AllowSshFromCidr:
+    Type: String
+    Default: "0.0.0.0/0"
+    Description: CIDR allowed to reach :22. Ignored if SshKeyName is blank.
+
+Conditions:
+  HasSshKey: !Not [!Equals [!Ref SshKeyName, ""]]
+
+Mappings:
+  # Latest Amazon Linux 2023 ARM64 AMI, per region. Keep in sync yearly,
+  # or swap to SSM Parameter Store lookup (commented below) for always-fresh.
+  AmiByRegion:
+    us-east-1:      { ami: ami-0cf73ea9441a60ea8 }   # al2023-ami-2023-arm64
+    us-east-2:      { ami: ami-0a4fb76a20c4d3f72 }
+    us-west-1:      { ami: ami-0a3fa9cc2d2cc16ea }
+    us-west-2:      { ami: ami-0f1cf53878fe3ee77 }
+    eu-west-1:      { ami: ami-04cb3e9c2c064fcd8 }
+    eu-central-1:   { ami: ami-0f0f9c8a1b0ed4dbf }
+    ap-southeast-1: { ami: ami-052b9f1f0d8ddf3c8 }
+    ap-south-1:     { ami: ami-00ab45480ba3a3c4e }
+
+Resources:
+  # ── ECR repo — image target for the docker-build workflow ────────────────
+  EcrRepo:
+    Type: AWS::ECR::Repository
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      RepositoryName: !Ref AppName
+      ImageTagMutability: MUTABLE
+      ImageScanningConfiguration: { ScanOnPush: true }
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {"rules":[{"rulePriority":1,"description":"Keep last 10 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}
+
+  # ── Security group: 80/443/14041 open; 22 conditional ────────────────────
+  Sg:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${AppName} inbound"
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 14041
+          ToPort: 14041
+          CidrIp: 0.0.0.0/0
+
+  SgSshIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Condition: HasSshKey
+    Properties:
+      GroupId: !Ref Sg
+      IpProtocol: tcp
+      FromPort: 22
+      ToPort: 22
+      CidrIp: !Ref AllowSshFromCidr
+
+  # ── IAM: instance profile with ECR pull + SSM Session Manager ────────────
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  # ── Elastic IP (stable address across reboots/re-deploys) ────────────────
+  Eip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  EipAssoc:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref Instance
+      EIP: !Ref Eip
+
+  # ── EC2 instance ─────────────────────────────────────────────────────────
+  Instance:
+    Type: AWS::EC2::Instance
+    CreationPolicy:
+      ResourceSignal: { Timeout: PT15M }
+    Properties:
+      ImageId: !FindInMap [AmiByRegion, !Ref "AWS::Region", ami]
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      KeyName: !If [HasSshKey, !Ref SshKeyName, !Ref "AWS::NoValue"]
+      SecurityGroupIds: [!Ref Sg]
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda           # root volume
+          Ebs: { VolumeType: gp3, VolumeSize: 20, DeleteOnTermination: true }
+        - DeviceName: /dev/xvdf           # dedicated data volume, survives instance replacement
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Ref DataVolumeSizeGb
+            DeleteOnTermination: false
+      Tags:
+        - { Key: Name, Value: !Ref AppName }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          exec > >(tee /var/log/user-data.log) 2>&1
+
+          dnf install -y docker aws-cli jq amazon-cloudwatch-agent
+
+          # Docker + compose plugin
+          systemctl enable --now docker
+          usermod -aG docker ec2-user
+          mkdir -p /usr/libexec/docker/cli-plugins
+          curl -fsSL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-aarch64 \
+            -o /usr/libexec/docker/cli-plugins/docker-compose
+          chmod +x /usr/libexec/docker/cli-plugins/docker-compose
+
+          # Swap file
+          if [ ! -f /swapfile ]; then
+            dd if=/dev/zero of=/swapfile bs=1M count=$((${SwapSizeGb} * 1024)) status=progress
+            chmod 600 /swapfile
+            mkswap /swapfile
+            swapon /swapfile
+            echo '/swapfile none swap sw 0 0' >> /etc/fstab
+          fi
+
+          # Format + mount data volume (idempotent: only format if blank)
+          DEV=/dev/nvme1n1   # second EBS on Nitro == nvme1n1
+          [ -b "$DEV" ] || DEV=/dev/xvdf
+          if ! blkid "$DEV"; then mkfs.ext4 -L litellm-data "$DEV"; fi
+          mkdir -p /opt/litellm/data
+          grep -q litellm-data /etc/fstab || \
+            echo 'LABEL=litellm-data /opt/litellm/data ext4 defaults,nofail 0 2' >> /etc/fstab
+          mount -a
+
+          # Pull compose.yml out of the image so the host has it on disk
+          cd /opt/litellm
+          cat > .env <<ENV
+          LITELLM_IMAGE=${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AppName}:${ImageTag}
+          LITELLM_DATA_DIR=/opt/litellm/data
+          LITELLM_MASTER_KEY=${LitellmMasterKey}
+          GATEWAY_ADMIN_EMAILS=${AdminEmails}
+          ENV
+          chmod 600 .env
+
+          aws ecr get-login-password --region ${AWS::Region} \
+            | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+
+          # Fetch compose.yml from the pushed image (one-shot, replaced on every deploy
+          # by the deploy workflow writing /opt/litellm/compose.yml over SSM).
+          docker pull ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AppName}:${ImageTag}
+          container=$(docker create ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AppName}:${ImageTag})
+          docker cp $container:/app/docker/compose.yml /opt/litellm/compose.yml || true
+          docker rm -v $container
+
+          docker compose -f /opt/litellm/compose.yml --env-file /opt/litellm/.env pull
+          docker compose -f /opt/litellm/compose.yml --env-file /opt/litellm/.env up -d
+
+          # Signal CFN success
+          /opt/aws/bin/cfn-signal --exit-code 0 \
+            --stack ${AWS::StackName} --resource Instance --region ${AWS::Region}
+
+Outputs:
+  PublicIp:
+    Description: "Connect to http://<PublicIp>:14041 initially, then configure Caddy."
+    Value: !Ref Eip
+  EcrRepositoryUri:
+    Value: !GetAtt EcrRepo.RepositoryUri
+    Export: { Name: !Sub "${AppName}-ecr-uri" }
+  InstanceId:
+    Value: !Ref Instance
+    Export: { Name: !Sub "${AppName}-instance-id" }

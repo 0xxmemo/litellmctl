@@ -305,6 +305,42 @@ def help() -> None:
     _show_help()
 
 
+@app.command("_fg", hidden=True)
+def _foreground(
+    service: str = typer.Argument(..., help="proxy | gateway | searxng | ollama | whisper"),
+    port: int = typer.Option(4040, "--port", help="Port (proxy only)"),
+    config: Optional[str] = typer.Option(None, "--config", help="Config file (proxy only)"),
+) -> None:
+    """Run a service in the foreground (docker harness / s6-overlay).
+
+    Each branch replaces the current process via os.execvp so the process
+    tree is flat and the supervisor sees real exit signals.
+    """
+    from .common.env import load_env
+    load_env()
+
+    svc = service.lower()
+    if svc == "proxy":
+        from .commands.service import cmd_proxy
+        cmd_proxy(port=port, config=config)
+    elif svc == "gateway":
+        from .commands.gateway import gateway_start_foreground
+        gateway_start_foreground()
+    elif svc == "searxng":
+        from .commands.searxng import searxng_start_foreground
+        searxng_start_foreground()
+    elif svc == "ollama":
+        from .commands.local import ollama_start_foreground
+        ollama_start_foreground()
+    elif svc in ("whisper", "transcription"):
+        from .commands.local import transcription_start_foreground
+        transcription_start_foreground()
+    else:
+        from .common.formatting import error
+        error(f"Unknown foreground service: {service}")
+        raise typer.Exit(2)
+
+
 # ── Flat gateway utility commands ────────────────────────────────────────────
 # All service lifecycle (start/stop/restart/status/logs) goes through the
 # top-level commands, NOT through a nested `gateway` sub-app. These are gateway-

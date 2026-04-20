@@ -1,0 +1,111 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  One-time bootstrap: creates the GitHub Actions OIDC identity provider and
+  the deploy role that GHA assumes via OIDC. Deploy this ONCE per AWS
+  account before pushing to the repo.
+
+  The role ARN this stack outputs is what you paste into the GitHub secret
+  `AWS_DEPLOY_ROLE_ARN` — everything else is automatic.
+
+Parameters:
+  GithubOrg:
+    Type: String
+    Description: GitHub org or user that owns the repo (e.g. "0xxmemo").
+
+  GithubRepo:
+    Type: String
+    Description: Repo name (e.g. "litellmctl").
+
+  AllowedBranches:
+    Type: CommaDelimitedList
+    Default: "main,feat/ec2-express"
+    Description: Branches that may assume this role. Use "*" for any branch.
+
+  AppName:
+    Type: String
+    Default: litellm-gateway
+    Description: Must match the AppName in cloudformation.yml.
+
+Resources:
+  # OIDC provider (shared across any GHA role in this account).
+  # If you already have one, set `CreateOidcProvider: false` and reuse it.
+  GithubOidcProvider:
+    Type: AWS::IAM::OIDCProvider
+    DeletionPolicy: Retain
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList: [sts.amazonaws.com]
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+        - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
+
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${AppName}-gha-deploy"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Federated: !Ref GithubOidcProvider }
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                "token.actions.githubusercontent.com:aud": sts.amazonaws.com
+              StringLike:
+                "token.actions.githubusercontent.com:sub":
+                  !Split
+                    - ","
+                    - !Sub
+                      - "repo:${GithubOrg}/${GithubRepo}:ref:refs/heads/${Joined}"
+                      - Joined: !Join [",repo:${GithubOrg}/${GithubRepo}:ref:refs/heads/", !Ref AllowedBranches]
+      Policies:
+        - PolicyName: deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # ECR: push image + describe repos (create-repository is handled by CFN)
+              - Effect: Allow
+                Resource: "*"
+                Action:
+                  - ecr:GetAuthorizationToken
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:GetDownloadUrlForLayer
+                  - ecr:BatchGetImage
+                  - ecr:PutImage
+                  - ecr:InitiateLayerUpload
+                  - ecr:UploadLayerPart
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeRepositories
+                  - ecr:CreateRepository
+              # CloudFormation: deploy the main stack
+              - Effect: Allow
+                Resource: "*"
+                Action:
+                  - cloudformation:*
+              # EC2 / IAM / SSM scoped to our AppName — permissive in V1,
+              # tighten once the resource tree stabilises.
+              - Effect: Allow
+                Resource: "*"
+                Action:
+                  - ec2:*
+                  - iam:*
+                  - ssm:SendCommand
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommandInvocations
+                  - ssm:DescribeInstanceInformation
+                  - logs:*
+
+Outputs:
+  RoleArn:
+    Description: "Paste this into GitHub secret AWS_DEPLOY_ROLE_ARN"
+    Value: !GetAtt DeployRole.Arn
+  Instructions:
+    Value: !Sub |
+      Now set these GitHub Actions secrets on your repo:
+        AWS_DEPLOY_ROLE_ARN = ${DeployRole.Arn}
+        AWS_REGION          = <your region, e.g. us-east-1>
+        APP_NAME            = ${AppName}
+        LITELLM_MASTER_KEY  = sk-$(openssl rand -hex 24)    # any long secret
+        GATEWAY_ADMIN_EMAILS= you@example.com,...
+      Then push to main — the build and deploy workflows do the rest.

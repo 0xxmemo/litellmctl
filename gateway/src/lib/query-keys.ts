@@ -45,4 +45,7 @@ export const queryKeys = {
 
   // Setup options
   setupOptions: ['setup', 'options'] as const,
+
+  // Health
+  health: ['health'] as const,
 } as const

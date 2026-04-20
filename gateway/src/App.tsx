@@ -8,6 +8,7 @@ import { ApiKeys as ApiKeysPage } from './pages/ApiKeys';
 import { Overview } from './pages/Overview';
 import { Settings } from './pages/Settings';
 import { Admin } from './pages/Admin';
+import { Console } from './pages/Console';
 import { Docs } from './pages/Docs';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuth } from './hooks/useAuth';
@@ -65,6 +66,12 @@ const adminRoute = createRoute({
   component: Admin,
 });
 
+const consoleRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: '/console',
+  component: Console,
+});
+
 const docsRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: '/docs',
@@ -72,7 +79,7 @@ const docsRoute = createRoute({
 });
 
 const routeTree = rootRoute.addChildren([
-  layoutRoute.addChildren([indexRoute, keysRoute, settingsRoute, adminRoute, docsRoute]),
+  layoutRoute.addChildren([indexRoute, keysRoute, settingsRoute, adminRoute, consoleRoute, docsRoute]),
 ]);
 
 const router = createRouter({ routeTree });

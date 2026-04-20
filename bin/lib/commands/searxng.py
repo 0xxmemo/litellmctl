@@ -11,9 +11,39 @@ import yaml
 
 from ..common.formatting import console, info, warn
 from ..common.network import http_check
-from ..common.paths import PROJECT_DIR
+from ..common.paths import PROJECT_DIR, VENV_DIR
 
 SETTINGS_FILE = PROJECT_DIR / "searxng" / "settings.yml"
+
+
+def _searxng_secret_key() -> str:
+    secret = os.environ.get("SEARXNG_SECRET_KEY", "").strip()
+    if secret:
+        return secret
+    import secrets
+    return secrets.token_hex(32)
+
+
+def searxng_start_foreground() -> None:
+    """Replace current process with `python -m searx.webapp` (docker harness)."""
+    port = int(os.environ.get("SEARXNG_PORT", "8888"))
+
+    _sync_proxy_settings()
+
+    python = str(VENV_DIR / "bin" / "python")
+    if not os.path.exists(python):
+        import shutil
+        python = shutil.which("python3") or "python"
+
+    if SETTINGS_FILE.exists():
+        os.environ["SEARXNG_SETTINGS_PATH"] = str(SETTINGS_FILE)
+    os.environ.setdefault("SEARXNG_SECRET_KEY", _searxng_secret_key())
+    os.environ.setdefault("SEARXNG_BIND_ADDRESS", "0.0.0.0")
+    os.environ["SEARXNG_PORT"] = str(port)
+
+    argv = [python, "-m", "searx.webapp"]
+    info(f"Starting SearXNG on port {port} (foreground) ...")
+    os.execvp(argv[0], argv)
 
 
 def _sync_proxy_settings() -> None:
