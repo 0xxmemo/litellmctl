@@ -1,13 +1,19 @@
 /**
- * LiteLLM plugin MCP config — stripped down to only the env vars we use.
+ * LiteLLM plugin MCP config.
+ *
+ * The embedding model and dimensions are FIXED by the LiteLLM control plane —
+ * they are NOT user-configurable. Changing them per-user would fragment the
+ * vector store (one vec0 table per dim) and invalidate existing indexes.
  */
+
+export const EMBEDDING_MODEL = 'local/nomic-embed-text';
+export const EMBEDDING_DIMENSIONS = 512;
 
 export interface ContextMcpConfig {
     name: string;
     version: string;
     gatewayUrl: string;
     gatewayApiKey: string;
-    embeddingModel: string;
     stateDir: string;
 }
 
@@ -62,7 +68,6 @@ function requireEnv(name: string): string {
 export function createMcpConfig(): ContextMcpConfig {
     const gatewayUrl = requireEnv('LLM_GATEWAY_URL');
     const gatewayApiKey = requireEnv('LLM_GATEWAY_API_KEY');
-    const embeddingModel = process.env.EMBEDDING_MODEL || 'local/nomic-embed-text';
     const stateDir = process.env.CLAUDE_CONTEXT_STATE_DIR
         || `${process.env.HOME}/.litellm/plugin-state/claude-context`;
 
@@ -71,7 +76,6 @@ export function createMcpConfig(): ContextMcpConfig {
         version: process.env.MCP_SERVER_VERSION || '1.0.0',
         gatewayUrl,
         gatewayApiKey,
-        embeddingModel,
         stateDir,
     };
 }
@@ -79,7 +83,8 @@ export function createMcpConfig(): ContextMcpConfig {
 export function logConfigurationSummary(config: ContextMcpConfig): void {
     console.log(`[MCP] Starting ${config.name} v${config.version}`);
     console.log(`[MCP]   Gateway URL:     ${config.gatewayUrl}`);
-    console.log(`[MCP]   Embedding model: ${config.embeddingModel}`);
+    console.log(`[MCP]   Embedding model: ${EMBEDDING_MODEL} (fixed)`);
+    console.log(`[MCP]   Dimensions:      ${EMBEDDING_DIMENSIONS} (fixed)`);
     console.log(`[MCP]   State dir:       ${config.stateDir}`);
 }
 
@@ -94,10 +99,12 @@ Required env:
   LLM_GATEWAY_API_KEY   User's gateway API key
 
 Optional env:
-  EMBEDDING_MODEL             Default: local/nomic-embed-text
   CLAUDE_CONTEXT_STATE_DIR    Default: ~/.litellm/plugin-state/claude-context
   EMBEDDING_BATCH_SIZE        Default: 64
   CUSTOM_EXTENSIONS           Comma-separated extra extensions
   CUSTOM_IGNORE_PATTERNS      Comma-separated extra ignore patterns
+
+Embedding model (${EMBEDDING_MODEL}) and dimensions (${EMBEDDING_DIMENSIONS})
+are fixed by the LiteLLM control plane and cannot be overridden.
 `);
 }

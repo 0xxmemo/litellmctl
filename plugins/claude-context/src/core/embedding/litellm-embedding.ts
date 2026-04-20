@@ -4,7 +4,8 @@ export interface LiteLLMEmbeddingConfig {
     baseUrl: string;      // e.g. http://localhost:14041
     apiKey: string;       // user's gateway API key
     model: string;        // e.g. local/nomic-embed-text
-    dimension?: number;
+    dimension?: number;   // if set, pre-cached; else detected via probe
+    dimensions?: number;  // sent in request body (Matryoshka truncation, e.g. 512)
     maxTokens?: number;
 }
 
@@ -28,7 +29,12 @@ export class LiteLLMEmbedding extends Embedding {
         if (!config.apiKey) throw new Error('LiteLLMEmbedding: apiKey required');
         if (!config.model) throw new Error('LiteLLMEmbedding: model required');
 
-        if (config.dimension && config.dimension > 0) {
+        // When `dimensions` is set, we can skip the probe call — the backend
+        // will return vectors truncated to that size (Matryoshka).
+        if (config.dimensions && config.dimensions > 0) {
+            this.dimension = config.dimensions;
+            this.dimensionDetected = true;
+        } else if (config.dimension && config.dimension > 0) {
             this.dimension = config.dimension;
             this.dimensionDetected = true;
         }
@@ -101,10 +107,14 @@ export class LiteLLMEmbedding extends Embedding {
 
     private async callEmbeddings(input: string[]): Promise<OpenAIEmbeddingResponse> {
         const url = this.config.baseUrl.replace(/\/$/, '') + '/v1/embeddings';
-        const body = JSON.stringify({
+        const payload: Record<string, unknown> = {
             model: this.config.model,
             input: input.length === 1 ? input[0] : input,
-        });
+        };
+        if (this.config.dimensions && this.config.dimensions > 0) {
+            payload.dimensions = this.config.dimensions;
+        }
+        const body = JSON.stringify(payload);
         const response = await fetch(url, {
             method: 'POST',
             headers: {

@@ -57,13 +57,13 @@ except Exception:
     settings = {"env": {}, "permissions": {"allow": [], "deny": [], "ask": []}}
 
 settings.setdefault("mcpServers", {})
+# Embedding model + dimensions are fixed by the plugin source, NOT env vars.
 settings["mcpServers"][entry_name] = {
     "command": "bun",
     "args": ["run", os.path.join(plugin_src, "src", "index.ts")],
     "env": {
         "LLM_GATEWAY_URL": gateway_url,
         "LLM_GATEWAY_API_KEY": api_key,
-        "EMBEDDING_MODEL": os.environ.get("EMBEDDING_MODEL", "local/nomic-embed-text"),
         "CLAUDE_CONTEXT_STATE_DIR": state_dir,
     },
 }
@@ -78,8 +78,7 @@ PYEOF
         jq --arg plugin_src "$PLUGIN_SRC_DIR" \
            --arg gateway "$GATEWAY_ORIGIN" \
            --arg key "$API_KEY" \
-           --arg state "$STATE_DIR" \
-           --arg model "${EMBEDDING_MODEL:-local/nomic-embed-text}" '
+           --arg state "$STATE_DIR" '
             if .mcpServers == null then .mcpServers = {} else . end |
             .mcpServers["claude-context"] = {
                 "command": "bun",
@@ -87,7 +86,6 @@ PYEOF
                 "env": {
                     "LLM_GATEWAY_URL": $gateway,
                     "LLM_GATEWAY_API_KEY": $key,
-                    "EMBEDDING_MODEL": $model,
                     "CLAUDE_CONTEXT_STATE_DIR": $state
                 }
             }

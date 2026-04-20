@@ -26,6 +26,8 @@ import {
     logConfigurationSummary,
     showHelpMessage,
     ContextMcpConfig,
+    EMBEDDING_MODEL,
+    EMBEDDING_DIMENSIONS,
 } from "./config";
 import { SnapshotManager } from "./snapshot";
 import { SyncManager } from "./sync";
@@ -47,7 +49,8 @@ class ContextMcpServer {
         const embedding = new LiteLLMEmbedding({
             baseUrl: config.gatewayUrl,
             apiKey: config.gatewayApiKey,
-            model: config.embeddingModel,
+            model: EMBEDDING_MODEL,
+            dimensions: EMBEDDING_DIMENSIONS,
         });
 
         const vectorDatabase = new GatewayVectorDatabase({

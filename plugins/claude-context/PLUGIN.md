@@ -20,8 +20,9 @@ All state lives on your machine: embeddings are generated via the LiteLLM gatewa
 ```bash
 GATEWAY_URL=__GATEWAY_URL__
 API_KEY=__API_KEY__
-EMBEDDING_MODEL=local/nomic-embed-text
 ```
+
+Embedding model and dimensions are fixed by the plugin (`local/nomic-embed-text` @ 512-d Matryoshka) — not configurable per install.
 
 The MCP server is registered in `~/.claude/settings.json` under `mcpServers.claude-context` and runs via `bun run /Users/anon/.litellm/plugins/claude-context/src/index.ts`.
 
@@ -31,7 +32,6 @@ The MCP server is registered in `~/.claude/settings.json` under `mcpServers.clau
 |---|---|---|
 | `LLM_GATEWAY_URL` | yes | — |
 | `LLM_GATEWAY_API_KEY` | yes | — |
-| `EMBEDDING_MODEL` | no | `local/nomic-embed-text` |
 | `CLAUDE_CONTEXT_STATE_DIR` | no | `~/.litellm/plugin-state/claude-context` |
 | `EMBEDDING_BATCH_SIZE` | no | `64` |
 
