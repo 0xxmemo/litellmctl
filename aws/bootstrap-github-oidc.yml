@@ -89,17 +89,16 @@ Resources:
                 Resource: "*"
                 Action:
                   - cloudformation:*
-              # EC2 / IAM / SSM scoped to our AppName — permissive in V1,
-              # tighten once the resource tree stabilises.
+              # EC2 / IAM / SSM / logs — permissive in V1, tighten once the
+              # resource tree stabilises. ssm:* covers both SendCommand (for
+              # the in-place deploy step) AND GetParameters (which CFN calls
+              # during change-set validation to resolve the AMI lookup).
               - Effect: Allow
                 Resource: "*"
                 Action:
                   - ec2:*
                   - iam:*
-                  - ssm:SendCommand
-                  - ssm:GetCommandInvocation
-                  - ssm:ListCommandInvocations
-                  - ssm:DescribeInstanceInformation
+                  - ssm:*
                   - logs:*
 
 Outputs:
