@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Key, Download } from "lucide-react";
+import { Key, Download, Puzzle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { ApiKeyInput, useApiKey } from "@/components/EndpointTryCard";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SetupWidget } from "./SetupWidget";
 import { SkillsInstall } from "./SkillsInstall";
+import { PluginsInstall } from "./PluginsInstall";
 
 function getBaseUrl(): string {
   if (typeof window === "undefined") return "http://localhost:14041";
@@ -40,13 +41,17 @@ export function ConfigContainer() {
 
         {/* Tabs for different setup options */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-2">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="setup" className="gap-1.5">
               Setup
             </TabsTrigger>
             <TabsTrigger value="skills" className="gap-1.5">
               <Download className="h-4 w-4" />
               Skills
+            </TabsTrigger>
+            <TabsTrigger value="plugins" className="gap-1.5">
+              <Puzzle className="h-4 w-4" />
+              Plugins
             </TabsTrigger>
           </TabsList>
 
@@ -56,6 +61,10 @@ export function ConfigContainer() {
 
           <TabsContent value="skills" className="mt-4">
             <SkillsInstall apiKey={apiKey} baseUrl={baseUrl} />
+          </TabsContent>
+
+          <TabsContent value="plugins" className="mt-4">
+            <PluginsInstall apiKey={apiKey} baseUrl={baseUrl} />
           </TabsContent>
         </Tabs>
       </CardContent>

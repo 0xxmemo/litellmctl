@@ -37,6 +37,10 @@ export const queryKeys = {
   skills: ['skills'] as const,
   skillsTargets: ['skills', 'targets'] as const,
 
+  // Plugins
+  plugins: ['plugins'] as const,
+  pluginsTargets: ['plugins', 'targets'] as const,
+
   // Setup options
   setupOptions: ['setup', 'options'] as const,
 } as const

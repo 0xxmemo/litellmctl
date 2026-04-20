@@ -36,3 +36,6 @@ ref/
 *.db-wal
 prisma/migrations/
 .prisma/gateway/index
+
+# Dependencies
+**/**/node_modules/

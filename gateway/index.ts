@@ -26,6 +26,8 @@ import { searchRoutes } from "./routes/search";
 import { healthRoutes } from "./routes/health";
 import { setupRoutes } from "./routes/setup";
 import { skillsRoutes } from "./routes/skills";
+import { vectorDbRoutes, handleVectorDbByName } from "./routes/vectordb";
+import { pluginsRoutes } from "./routes/plugins";
 
 // Last-resort handlers — any throw that escapes a request handler, an
 // interval callback, or a detached promise lands here. We log and keep the
@@ -75,6 +77,7 @@ await initCliSecret();
 const allRoutes = [
   authRoutes, keysRoutes, modelsRoutes, statsRoutes,
   userRoutes, adminRoutes, proxyRoutes, searchRoutes, healthRoutes, setupRoutes, skillsRoutes,
+  vectorDbRoutes, pluginsRoutes,
 ];
 
 function buildRouteManifest() {
@@ -229,6 +232,8 @@ Bun.serve({
     ...healthRoutes,
     ...setupRoutes,
     ...skillsRoutes,
+    ...vectorDbRoutes,
+    ...pluginsRoutes,
 
     // Icons (served from /public/)
     "/favicon.ico": async () => (await serveStaticFile("/public/favicon.ico")) || new Response("Not found", { status: 404 }),
@@ -257,6 +262,12 @@ Bun.serve({
     // /api/keys/:id — DELETE, PUT
     if (url.pathname.startsWith("/api/keys/")) {
       const res = await handleKeyById(req);
+      if (res) return res;
+    }
+
+    // /api/vectordb/collections/:name[/insert|/search|/delete|/query]
+    if (url.pathname.startsWith("/api/vectordb/collections/")) {
+      const res = await handleVectorDbByName(req);
       if (res) return res;
     }
 

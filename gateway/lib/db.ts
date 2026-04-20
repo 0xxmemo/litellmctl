@@ -109,6 +109,32 @@ export async function connectDB(): Promise<void> {
       ON usage_logs(email, model, timestamp DESC);
     CREATE INDEX IF NOT EXISTS idx_usage_email_actual_ts
       ON usage_logs(email, actual_model, timestamp DESC);
+
+    CREATE TABLE IF NOT EXISTS plugin_collections (
+      api_key_hash TEXT NOT NULL,
+      name TEXT NOT NULL,
+      dimension INTEGER NOT NULL,
+      created_at INTEGER NOT NULL,
+      PRIMARY KEY (api_key_hash, name)
+    );
+
+    CREATE TABLE IF NOT EXISTS plugin_chunks (
+      rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+      api_key_hash TEXT NOT NULL,
+      collection TEXT NOT NULL,
+      chunk_id TEXT NOT NULL,
+      content TEXT NOT NULL,
+      relative_path TEXT NOT NULL,
+      start_line INTEGER NOT NULL,
+      end_line INTEGER NOT NULL,
+      file_extension TEXT,
+      metadata TEXT,
+      UNIQUE(api_key_hash, collection, chunk_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_plugin_chunks_scope
+      ON plugin_chunks(api_key_hash, collection);
+    CREATE INDEX IF NOT EXISTS idx_plugin_chunks_rel
+      ON plugin_chunks(api_key_hash, collection, relative_path);
   `;
   for (const stmt of schema.split(";")) {
     const trimmed = stmt.trim();
