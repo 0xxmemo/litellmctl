@@ -70,3 +70,66 @@ export function usePluginTargets() {
 }
 
 export type UsePluginTargetsReturn = ReturnType<typeof usePluginTargets>
+
+// ── Plugin usage / monitoring ────────────────────────────────────────────────
+
+export interface ClaudeContextCollection {
+  name: string
+  dimension: number
+  createdAt: number
+  chunks: number
+  files: number
+  codebasePath: string | null
+}
+
+export interface ClaudeContextUsage {
+  totals: { codebases: number; chunks: number; files: number }
+  collections: ClaudeContextCollection[]
+}
+
+export interface SupermemoryEntry {
+  id: string
+  content: string
+  createdAt: string | null
+  source: string | null
+}
+
+export interface SupermemoryUsage {
+  exists: boolean
+  total: number
+  createdAt?: number
+  dimension?: number
+  memories: SupermemoryEntry[]
+}
+
+async function fetchClaudeContextUsage(): Promise<ClaudeContextUsage> {
+  const res = await apiFetch('/api/plugins/claude-context/usage')
+  return (await res.json()) as ClaudeContextUsage
+}
+
+async function fetchSupermemoryUsage(limit: number): Promise<SupermemoryUsage> {
+  const res = await apiFetch(`/api/plugins/supermemory/usage?limit=${limit}`)
+  return (await res.json()) as SupermemoryUsage
+}
+
+export function useClaudeContextUsage(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.claudeContextUsage,
+    queryFn: fetchClaudeContextUsage,
+    enabled: options?.enabled ?? true,
+    refetchOnWindowFocus: false,
+  })
+}
+
+export type UseClaudeContextUsageReturn = ReturnType<typeof useClaudeContextUsage>
+
+export function useSupermemoryUsage(limit = 20, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.supermemoryUsage(limit),
+    queryFn: () => fetchSupermemoryUsage(limit),
+    enabled: options?.enabled ?? true,
+    refetchOnWindowFocus: false,
+  })
+}
+
+export type UseSupermemoryUsageReturn = ReturnType<typeof useSupermemoryUsage>

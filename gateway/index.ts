@@ -28,6 +28,7 @@ import { setupRoutes } from "./routes/setup";
 import { skillsRoutes } from "./routes/skills";
 import { vectorDbRoutes, handleVectorDbByName } from "./routes/vectordb";
 import { pluginsRoutes } from "./routes/plugins";
+import { pluginStatsRoutes } from "./routes/pluginStats";
 
 // Last-resort handlers — any throw that escapes a request handler, an
 // interval callback, or a detached promise lands here. We log and keep the
@@ -77,7 +78,7 @@ await initCliSecret();
 const allRoutes = [
   authRoutes, keysRoutes, modelsRoutes, statsRoutes,
   userRoutes, adminRoutes, proxyRoutes, searchRoutes, healthRoutes, setupRoutes, skillsRoutes,
-  vectorDbRoutes, pluginsRoutes,
+  vectorDbRoutes, pluginsRoutes, pluginStatsRoutes,
 ];
 
 function buildRouteManifest() {
@@ -234,6 +235,7 @@ Bun.serve({
     ...skillsRoutes,
     ...vectorDbRoutes,
     ...pluginsRoutes,
+    ...pluginStatsRoutes,
 
     // Icons (served from /public/)
     "/favicon.ico": async () => (await serveStaticFile("/public/favicon.ico")) || new Response("Not found", { status: 404 }),

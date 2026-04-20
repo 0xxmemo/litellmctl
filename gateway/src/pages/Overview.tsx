@@ -1,11 +1,13 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { StatCard } from '@/components/StatCard'
-import { Activity, Key, Zap, TrendingUp, RefreshCw } from 'lucide-react'
+import { Activity, Key, Zap, TrendingUp, RefreshCw, Puzzle, BarChart3 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PrettyAmount } from '@/components/PrettyAmount'
 import { ModelUsagePieChart } from '@/components/ModelUsagePieChart'
 import { RequestsTable } from '@/components/RequestsTable'
+import { PluginsOverview } from '@/components/plugins/PluginsOverview'
 import { getDisplayName, formatProviderName, getProviderColor, extractProvider, resolveProvider } from '@lib/models'
 import { useUserStats } from '@/hooks/useStats'
 import { useAuth } from '@/hooks/useAuth'
@@ -121,6 +123,8 @@ export function Overview() {
 
   const userChartData = buildUserChart(userStats)
 
+  const [activeTab, setActiveTab] = useState<string>('usage')
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -146,64 +150,81 @@ export function Overview() {
         </Card>
       )}
 
-      {/* Signed-in user / admin: personal usage */}
+      {/* Signed-in user / admin: personal usage + plugins */}
       {authChecked && canSeeUsage && (
-        <div className="space-y-6">
-          <div className="flex justify-end">
-            <LastUpdated ts={userStatsUpdatedAt} spinning={userStatsSpinning} />
-          </div>
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+          <TabsList className="grid w-full grid-cols-2 max-w-md">
+            <TabsTrigger value="usage" className="gap-1.5">
+              <BarChart3 className="h-4 w-4" />
+              Usage
+            </TabsTrigger>
+            <TabsTrigger value="plugins" className="gap-1.5">
+              <Puzzle className="h-4 w-4" />
+              Plugins
+            </TabsTrigger>
+          </TabsList>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            <StatCard
-              title="Your Keys"
-              value={<PrettyAmount amountFormatted={userStatsLoading ? '...' : (userStats?.keys ?? 0)} size="2xl" normalPrecision={0} />}
-              icon={Key}
-            />
-            <StatCard
-              title="Your Requests"
-              value={<PrettyAmount amountFormatted={userStatsLoading ? '...' : (userStats?.requests ?? 0)} size="2xl" />}
-              icon={Activity}
-            />
-            <StatCard
-              title="Your Tokens"
-              value={<PrettyAmount amountFormatted={userStatsLoading ? '...' : (userStats?.tokens ?? 0)} size="2xl" />}
-              icon={Zap}
-            />
-          </div>
+          <TabsContent value="usage" className="mt-6 space-y-6">
+            <div className="flex justify-end">
+              <LastUpdated ts={userStatsUpdatedAt} spinning={userStatsSpinning} />
+            </div>
 
-          <UsageChart data={userChartData} loading={userStatsLoading} />
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              <StatCard
+                title="Your Keys"
+                value={<PrettyAmount amountFormatted={userStatsLoading ? '...' : (userStats?.keys ?? 0)} size="2xl" normalPrecision={0} />}
+                icon={Key}
+              />
+              <StatCard
+                title="Your Requests"
+                value={<PrettyAmount amountFormatted={userStatsLoading ? '...' : (userStats?.requests ?? 0)} size="2xl" />}
+                icon={Activity}
+              />
+              <StatCard
+                title="Your Tokens"
+                value={<PrettyAmount amountFormatted={userStatsLoading ? '...' : (userStats?.tokens ?? 0)} size="2xl" />}
+                icon={Zap}
+              />
+            </div>
 
-          {!userStatsLoading && userStats?.modelUsage && userStats.modelUsage.length > 0 ? (
-            <ModelUsagePieChart
-              data={userStats.modelUsage.map(m => {
-                const provider = extractProvider(m.model_name) || resolveProvider(m.model_name, '')
-                return {
-                  name: getDisplayName(m.model_name),
-                  value: m.requests ?? 0,
-                  percentage: m.percentage || '0',
-                  provider,
-                  colorClass: getProviderColor(provider),
-                  providerName: formatProviderName(provider),
-                }
-              })}
-            />
-          ) : !userStatsLoading ? (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Your Model Usage</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center text-muted-foreground py-8">
-                  <Activity className="w-12 h-12 mx-auto mb-3 opacity-20" />
-                  <p className="text-sm">No model usage data yet</p>
-                  <p className="text-xs mt-1">Model statistics appear here after your first API request</p>
-                </div>
-              </CardContent>
-            </Card>
-          ) : null}
+            <UsageChart data={userChartData} loading={userStatsLoading} />
 
-          <RequestsTable requestsTable={requestsTable} />
-        </div>
+            {!userStatsLoading && userStats?.modelUsage && userStats.modelUsage.length > 0 ? (
+              <ModelUsagePieChart
+                data={userStats.modelUsage.map(m => {
+                  const provider = extractProvider(m.model_name) || resolveProvider(m.model_name, '')
+                  return {
+                    name: getDisplayName(m.model_name),
+                    value: m.requests ?? 0,
+                    percentage: m.percentage || '0',
+                    provider,
+                    colorClass: getProviderColor(provider),
+                    providerName: formatProviderName(provider),
+                  }
+                })}
+              />
+            ) : !userStatsLoading ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Your Model Usage</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-center text-muted-foreground py-8">
+                    <Activity className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                    <p className="text-sm">No model usage data yet</p>
+                    <p className="text-xs mt-1">Model statistics appear here after your first API request</p>
+                  </div>
+                </CardContent>
+              </Card>
+            ) : null}
+
+            <RequestsTable requestsTable={requestsTable} />
+          </TabsContent>
+
+          <TabsContent value="plugins" className="mt-6">
+            <PluginsOverview enabled={activeTab === 'plugins'} />
+          </TabsContent>
+        </Tabs>
       )}
 
       {!isLoggedIn && authChecked && (

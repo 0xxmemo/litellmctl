@@ -40,6 +40,8 @@ export const queryKeys = {
   // Plugins
   plugins: ['plugins'] as const,
   pluginsTargets: ['plugins', 'targets'] as const,
+  claudeContextUsage: ['plugins', 'claude-context', 'usage'] as const,
+  supermemoryUsage: (limit: number) => ['plugins', 'supermemory', 'usage', limit] as const,
 
   // Setup options
   setupOptions: ['setup', 'options'] as const,
