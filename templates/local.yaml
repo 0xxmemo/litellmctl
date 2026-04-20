@@ -29,29 +29,11 @@ embedding_models:
       output_vector_size: 512
       embedding_dimensions_options: [256, 512, 768]
 
-# Local transcription models
-# Served by faster-whisper-server at LOCAL_TRANSCRIPTION_API_BASE (written to .env by litellmctl install --with-transcription)
-# /v1 suffix required in LOCAL_TRANSCRIPTION_API_BASE: LiteLLM appends /audio/transcriptions directly to api_base.
-# Uses litellm's openai provider with api_base override pointing to the local server.
+# Local transcription — single preset: Whisper large-v3-turbo (best speed/quality tradeoff).
+# Served by speaches at LOCAL_TRANSCRIPTION_API_BASE (written to .env by litellmctl install --with-transcription).
+# /v1 suffix required: LiteLLM appends /audio/transcriptions directly to api_base.
+# Override the pulled model with LOCAL_TRANSCRIPTION_MODEL env var before install.
 transcription_models:
-  - model_name: local/distil-whisper-large-v3
-    model: openai/distil-whisper-large-v3
-    api_base: os.environ/LOCAL_TRANSCRIPTION_API_BASE
-    api_key: sk-local
-    model_info:
-      mode: audio_transcription
-  - model_name: local/whisper
-    model: openai/whisper
-    api_base: os.environ/LOCAL_TRANSCRIPTION_API_BASE
-    api_key: sk-local
-    model_info:
-      mode: audio_transcription
-  - model_name: local/whisper-large-v3
-    model: openai/whisper-large-v3
-    api_base: os.environ/LOCAL_TRANSCRIPTION_API_BASE
-    api_key: sk-local
-    model_info:
-      mode: audio_transcription
   - model_name: local/whisper-large-v3-turbo
     model: openai/whisper-large-v3-turbo
     api_base: os.environ/LOCAL_TRANSCRIPTION_API_BASE

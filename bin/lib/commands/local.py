@@ -271,7 +271,7 @@ def install_transcription() -> None:
             subprocess.call([
                 "docker", "run", "-d", "--name", "faster-whisper",
                 "-p", "10300:8000",
-                "-e", "WHISPER__MODEL=Systran/faster-whisper-tiny",
+                "-e", "WHISPER__MODEL=Systran/faster-whisper-large-v3-turbo",
                 "ghcr.io/speaches-ai/speaches:latest-cpu",
             ])
         else:
@@ -287,7 +287,7 @@ def install_transcription() -> None:
             transcr_port = port_match.group(1) if port_match else "10300"
             transcr_log = LOG_DIR / "faster-whisper.log"
             LOG_DIR.mkdir(parents=True, exist_ok=True)
-            transcr_model = os.environ.get("LOCAL_TRANSCRIPTION_MODEL", "Systran/faster-whisper-tiny")
+            transcr_model = os.environ.get("LOCAL_TRANSCRIPTION_MODEL", "Systran/faster-whisper-large-v3-turbo")
 
             cmd = _build_transcription_cmd(transcr_bin, transcr_port, transcr_model)
             info(f"Starting {transcr_bin} (first start downloads model — may take a minute) ...")
