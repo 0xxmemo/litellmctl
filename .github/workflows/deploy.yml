@@ -96,6 +96,9 @@ jobs:
               ;;
           esac
 
+      # When the stack already exists and nothing in the template or parameters
+      # changed, this is a true no-op. The per-SHA image roll happens in the
+      # SSM step below, not via CFN.
       - name: Deploy CloudFormation stack
         run: |
           aws cloudformation deploy \
@@ -107,8 +110,7 @@ jobs:
               AppName="${APP_NAME}" \
               InstanceType="${{ inputs.instance_type || 'c7g.xlarge' }}" \
               AdminEmails="${{ secrets.GATEWAY_ADMIN_EMAILS }}" \
-              LitellmMasterKey="${{ secrets.LITELLM_MASTER_KEY }}" \
-              ImageTag="${GITHUB_SHA::12}"
+              LitellmMasterKey="${{ secrets.LITELLM_MASTER_KEY }}"
 
       - name: On-failure stack diagnostics
         if: failure()
@@ -139,6 +141,24 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Compute image tags
+        id: tags
+        env:
+          ECR: ${{ steps.stack.outputs.ecr_uri }}
+          REF: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          # Docker image tags don't allow `/` — fold branch refs like
+          # feat/ec2-express into feat-ec2-express.
+          sanitized=${REF//\//-}
+          {
+            echo "list<<EOF"
+            echo "${ECR}:${SHA}"
+            echo "${ECR}:${sanitized}"
+            echo "${ECR}:latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
@@ -146,10 +166,7 @@ jobs:
           file: ./Dockerfile
           platforms: linux/arm64
           push: true
-          tags: |
-            ${{ steps.stack.outputs.ecr_uri }}:${{ github.sha }}
-            ${{ steps.stack.outputs.ecr_uri }}:${{ github.ref_name }}
-            ${{ steps.stack.outputs.ecr_uri }}:latest
+          tags: ${{ steps.tags.outputs.list }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: false

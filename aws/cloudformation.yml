@@ -33,10 +33,11 @@ Parameters:
     MinValue: 0
     MaxValue: 128
 
-  ImageTag:
-    Type: String
-    Default: latest
-    Description: ECR image tag to run. Updated by the deploy workflow on each push.
+  # ImageTag deliberately not a parameter: referencing a per-deploy SHA in
+  # UserData would force CFN to replace the EC2 instance on every release.
+  # Instead, UserData pulls `:latest` on first boot, and the workflow's
+  # post-CFN SSM step rolls the instance to the specific SHA without
+  # touching the EC2 resource.
 
   AdminEmails:
     Type: String
@@ -194,10 +195,13 @@ Resources:
             echo 'LABEL=litellm-data /opt/litellm/data ext4 defaults,nofail 0 2' >> /etc/fstab
           mount -a
 
-          # Pull compose.yml out of the image so the host has it on disk
+          # First-boot bootstrap only. The deploy workflow re-writes .env
+          # with a specific image SHA via SSM on every release — this initial
+          # `:latest` pull is just to get something running before that.
           cd /opt/litellm
+          IMAGE_BASE=${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AppName}
           cat > .env <<ENV
-          LITELLM_IMAGE=${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AppName}:${ImageTag}
+          LITELLM_IMAGE=$${IMAGE_BASE}:latest
           LITELLM_DATA_DIR=/opt/litellm/data
           LITELLM_MASTER_KEY=${LitellmMasterKey}
           GATEWAY_ADMIN_EMAILS=${AdminEmails}
@@ -207,10 +211,8 @@ Resources:
           aws ecr get-login-password --region ${AWS::Region} \
             | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
 
-          # Fetch compose.yml from the pushed image (one-shot, replaced on every deploy
-          # by the deploy workflow writing /opt/litellm/compose.yml over SSM).
-          docker pull ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AppName}:${ImageTag}
-          container=$(docker create ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AppName}:${ImageTag})
+          docker pull "$${IMAGE_BASE}:latest"
+          container=$(docker create "$${IMAGE_BASE}:latest")
           docker cp $container:/app/docker/compose.yml /opt/litellm/compose.yml || true
           docker rm -v $container
 
