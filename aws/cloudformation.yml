@@ -138,10 +138,12 @@ Resources:
       EIP: !Ref Eip
 
   # ── EC2 instance ─────────────────────────────────────────────────────────
+  # No CreationPolicy / cfn-signal — Amazon Linux 2023 doesn't ship
+  # aws-cfn-bootstrap, so a signal-based create policy would just time out
+  # after 15 min with no useful feedback. The workflow's post-deploy
+  # `Smoke-test /api/health` step is the real "is it up?" check instead.
   Instance:
     Type: AWS::EC2::Instance
-    CreationPolicy:
-      ResourceSignal: { Timeout: PT15M }
     Properties:
       ImageId: !Ref LatestAmiId
       InstanceType: !Ref InstanceType
@@ -215,9 +217,9 @@ Resources:
           docker compose -f /opt/litellm/compose.yml --env-file /opt/litellm/.env pull
           docker compose -f /opt/litellm/compose.yml --env-file /opt/litellm/.env up -d
 
-          # Signal CFN success
-          /opt/aws/bin/cfn-signal --exit-code 0 \
-            --stack ${AWS::StackName} --resource Instance --region ${AWS::Region}
+          # Write a breadcrumb so SSM-session operators can `cat` this to
+          # confirm user-data ran to completion.
+          date -u +%FT%TZ > /var/log/user-data-done
 
 Outputs:
   PublicIp:
