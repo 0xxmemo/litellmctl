@@ -16,11 +16,6 @@ Parameters:
     Type: String
     Description: Repo name (e.g. "litellmctl").
 
-  AllowedBranches:
-    Type: CommaDelimitedList
-    Default: "main,feat/ec2-express"
-    Description: Branches that may assume this role. Use "*" for any branch.
-
   AppName:
     Type: String
     Default: litellm-gateway
@@ -69,13 +64,14 @@ Resources:
             Condition:
               StringEquals:
                 "token.actions.githubusercontent.com:aud": sts.amazonaws.com
+              # Trust boundary is the repo. Any workflow in this repo — push,
+              # pull_request, workflow_dispatch, tag — can assume this role.
+              # The role only has deploy permissions; restrict branches further
+              # via GitHub's own branch protection / environment rules if you
+              # need tighter control (see docs/docker.md).
               StringLike:
                 "token.actions.githubusercontent.com:sub":
-                  !Split
-                    - ","
-                    - !Sub
-                      - "repo:${GithubOrg}/${GithubRepo}:ref:refs/heads/${Joined}"
-                      - Joined: !Join [",repo:${GithubOrg}/${GithubRepo}:ref:refs/heads/", !Ref AllowedBranches]
+                  - !Sub "repo:${GithubOrg}/${GithubRepo}:*"
       Policies:
         - PolicyName: deploy
           PolicyDocument:

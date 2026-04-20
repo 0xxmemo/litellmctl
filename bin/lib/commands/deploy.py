@@ -250,12 +250,6 @@ def _aws_deploy() -> None:
     gh_org = ask("GitHub org", default=gh_org_default)
     gh_repo = ask("GitHub repo", default=gh_repo_default)
 
-    if current_branch and current_branch not in ("main", "HEAD"):
-        allowed_default = f"main,{current_branch}"
-    else:
-        allowed_default = "main"
-    allowed_branches = ask("Branches allowed to deploy (comma-separated)", default=allowed_default)
-
     admin_emails = ask("Admin email(s), comma-separated", default=git_email or "you@example.com")
 
     repo = f"{gh_org}/{gh_repo}"
@@ -282,7 +276,6 @@ def _aws_deploy() -> None:
     console.print(f"  [dim]account          [/]{account}")
     console.print(f"  [dim]app / stack name [/]{app_name}")
     console.print(f"  [dim]github repo      [/]{repo}")
-    console.print(f"  [dim]allowed branches [/]{allowed_branches}")
     console.print(f"  [dim]admin emails     [/]{admin_emails}")
     console.print(f"  [dim]OIDC stack       [/]{oidc_stack}")
     console.print(
@@ -331,7 +324,6 @@ def _aws_deploy() -> None:
         f"GithubOrg={gh_org}",
         f"GithubRepo={gh_repo}",
         f"AppName={app_name}",
-        f"AllowedBranches={allowed_branches}",
         f"ExistingOidcProviderArn={existing_arn}",
     ])
 
@@ -379,11 +371,6 @@ def _aws_deploy() -> None:
     # ── Trigger workflow ─────────────────────────────────────────────────
     info("Deploy workflow")
     run_branch = ask("Branch to deploy", default=current_branch)
-
-    if run_branch not in [b.strip() for b in allowed_branches.split(",")]:
-        warn(f"'{run_branch}' is not in the allowed-branches list ({allowed_branches}).")
-        warn("   The role will refuse to assume from that branch. Re-run and")
-        warn("   include it, or update the OIDC stack manually.")
 
     if confirm(f"Dispatch deploy.yml on {run_branch} now?", default=True):
         _run(["gh", "workflow", "run", "deploy.yml", "-R", repo, "-r", run_branch])

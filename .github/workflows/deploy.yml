@@ -29,6 +29,12 @@ concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
+# Opt into Node 24 now so we don't chase deprecations every few months.
+# Remove once all JS-backed actions (configure-aws-credentials, checkout, etc.)
+# publish Node 24-native major versions.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
