@@ -86,11 +86,15 @@ jobs:
             --stack-name "${STACK_NAME}" \
             --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo MISSING)
           echo "stack=${STACK_NAME} status=${status}"
-          if [ "$status" = "ROLLBACK_COMPLETE" ] || [ "$status" = "CREATE_FAILED" ]; then
-            echo "::warning::stack is in $status — deleting so we can re-create"
-            aws cloudformation delete-stack --stack-name "${STACK_NAME}"
-            aws cloudformation wait stack-delete-complete --stack-name "${STACK_NAME}"
-          fi
+          # Terminal / semi-wedged states that `cloudformation deploy` cannot
+          # move out of. We delete and let the next step re-create.
+          case "$status" in
+            ROLLBACK_COMPLETE|CREATE_FAILED|REVIEW_IN_PROGRESS|ROLLBACK_FAILED|DELETE_FAILED)
+              echo "::warning::stack is in $status — deleting so we can re-create"
+              aws cloudformation delete-stack --stack-name "${STACK_NAME}"
+              aws cloudformation wait stack-delete-complete --stack-name "${STACK_NAME}"
+              ;;
+          esac
 
       - name: Deploy CloudFormation stack
         run: |
