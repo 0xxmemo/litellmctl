@@ -90,9 +90,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # ── Claude Code CLI ──────────────────────────────────────────────────────────
 # Ships as a native per-platform binary — no Node runtime required. The
 # installer script drops `claude` in /root/.local/bin and keeps versioned
-# binaries under /root/.local/share/claude. We disable auto-updates in
-# /root/.claude/settings.json below because the container is immutable:
-# new versions ship by rebuilding the image.
+# binaries under /root/.local/share/claude. Both of those dirs are
+# persisted under /data/home by the entrypoint, so the background
+# auto-updater writes to the data volume and survives container rebuilds.
 ARG CLAUDE_CODE_CHANNEL
 RUN curl -fsSL https://claude.ai/install.sh -o /tmp/claude-install.sh \
  && bash /tmp/claude-install.sh "${CLAUDE_CODE_CHANNEL}" \
@@ -201,8 +201,6 @@ export ANTHROPIC_AUTH_TOKEN="${ANTHROPIC_AUTH_TOKEN:-${LITELLM_MASTER_KEY:-}}"
 export ANTHROPIC_DEFAULT_OPUS_MODEL="${ANTHROPIC_DEFAULT_OPUS_MODEL:-ultra}"
 export ANTHROPIC_DEFAULT_SONNET_MODEL="${ANTHROPIC_DEFAULT_SONNET_MODEL:-plus}"
 export ANTHROPIC_DEFAULT_HAIKU_MODEL="${ANTHROPIC_DEFAULT_HAIKU_MODEL:-lite}"
-# Immutable container — never try to auto-update the baked binary.
-export DISABLE_AUTOUPDATER=1
 # Make litellmctl + claude + venv binaries directly invokable.
 export PATH="/root/.local/bin:/opt/venv/bin:/root/.bun/bin:/app/bin:${PATH}"
 PROFILE
@@ -228,8 +226,9 @@ cat > /root/.bash_profile <<'BPROFILE'
 BPROFILE
 
 # Seed Claude Code's own settings.json so tier-aliased models work even when
-# the user launches `claude` outside an interactive shell. Disable the
-# in-process auto-updater — the container is immutable.
+# the user launches `claude` outside an interactive shell. The file is
+# symlinked to /data/claude/settings.json by the entrypoint, so the admin
+# can edit it from the console and the change survives container rebuilds.
 mkdir -p /root/.claude
 cat > /root/.claude/settings.json <<'SETTINGS'
 {
@@ -237,8 +236,7 @@ cat > /root/.claude/settings.json <<'SETTINGS'
     "ANTHROPIC_BASE_URL": "http://localhost:4040",
     "ANTHROPIC_DEFAULT_OPUS_MODEL": "ultra",
     "ANTHROPIC_DEFAULT_SONNET_MODEL": "plus",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "lite",
-    "DISABLE_AUTOUPDATER": "1"
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "lite"
   }
 }
 SETTINGS

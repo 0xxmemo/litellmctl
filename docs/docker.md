@@ -122,6 +122,34 @@ On the EBS volume (`/opt/litellm/data` on the host, mounted as `/data` inside th
 
 Sidecar containers (`ollama`, `searxng`, `whisper`) keep their own named Docker volumes. Ollama models persist across deploys — they only re-download when you blow away the volume.
 
+### Using the container as a personal remote server
+
+The admin has root inside the main container and full ownership of `/root`
+— treat it as your remote box. The entrypoint seeds from image defaults on
+first boot, then symlinks these paths to `/data/home/` so they survive
+every redeploy:
+
+| Path                   | What it's for                                              |
+|------------------------|-------------------------------------------------------------|
+| `~/.local`             | Claude Code binary + auto-updater state, `pip install --user`, custom scripts on `$PATH` |
+| `~/.bun`               | `bun install -g` globals                                   |
+| `~/.claude`            | Claude Code settings + conversation history               |
+| `~/.npm`, `~/.cache`, `~/.config` | Generic XDG dirs                                |
+| `~/.ssh`               | SSH keys if you want the container to act as an SSH client |
+| `~/.bashrc`, `~/.bash_profile` | Your shell config — yours after first boot          |
+| `~/scratch`            | Symlink to `/data/home` — a general-purpose scratch space |
+| `~/.litellm`           | Convenience symlink to `/app` (the project). Its mutable subpaths — `.env`, `config.yaml`, `auth.*.json`, `gateway/gateway.db`, `plugins/`, `logs/` — are already individually symlinked to `/data/*`, so edits persist. |
+
+**One caveat**: apt-installed packages land under `/etc`, `/usr`, `/var` —
+those aren't persisted. On next container replace, they disappear. Two ways
+to handle this:
+
+1. **Drop a `/data/bootstrap.sh`** (executable). The entrypoint runs it on
+   every boot, after `/data` is ready but before any longrun service
+   starts. Put your `apt install -y foo bar`, env fixes, or systemd-ish
+   overrides there. This is the supported escape hatch.
+2. **Bake it into the image** — the Dockerfile is yours to edit; add `RUN apt-get install ...` and push a new build.
+
 ## Day-2 operations (from the web console)
 
 The admin console is a full `bash -l` inside the container. `litellmctl` and
@@ -145,11 +173,12 @@ LiteLLM proxy — no separate Anthropic API key required, no network path off
 the instance for model calls.
 
 Installed via the official native installer (`claude.ai/install.sh`) — a
-per-platform binary with no Node/runtime dependency. Version is pinned per
-image; the in-process auto-updater is disabled because the container is
-immutable. To move to a new Claude Code release, rebuild the image (the
-`CLAUDE_CODE_CHANNEL` build arg accepts `latest`, `stable`, or a version
-like `2.1.89`).
+per-platform binary with no Node/runtime dependency. The image bakes the
+channel chosen at build time (`CLAUDE_CODE_CHANNEL` build arg: `latest`,
+`stable`, or a pinned version like `2.1.89`), and the in-process
+auto-updater stays on at runtime because `/root/.local` is persisted to
+`/data/home/.local` — updates land on the data volume and survive
+container rebuilds.
 
 What's wired up:
 
