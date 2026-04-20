@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
-import tempfile
 import time
 
 from ..common.paths import (
@@ -479,126 +479,86 @@ def uninstall_gateway() -> None:
     console.print(f"      rm -rf {gateway_dir}\n")
 
 
-def _gateway_mongo_uri() -> str | None:
-    """Return GATEWAY_MONGODB_URI from root .env (already loaded by load_env())."""
-    return os.environ.get("GATEWAY_MONGODB_URI")
+def _gateway_db_path() -> str:
+    """Return the SQLite DB path (env override or gateway/gateway.db)."""
+    override = os.environ.get("GATEWAY_DB_PATH")
+    if override:
+        return override
+    return str(PROJECT_DIR / "gateway" / "gateway.db")
 
 
-def _run_mongo_script(script: str) -> subprocess.CompletedProcess:
-    """Run a TypeScript snippet via bun inside the gateway directory (uses its node_modules)."""
-    _ensure_bun_path()
-    gateway_dir = PROJECT_DIR / "gateway"
-    with tempfile.NamedTemporaryFile(
-        suffix=".ts", delete=False, mode="w", dir=str(gateway_dir)
-    ) as f:
-        f.write(script)
-        tmp = f.name
-    try:
-        return subprocess.run(
-            ["bun", "run", tmp],
-            capture_output=True, text=True, timeout=15,
-            cwd=str(gateway_dir),
-        )
-    finally:
-        os.unlink(tmp)
+def _open_gateway_db() -> sqlite3.Connection | None:
+    path = _gateway_db_path()
+    if not os.path.exists(path):
+        error(f"Gateway DB not found at {path}")
+        error("Start the gateway once (litellmctl start gateway) to create it.")
+        return None
+    conn = sqlite3.connect(path)
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 VALID_ROLES = ("guest", "user", "admin")
 
 
 def gateway_set_role(email: str, role: str) -> None:
-    """Set a user's role directly in the gateway MongoDB collection."""
+    """Set a user's role directly in the gateway SQLite DB."""
     load_env()
     if role not in VALID_ROLES:
         error(f"Invalid role '{role}'. Choose from: {', '.join(VALID_ROLES)}")
         return
 
-    mongo_uri = _gateway_mongo_uri()
-    if not mongo_uri:
-        error("GATEWAY_MONGODB_URI not set — check gateway/.env")
+    conn = _open_gateway_db()
+    if conn is None:
         return
-
-    import shutil
-    if not shutil.which("bun"):
-        error("bun not found — install with: curl -fsSL https://bun.sh/install | bash")
-        return
-
-    script = f"""
-import {{ MongoClient }} from "mongodb";
-const client = new MongoClient({json.dumps(mongo_uri)});
-await client.connect();
-const col = client.db("llm-gateway").collection("validated_users");
-const result = await col.updateOne(
-  {{ email: {json.dumps(email.lower())} }},
-  {{
-    $set:       {{ role: {json.dumps(role)} }},
-    $setOnInsert: {{ email: {json.dumps(email.lower())}, createdAt: new Date() }},
-  }},
-  {{ upsert: true }},
-);
-await client.close();
-console.log(JSON.stringify({{ matched: result.matchedCount, upserted: result.upsertedCount }}));
-"""
-    result = _run_mongo_script(script)
-    if result.returncode != 0:
-        error(f"Failed to update role:\n{result.stderr or result.stdout}")
-        return
-
     try:
-        out = json.loads(result.stdout.strip())
-        action = "created" if out.get("upserted") else "updated"
+        email_norm = email.lower()
+        now_ms = int(time.time() * 1000)
+        cur = conn.execute("SELECT 1 FROM validated_users WHERE email = ?", (email_norm,))
+        existed = cur.fetchone() is not None
+        conn.execute(
+            """
+            INSERT INTO validated_users (email, role, created_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(email) DO UPDATE SET role = excluded.role
+            """,
+            (email_norm, role, now_ms),
+        )
+        conn.commit()
+        action = "updated" if existed else "created"
         info(f"{action} {email} → [bold]{role}[/]")
-    except Exception:
-        # stdout contained something unexpected but exit code was 0
-        info(f"Set {email} → {role}")
+    except sqlite3.Error as e:
+        error(f"Failed to update role: {e}")
+    finally:
+        conn.close()
 
 
 def gateway_user_list() -> None:
     """List all gateway users and their roles."""
     load_env()
-    mongo_uri = _gateway_mongo_uri()
-    if not mongo_uri:
-        error("GATEWAY_MONGODB_URI not set — check gateway/.env")
+    conn = _open_gateway_db()
+    if conn is None:
         return
-
-    import shutil
-    if not shutil.which("bun"):
-        error("bun not found")
-        return
-
-    script = f"""
-import {{ MongoClient }} from "mongodb";
-const client = new MongoClient({json.dumps(mongo_uri)});
-await client.connect();
-const users = await client.db("llm-gateway").collection("validated_users")
-  .find({{}}, {{ projection: {{ email: 1, role: 1, _id: 0 }} }})
-  .sort({{ role: 1, email: 1 }})
-  .toArray();
-await client.close();
-console.log(JSON.stringify(users));
-"""
-    result = _run_mongo_script(script)
-    if result.returncode != 0:
-        error(f"Failed to list users:\n{result.stderr or result.stdout}")
-        return
-
     try:
-        users = json.loads(result.stdout.strip())
-    except Exception:
-        error(f"Unexpected output: {result.stdout}")
+        rows = conn.execute(
+            "SELECT email, role FROM validated_users ORDER BY role, email"
+        ).fetchall()
+    except sqlite3.Error as e:
+        error(f"Failed to list users: {e}")
+        conn.close()
         return
+    conn.close()
 
-    if not users:
+    if not rows:
         info("No users found")
         return
 
     role_color = {"admin": "red", "user": "green", "guest": "yellow"}
     console.print(f"\n  {'EMAIL':<40} ROLE")
     console.print(f"  {'─'*40} ────")
-    for u in users:
-        r = u.get("role", "?")
-        color = role_color.get(r, "white")
-        console.print(f"  {u['email']:<40} [{color}]{r}[/]")
+    for r in rows:
+        color = role_color.get(r["role"], "white")
+        console.print(f"  {r['email']:<40} [{color}]{r['role']}[/]")
     console.print()
 
 

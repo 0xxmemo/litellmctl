@@ -257,6 +257,63 @@ fi
 info "Syncing auth file paths ..."
 "$INSTALL_DIR/bin/litellmctl" init-env 2>/dev/null || true
 
+# ── 7b. Gateway SQLite DB + sqlite-vec extension ─────────────────────────
+#
+# The gateway stores all auth/session/usage data in a single SQLite file at
+# $INSTALL_DIR/gateway/gateway.db (created on first gateway start). This
+# step prepares the directory and tries to install the sqlite-vec extension
+# for future vector-search features. All failures here are non-fatal —
+# the gateway runs fine without sqlite-vec, it just can't do vec queries.
+
+GATEWAY_DB_DIR="$INSTALL_DIR/gateway"
+if [ -d "$GATEWAY_DB_DIR" ]; then
+  mkdir -p "$GATEWAY_DB_DIR"
+  ok "Gateway SQLite DB directory ready ($GATEWAY_DB_DIR/gateway.db will be created on first start)"
+fi
+
+install_sqlite_vec_macos() {
+  if ! command -v brew &>/dev/null; then
+    warn "Homebrew not found — skipping sqlite-vec install."
+    echo "  Install brew first (https://brew.sh) then rerun this installer,"
+    echo "  or build sqlite-vec from source: https://github.com/asg017/sqlite-vec"
+    return 0
+  fi
+  # Probe for an already-installed vec0 library in the usual brew locations
+  for p in /opt/homebrew/lib/vec0.dylib /usr/local/lib/vec0.dylib; do
+    if [ -f "$p" ]; then
+      ok "sqlite-vec already installed ($p)"
+      return 0
+    fi
+  done
+  info "Installing sqlite-vec via Homebrew (optional, for vector search) ..."
+  if brew install asg017/sqlite-vec/sqlite-vec 2>/dev/null; then
+    ok "sqlite-vec installed"
+  else
+    warn "sqlite-vec install via brew failed — vector features disabled (non-fatal)"
+    echo "  To install manually later: brew install asg017/sqlite-vec/sqlite-vec"
+  fi
+}
+
+install_sqlite_vec_linux() {
+  for p in /usr/lib/sqlite-vec/vec0.so /usr/local/lib/vec0.so; do
+    if [ -f "$p" ]; then
+      ok "sqlite-vec already installed ($p)"
+      return 0
+    fi
+  done
+  warn "sqlite-vec not found — vector search will be disabled (non-fatal)"
+  echo "  To enable vector features, build and install sqlite-vec manually:"
+  echo "    git clone https://github.com/asg017/sqlite-vec && cd sqlite-vec"
+  echo "    make loadable"
+  echo "    sudo cp dist/vec0.so /usr/local/lib/"
+  echo "  Then restart the gateway."
+}
+
+case "$PLATFORM" in
+  macOS) install_sqlite_vec_macos ;;
+  Linux) install_sqlite_vec_linux ;;
+esac
+
 # ── 8. Shell completions ─────────────────────────────────────────────────
 
 SHELL_NAME="$(basename "${SHELL:-/bin/bash}")"

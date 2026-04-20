@@ -5,7 +5,7 @@ import {
   validateApiKey,
   requireUser,
   trackUsage,
-  validatedUsers,
+  getUserModelOverrides as dbGetUserModelOverrides,
 } from "../lib/db";
 
 /**
@@ -22,19 +22,13 @@ const OVERRIDE_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 /**
  * Get user model overrides with caching.
  */
-async function getUserModelOverrides(
-  email: string,
-): Promise<Record<string, string>> {
+function getUserModelOverrides(email: string): Record<string, string> {
   const cached = modelOverridesCache.get(email);
   if (cached && Date.now() - cached.timestamp < OVERRIDE_CACHE_TTL) {
     return cached.overrides;
   }
 
-  const userRecord = await validatedUsers.findOne(
-    { email },
-    { projection: { model_overrides: 1 } },
-  );
-  const overrides = userRecord?.model_overrides || {};
+  const overrides = dbGetUserModelOverrides(email);
   modelOverridesCache.set(email, { overrides, timestamp: Date.now() });
   return overrides;
 }
@@ -182,7 +176,7 @@ async function proxyHandler(req: Request) {
     let keyHash: string | null = null;
     const apiKey = extractApiKey(req);
     if (apiKey) {
-      const keyRecord = await validateApiKey(apiKey);
+      const keyRecord = validateApiKey(apiKey);
       if (keyRecord) keyHash = keyRecord.keyHash;
     }
 
@@ -196,7 +190,7 @@ async function proxyHandler(req: Request) {
         requestedModel = typeof json.model === "string" ? json.model : null;
 
         if (requestedModel) {
-          const overrides = await getUserModelOverrides(auth.email);
+          const overrides = getUserModelOverrides(auth.email);
           if (overrides[requestedModel]) {
             json.model = overrides[requestedModel];
             body = new TextEncoder().encode(JSON.stringify(json)).buffer;

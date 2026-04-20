@@ -1,6 +1,11 @@
 import { CONFIG_PATH } from "../lib/config";
 import { errorMessage } from "../lib/errors";
-import { validatedUsers, userProfileCache, requireUser } from "../lib/db";
+import {
+  requireUser,
+  updateUserProfile,
+  getUserModelOverrides,
+  setUserModelOverrides,
+} from "../lib/db";
 import { invalidateModelOverridesCache } from "./proxy";
 
 // PUT /api/user/profile — requireUser (not guest)
@@ -10,12 +15,11 @@ async function userProfileHandler(req: Request) {
 
   try {
     const body = await req.json();
-    const update: Record<string, string> = {};
-    if (typeof body.name === "string") update.name = body.name.trim();
-    if (typeof body.company === "string") update.company = body.company.trim();
-    if (Object.keys(update).length > 0) {
-      await validatedUsers.updateOne({ email: auth.email }, { $set: update });
-      userProfileCache.delete(auth.email);
+    const updates: { name?: string; company?: string } = {};
+    if (typeof body.name === "string") updates.name = body.name.trim();
+    if (typeof body.company === "string") updates.company = body.company.trim();
+    if (Object.keys(updates).length > 0) {
+      updateUserProfile(auth.email, updates);
     }
     return Response.json({ success: true });
   } catch (err) {
@@ -30,8 +34,7 @@ async function getUserModelOverridesHandler(req: Request) {
   if (auth instanceof Response) return auth;
 
   try {
-    const record = await validatedUsers.findOne({ email: auth.email }, { projection: { model_overrides: 1 } });
-    return Response.json({ model_overrides: record?.model_overrides || {} });
+    return Response.json({ model_overrides: getUserModelOverrides(auth.email) });
   } catch (err) {
     console.error("GET /api/user/model-overrides error:", errorMessage(err));
     return Response.json({ error: "Failed to fetch model overrides" }, { status: 500 });
@@ -53,8 +56,7 @@ async function putUserModelOverridesHandler(req: Request) {
         }
       }
     }
-    await validatedUsers.updateOne({ email: auth.email }, { $set: { model_overrides: overrides } });
-    userProfileCache.delete(auth.email);
+    setUserModelOverrides(auth.email, overrides);
     invalidateModelOverridesCache(auth.email);
     return Response.json({ success: true, model_overrides: overrides });
   } catch (err) {

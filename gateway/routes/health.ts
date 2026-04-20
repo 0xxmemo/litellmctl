@@ -1,4 +1,4 @@
-import { db } from "../lib/db";
+import { dbHealthy } from "../lib/db";
 
 /** Try an HTTP probe, return true if response is ok within timeout. */
 async function httpProbe(url: string, timeoutMs = 1000): Promise<boolean> {
@@ -25,15 +25,9 @@ async function tcpProbe(host: string, port: number, timeoutMs = 1000): Promise<b
   }
 }
 
-/** MongoDB ping probe. */
-async function dbProbe(): Promise<boolean> {
-  try {
-    if (!db) return false;
-    await db.admin().ping();
-    return true;
-  } catch {
-    return false;
-  }
+/** SQLite availability probe. */
+function dbProbe(): boolean {
+  return dbHealthy();
 }
 
 /**
@@ -47,13 +41,13 @@ async function healthHandler() {
   const protonHost = process.env.GATEWAY_PROTON_SMTP_HOST || "127.0.0.1";
   const protonPort = parseInt(process.env.GATEWAY_PROTON_SMTP_PORT || "1025");
 
-  const [search, embedding, transcription, proton, database] = await Promise.all([
+  const [search, embedding, transcription, proton] = await Promise.all([
     httpProbe(`http://localhost:${searxngPort}/`),
     httpProbe(`http://localhost:${embeddingPort}/api/tags`),
     httpProbe(`http://localhost:${transcriptionPort}/api/health`),
     tcpProbe(protonHost, protonPort),
-    dbProbe(),
   ]);
+  const database = dbProbe();
 
   return Response.json({
     status: "ok",

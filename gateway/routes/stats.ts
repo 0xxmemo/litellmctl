@@ -1,6 +1,18 @@
-import { apiKeys, usageLogs, requireAuth, requireUser } from "../lib/db";
+import { db, requireAuth, requireUser, listUserKeyHashes } from "../lib/db";
 import { errorMessage } from "../lib/errors";
 import { extractProvider } from "../lib/models";
+
+// Build SQL WHERE clause + bindings matching a user's own email OR one of their API key hashes.
+function buildUserMatch(email: string, keyHashes: string[]): { where: string; params: any[] } {
+  if (keyHashes.length === 0) {
+    return { where: "email = ?", params: [email] };
+  }
+  const placeholders = keyHashes.map(() => "?").join(",");
+  return {
+    where: `(email = ? OR api_key_hash IN (${placeholders}))`,
+    params: [email, ...keyHashes],
+  };
+}
 
 // GET /api/stats/user — requireUser (not guest)
 async function userStatsHandler(req: Request) {
@@ -8,67 +20,79 @@ async function userStatsHandler(req: Request) {
   if (auth instanceof Response) return auth;
 
   try {
-    const userKeys = await apiKeys.find({ email: auth.email, revoked: false }).toArray();
-    const keyHashes = userKeys.map((k: any) => k.keyHash).filter(Boolean);
-    const matchClause = keyHashes.length
-      ? { $or: [{ email: auth.email }, { apiKeyHash: { $in: keyHashes } }] }
-      : { email: auth.email };
+    const keyHashes = listUserKeyHashes(auth.email);
+    const m = buildUserMatch(auth.email, keyHashes);
 
-    const tokensExpr = { $add: [{ $ifNull: ["$tokens", 0] }, { $ifNull: ["$totalTokens", 0] }] };
+    const totals = db
+      .prepare(
+        `SELECT
+           COUNT(*) AS requests,
+           COALESCE(SUM(tokens), 0) AS tokens,
+           COALESCE(SUM(prompt_tokens), 0) AS promptTokens,
+           COALESCE(SUM(completion_tokens), 0) AS completionTokens
+         FROM usage_logs WHERE ${m.where}`,
+      )
+      .get(...m.params) as any;
 
-    const [totals] = await usageLogs.aggregate([
-      { $match: matchClause },
-      { $group: {
-        _id: null,
-        requests: { $sum: 1 },
-        tokens: { $sum: tokensExpr },
-        promptTokens: { $sum: { $ifNull: ["$promptTokens", 0] } },
-        completionTokens: { $sum: { $ifNull: ["$completionTokens", 0] } },
-      }},
-    ]).toArray();
+    const modelRows = db
+      .prepare(
+        `SELECT
+           model,
+           COUNT(*) AS requests,
+           COALESCE(SUM(tokens), 0) AS tokens,
+           COALESCE(SUM(prompt_tokens), 0) AS promptTokens,
+           COALESCE(SUM(completion_tokens), 0) AS completionTokens
+         FROM usage_logs
+         WHERE ${m.where}
+         GROUP BY model
+         ORDER BY tokens DESC`,
+      )
+      .all(...m.params) as any[];
 
-    const modelBreakdown = await usageLogs.aggregate([
-      { $match: matchClause },
-      { $group: {
-        _id: "$model",
-        requests: { $sum: 1 },
-        tokens: { $sum: tokensExpr },
-        promptTokens: { $sum: { $ifNull: ["$promptTokens", 0] } },
-        completionTokens: { $sum: { $ifNull: ["$completionTokens", 0] } },
-        requestedAliases: { $addToSet: "$requestedModel" },
-      }},
-      { $sort: { tokens: -1 } },
-    ]).toArray();
+    // Requested alias expansion per model
+    const aliasStmt = db.prepare(
+      `SELECT DISTINCT requested_model FROM usage_logs
+       WHERE ${m.where} AND model = ? AND requested_model IS NOT NULL AND requested_model != model`,
+    );
+    const modelBreakdown = modelRows.map((r) => {
+      const aliasRows = aliasStmt.all(...m.params, r.model) as { requested_model: string }[];
+      return {
+        ...r,
+        requestedAliases: aliasRows.map((a) => a.requested_model).filter(Boolean),
+      };
+    });
 
-    const totalModelTokens = modelBreakdown.reduce((s: number, m: any) => s + m.tokens, 0);
+    const totalModelTokens = modelBreakdown.reduce((s, m) => s + (m.tokens || 0), 0);
 
-    // Daily requests last 30 days
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 29);
-    thirtyDaysAgo.setHours(0, 0, 0, 0);
+    // 30-day daily histogram (cutoff = 00:00 local 29 days ago)
+    const thirtyStart = new Date();
+    thirtyStart.setDate(thirtyStart.getDate() - 29);
+    thirtyStart.setHours(0, 0, 0, 0);
 
-    const dailyAgg = await usageLogs.aggregate([
-      { $match: { ...matchClause, timestamp: { $gte: thirtyDaysAgo } } },
-      { $group: {
-        _id: { year: { $year: "$timestamp" }, month: { $month: "$timestamp" }, day: { $dayOfMonth: "$timestamp" } },
-        requests: { $sum: 1 },
-      }},
-      { $sort: { "_id.year": 1, "_id.month": 1, "_id.day": 1 } },
-    ]).toArray();
+    const dailyRows = db
+      .prepare(
+        `SELECT
+           strftime('%Y-%m-%d', timestamp / 1000, 'unixepoch', 'localtime') AS day,
+           COUNT(*) AS requests
+         FROM usage_logs
+         WHERE ${m.where} AND timestamp >= ?
+         GROUP BY day`,
+      )
+      .all(...m.params, thirtyStart.getTime()) as { day: string; requests: number }[];
 
     const dailyMap: Record<string, number> = {};
-    for (const e of dailyAgg) {
-      const key = `${e._id.year}-${String(e._id.month).padStart(2,"0")}-${String(e._id.day).padStart(2,"0")}`;
-      dailyMap[key] = e.requests;
-    }
+    for (const r of dailyRows) dailyMap[r.day] = r.requests;
 
     const dailyRequests: { date: string; requests: number }[] = [];
     for (let i = 29; i >= 0; i--) {
       const d = new Date();
       d.setDate(d.getDate() - i);
       d.setHours(0, 0, 0, 0);
-      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-      dailyRequests.push({ date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }), requests: dailyMap[key] || 0 });
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      dailyRequests.push({
+        date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        requests: dailyMap[key] || 0,
+      });
     }
 
     return Response.json({
@@ -76,18 +100,15 @@ async function userStatsHandler(req: Request) {
       tokens: totals?.tokens || 0,
       promptTokens: totals?.promptTokens || 0,
       completionTokens: totals?.completionTokens || 0,
-      keys: userKeys.length,
+      keys: keyHashes.length,
       dailyRequests,
-      modelUsage: modelBreakdown.map((m: any) => {
-        const aliases = (m.requestedAliases || []).filter((a: string) => a && a !== m._id);
-        return {
-          model_name: m._id || "unknown",
-          requested_aliases: aliases,
-          requests: m.requests,
-          tokens: m.tokens,
-          percentage: totalModelTokens > 0 ? ((m.tokens / totalModelTokens) * 100).toFixed(1) : "0.0",
-        };
-      }),
+      modelUsage: modelBreakdown.map((m) => ({
+        model_name: m.model || "unknown",
+        requested_aliases: m.requestedAliases,
+        requests: m.requests,
+        tokens: m.tokens,
+        percentage: totalModelTokens > 0 ? ((m.tokens / totalModelTokens) * 100).toFixed(1) : "0.0",
+      })),
     });
   } catch (err) {
     console.error("user-stats error:", errorMessage(err));
@@ -95,20 +116,9 @@ async function userStatsHandler(req: Request) {
   }
 }
 
-// Helper: build match clause for a user's usage logs (email + API key hashes)
-async function buildUserMatchClause(email: string) {
-  const userKeys = await apiKeys
-    .find({ email, revoked: false }, { projection: { keyHash: 1 } })
-    .toArray();
-  const keyHashes = userKeys.map((k: any) => k.keyHash).filter(Boolean);
-  return keyHashes.length
-    ? { $or: [{ email }, { apiKeyHash: { $in: keyHashes } }] }
-    : { email };
-}
-
 // GET /api/stats/requests — requireAuth (any authenticated user incl. guests)
-// Uses a cursor to stream only enough docs to fill the requested page of groups,
-// instead of loading 10K docs into memory. Stops as soon as we have enough groups.
+// Streams rows in timestamp-desc order and collects consecutive same-provider/model/endpoint
+// runs into groups. Stops as soon as we have (offset + pageSize + 1) groups.
 async function groupedRequestsHandler(req: Request) {
   const auth = await requireAuth(req);
   if (auth instanceof Response) return auth;
@@ -117,32 +127,33 @@ async function groupedRequestsHandler(req: Request) {
     const url = new URL(req.url);
     const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10));
     const pageSize = Math.min(100, Math.max(1, parseInt(url.searchParams.get("pageSize") || "20", 10)));
-    const matchClause = await buildUserMatchClause(auth.email);
 
-    // Target: we need (offset + pageSize) groups, plus 1 to know if there's more
+    const keyHashes = listUserKeyHashes(auth.email);
+    const m = buildUserMatch(auth.email, keyHashes);
     const targetGroups = (page - 1) * pageSize + pageSize + 1;
 
-    // Cursor-based scan: project only needed fields, stop when we have enough groups
-    const cursor = usageLogs.aggregate([
-      { $match: matchClause },
-      { $sort: { timestamp: -1 } },
-      { $project: {
-        _m: { $ifNull: ["$actualModel", "$model"] },
-        endpoint: 1,
-        promptTokens: { $ifNull: ["$promptTokens", 0] },
-        completionTokens: { $ifNull: ["$completionTokens", 0] },
-        tokens: { $add: [{ $ifNull: ["$tokens", 0] }, { $ifNull: ["$totalTokens", 0] }] },
-        timestamp: 1,
-      }},
-    ], { maxTimeMS: 8000 });
+    const iter = db
+      .prepare(
+        `SELECT
+           COALESCE(actual_model, model) AS m,
+           endpoint,
+           prompt_tokens AS promptTokens,
+           completion_tokens AS completionTokens,
+           tokens,
+           timestamp
+         FROM usage_logs
+         WHERE ${m.where}
+         ORDER BY timestamp DESC`,
+      )
+      .iterate(...m.params) as IterableIterator<any>;
 
     const groups: any[] = [];
     let groupCounter = 0;
     let docsRead = 0;
 
-    for await (const r of cursor) {
+    for (const r of iter) {
       docsRead++;
-      const model: string = r._m || "unknown";
+      const model: string = r.m || "unknown";
       const ep: string | null = r.endpoint || null;
       const provider = extractProvider(model) || model;
       const groupKey = `${provider}|${model}|${ep}`;
@@ -152,29 +163,26 @@ async function groupedRequestsHandler(req: Request) {
       if (last && last._gk === groupKey) {
         last.count++;
         last.totalTokens += tokens;
-        last.lastTimestamp = r.timestamp;
+        last.lastTimestamp = new Date(r.timestamp).toISOString();
       } else {
-        // New group — check if we already have enough
         if (groups.length >= targetGroups) break;
+        const ts = new Date(r.timestamp).toISOString();
         groups.push({
           id: `group-${++groupCounter}`,
           _gk: groupKey,
           provider, model, endpoint: ep,
           count: 1,
           totalTokens: tokens,
-          firstTimestamp: r.timestamp,
-          lastTimestamp: r.timestamp,
+          firstTimestamp: ts,
+          lastTimestamp: ts,
           items: null,
         });
       }
     }
-    await cursor.close();
 
     const hasMore = groups.length > (page - 1) * pageSize + pageSize;
     const offset = (page - 1) * pageSize;
     const pageGroups = groups.slice(offset, offset + pageSize).map(({ _gk, ...g }) => g);
-    // knownGroups: how many distinct groups were found in this scan.
-    // When hasMore=true this is a lower bound — the true total is unknown without a full scan.
     const knownGroups = groups.length - (hasMore ? 1 : 0);
 
     return Response.json({
@@ -210,40 +218,48 @@ async function groupItemsHandler(req: Request) {
       return Response.json({ error: "model, from, to are required" }, { status: 400 });
     }
 
-    const matchClause = await buildUserMatchClause(auth.email);
+    const keyHashes = listUserKeyHashes(auth.email);
+    const m = buildUserMatch(auth.email, keyHashes);
 
-    const fromDate = new Date(from);
-    const toDate = new Date(to);
-    fromDate.setSeconds(fromDate.getSeconds() - 1);
-    toDate.setSeconds(toDate.getSeconds() + 1);
+    const fromMs = new Date(from).getTime() - 1000;
+    const toMs = new Date(to).getTime() + 1000;
 
-    // Single $and with all conditions — avoids conflicting top-level $or
-    const items = await usageLogs.aggregate([
-      { $match: {
-        $and: [
-          matchClause,
-          { $or: [{ actualModel: model }, { model: model }] },
-          ...(endpoint ? [{ endpoint }] : []),
-          { timestamp: { $gte: fromDate, $lte: toDate } },
-        ],
-      }},
-      { $sort: { timestamp: -1 } },
-      { $limit: 100 },
-      { $project: {
-        requestedModel: { $ifNull: ["$requestedModel", null] },
-        actualModel: { $ifNull: ["$actualModel", "$model"] },
-        endpoint: { $ifNull: ["$endpoint", null] },
-        promptTokens: { $ifNull: ["$promptTokens", 0] },
-        completionTokens: { $ifNull: ["$completionTokens", 0] },
-        totalTokens: { $ifNull: ["$tokens", 0] },
-        timestamp: 1,
-      }},
-    ], { maxTimeMS: 6000 }).toArray();
+    const endpointClause = endpoint ? "AND endpoint = ?" : "";
+    const params: any[] = [...m.params, model, model];
+    if (endpoint) params.push(endpoint);
+    params.push(fromMs, toMs);
+
+    const rows = db
+      .prepare(
+        `SELECT
+           id,
+           requested_model AS requestedModel,
+           COALESCE(actual_model, model) AS actualModel,
+           endpoint,
+           prompt_tokens AS promptTokens,
+           completion_tokens AS completionTokens,
+           tokens AS totalTokens,
+           timestamp
+         FROM usage_logs
+         WHERE ${m.where}
+           AND (actual_model = ? OR model = ?)
+           ${endpointClause}
+           AND timestamp BETWEEN ? AND ?
+         ORDER BY timestamp DESC
+         LIMIT 100`,
+      )
+      .all(...params) as any[];
 
     return Response.json({
-      items: items.map((r: any) => ({
-        ...r,
-        _id: r._id.toString(),
+      items: rows.map((r) => ({
+        _id: String(r.id),
+        requestedModel: r.requestedModel ?? null,
+        actualModel: r.actualModel,
+        endpoint: r.endpoint ?? null,
+        promptTokens: r.promptTokens,
+        completionTokens: r.completionTokens,
+        totalTokens: r.totalTokens,
+        timestamp: new Date(r.timestamp).toISOString(),
       })),
     });
   } catch (err) {

@@ -7,7 +7,14 @@
 
 import { initConfig, PORT } from "./lib/config";
 import { errorMessage } from "./lib/errors";
-import { connectDB, initCliSecret, flushUsageQueue, rateLimitMap, otpRateLimitMap } from "./lib/db";
+import {
+  connectDB,
+  initCliSecret,
+  flushUsageQueue,
+  rateLimitMap,
+  otpRateLimitMap,
+  sweepExpiredOtpsAndSessions,
+} from "./lib/db";
 import { authRoutes } from "./routes/auth";
 import { keysRoutes, handleKeyById } from "./routes/keys";
 import { modelsRoutes } from "./routes/models";
@@ -58,7 +65,7 @@ const configPath = new URL("../config.yaml", import.meta.url).pathname;
 const port = parseInt(process.env.GATEWAY_PORT || "14041");
 
 initConfig(litellmUrl, masterKey, configPath, port);
-await connectDB(process.env.GATEWAY_MONGODB_URI!);
+await connectDB();
 await initCliSecret();
 
 // ============================================================================
@@ -105,8 +112,9 @@ setInterval(() => {
     for (const [email, record] of otpRateLimitMap.entries()) {
       if (now - record.startTime > 3600000) otpRateLimitMap.delete(email);
     }
+    sweepExpiredOtpsAndSessions();
   } catch (err) {
-    console.error("[gateway][rateLimitCleanup]", err);
+    console.error("[gateway][periodicCleanup]", err);
   }
 }, 60000).unref();
 
