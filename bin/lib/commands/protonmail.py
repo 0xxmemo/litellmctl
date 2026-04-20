@@ -252,7 +252,7 @@ def hydroxide_auth_interactive(hbin: str, username: str) -> bool:
         else:
             warn("Could not extract bridge password from output.")
             warn("Set GATEWAY_PROTON_BRIDGE_PASS manually in .env")
-        info("Run: litellmctl protonmail start")
+        info("Run: litellmctl start protonmail")
         return True
     warn("hydroxide authentication failed")
     return False
@@ -291,7 +291,7 @@ def hydroxide_start() -> bool:
         else:
             username = os.environ.get("GATEWAY_PROTON_USERNAME", "")
             warn("hydroxide is not authenticated.")
-            info(f"Run: litellmctl protonmail auth")
+            info("Run: litellmctl auth protonmail")
             return False
 
     LOG_DIR.mkdir(parents=True, exist_ok=True)
@@ -346,7 +346,7 @@ def protonmail_status() -> None:
     else:
         console.print("  Status:   [yellow]stopped[/]")
         console.print(f"  Binary:   {bin_path}")
-        console.print("  [dim]Start: litellmctl protonmail start[/]")
+        console.print("  [dim]Start: litellmctl start protonmail[/]")
 
     console.print()
 
@@ -372,46 +372,41 @@ def uninstall_protonmail() -> None:
     console.print("      rm -rf ~/.config/hydroxide\n")
 
 
-def cmd_protonmail(subcmd: str = "status") -> None:
+def protonmail_auth() -> None:
+    """Authenticate hydroxide using ProtonMail credentials.
+
+    If GATEWAY_PROTON_PASSWORD is in .env, runs the non-interactive auto flow.
+    Otherwise prompts for a username and runs hydroxide auth interactively.
+    """
     from ..common.env import load_env
     load_env()
-    if subcmd == "start":
-        hydroxide_start()
-    elif subcmd == "stop":
-        hydroxide_stop()
-    elif subcmd == "restart":
-        hydroxide_stop()
-        import time; time.sleep(1)
-        hydroxide_start()
-    elif subcmd == "status":
-        protonmail_status()
-    elif subcmd == "auth":
-        password = os.environ.get("GATEWAY_PROTON_PASSWORD", "")
-        if password:
-            # Auto-authenticate using env password
-            ok = hydroxide_auth_auto()
-            if ok:
-                info("Run: litellmctl protonmail start")
-        else:
-            # No password in env — run hydroxide auth interactively
-            # and capture the bridge password from its output
-            hbin = _hydroxide_bin()
-            if not hbin:
-                warn("hydroxide not installed. Run: litellmctl install --with-protonmail")
-                return
-            username = os.environ.get("GATEWAY_PROTON_USERNAME", "")
-            if not username:
-                from ..common.platform import is_interactive as _is_interactive
-                if _is_interactive():
-                    from ..common.deps import require_questionary
-                    username = require_questionary().text(
-                        "ProtonMail username:",
-                    ).ask() or ""
-                if not username:
-                    warn("Set GATEWAY_PROTON_USERNAME in .env or pass interactively")
-                    return
-            hydroxide_auth_interactive(hbin, username)
-    else:
-        from ..common.formatting import error
-        error(f"Unknown subcommand: {subcmd}")
-        console.print("  Usage: litellmctl protonmail [start|stop|restart|status|auth]")
+    password = os.environ.get("GATEWAY_PROTON_PASSWORD", "")
+    if password:
+        ok = hydroxide_auth_auto()
+        if ok:
+            info("Run: litellmctl start protonmail")
+        return
+
+    hbin = _hydroxide_bin()
+    if not hbin:
+        warn("hydroxide not installed. Run: litellmctl install --with-protonmail")
+        return
+    username = os.environ.get("GATEWAY_PROTON_USERNAME", "")
+    if not username:
+        from ..common.platform import is_interactive as _is_interactive
+        if _is_interactive():
+            from ..common.deps import require_questionary
+            username = require_questionary().text(
+                "ProtonMail username:",
+            ).ask() or ""
+        if not username:
+            warn("Set GATEWAY_PROTON_USERNAME in .env or pass interactively")
+            return
+    hydroxide_auth_interactive(hbin, username)
+
+
+def protonmail_restart() -> None:
+    """Restart hydroxide (stop+sleep+start)."""
+    hydroxide_stop()
+    import time; time.sleep(1)
+    hydroxide_start()

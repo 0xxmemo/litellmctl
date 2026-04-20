@@ -481,17 +481,42 @@ def cmd_restart() -> None:
     wait_for_ready(port)
 
 
-def cmd_logs() -> None:
+def cmd_logs(feature: str | None = None) -> None:
+    """Tail logs for a feature (default: proxy)."""
     _ensure_log_dir()
-    logfile = LOG_DIR / "proxy.log"
-    errfile = LOG_DIR / "proxy-error.log"
 
-    if not logfile.exists() and not errfile.exists():
-        warn("No log files found yet. Start the proxy first with 'litellmctl start'.")
+    feature = (feature or "proxy").lower()
+    if feature == "proxy":
+        logfile = LOG_DIR / "proxy.log"
+        errfile = LOG_DIR / "proxy-error.log"
+        start_hint = "litellmctl start"
+        label = "proxy"
+    elif feature == "gateway":
+        logfile = LOG_DIR / "gateway.log"
+        errfile = LOG_DIR / "gateway-error.log"
+        start_hint = "litellmctl start gateway"
+        label = "gateway"
+    elif feature == "protonmail":
+        logfile = LOG_DIR / "hydroxide.log"
+        errfile = None
+        start_hint = "litellmctl start protonmail"
+        label = "protonmail"
+    elif feature == "searxng":
+        # SearXNG logs live in docker — hand off to docker logs directly
+        warn("SearXNG logs are managed by Docker.")
+        info("Run: docker logs -f searxng")
+        return
+    else:
+        warn(f"Unknown log target: {feature}. Choose: proxy, gateway, protonmail, searxng.")
         return
 
-    info(f"Tailing {LOG_DIR}  (Ctrl+C to stop)")
-    files = [str(f) for f in [logfile, errfile] if f.exists()]
+    has_any = logfile.exists() or (errfile and errfile.exists())
+    if not has_any:
+        warn(f"No {label} log files found yet. Start it first: {start_hint}")
+        return
+
+    info(f"Tailing {label} logs (Ctrl+C to stop)")
+    files = [str(f) for f in [logfile, errfile] if f and f.exists()]
     try:
         subprocess.call(["tail", "-f", *files])
     except KeyboardInterrupt:

@@ -685,18 +685,18 @@ def gateway_api(args: list[str], data: str | None = None) -> None:
     """Call a gateway endpoint using human-readable commands.
 
     Examples:
-        gateway api health
-        gateway api stats requests
-        gateway api admin users
-        gateway api admin approve email=user@example.com
-        gateway api keys delete abc123
-        gateway api search q=hello
+        litellmctl api health
+        litellmctl api stats requests
+        litellmctl api admin users
+        litellmctl api admin approve email=user@example.com
+        litellmctl api keys delete abc123
+        litellmctl api search q=hello
     """
     load_env()
 
     if not args:
-        error("Usage: litellmctl gateway api <command...> [-d json] [key=val...]")
-        info("Run: litellmctl gateway routes")
+        error("Usage: litellmctl api <command...> [-d json] [key=val...]")
+        info("Run: litellmctl routes")
         return
 
     if not gateway_is_running():
@@ -756,7 +756,7 @@ def gateway_api(args: list[str], data: str | None = None) -> None:
     route = _find_route(routes, url_path, method) or _find_route(routes, url_path)
     if not route:
         error(f"Unknown command: {' '.join(args)}")
-        info("Run: litellmctl gateway routes")
+        info("Run: litellmctl routes")
         return
 
     # Use the matched route's method if our inferred one has no match
@@ -796,48 +796,22 @@ def gateway_routes() -> None:
         desc = r.get("desc", "")
         console.print(f"  {cmd:<36} [{color}]{method:<8}[/] [dim]{desc}[/]")
     console.print(f"\n  [dim]{len(routes)} endpoints[/]\n")
-    console.print("  [dim]Usage: litellmctl gateway api <command...> [-d json] [key=val...][/]\n")
+    console.print("  [dim]Usage: litellmctl api <command...> [-d json] [key=val...][/]\n")
 
 
-def cmd_gateway(subcmd: str = "status") -> None:
+def gateway_restart() -> None:
+    """Rebuild frontend (if bun is available) and restart the gateway."""
     load_env()
-    if subcmd == "start":
-        gateway_start()
-    elif subcmd == "stop":
-        gateway_stop()
-    elif subcmd == "restart":
-        gateway_stop()
-        time.sleep(1)
-        bun = _bun_bin()
-        if bun:
-            gateway_dir = PROJECT_DIR / "gateway"
-            info("Building gateway frontend ...")
-            ret = subprocess.call([bun, "run", "build"], cwd=str(gateway_dir))
-            if ret != 0:
-                warn("Frontend build failed — starting anyway")
-        gateway_start()
-    elif subcmd == "status":
-        gateway_status()
-    elif subcmd == "logs":
-        logfile = LOG_DIR / "gateway.log"
-        if not logfile.exists():
-            warn("No gateway log file found")
-            return
-        info("Tailing gateway logs (Ctrl+C to stop)")
-        try:
-            subprocess.call(["tail", "-f", str(logfile)])
-        except KeyboardInterrupt:
-            pass
-    elif subcmd == "routes":
-        gateway_routes()
-    elif subcmd == "migrate-from-mongo":
-        gateway_migrate_from_mongo()
-    else:
-        error(f"Unknown gateway subcommand: {subcmd}")
-        console.print(
-            "  Usage: litellmctl gateway "
-            "[start|stop|restart|status|logs|routes|api|migrate-from-mongo]"
-        )
+    gateway_stop()
+    time.sleep(1)
+    bun = _bun_bin()
+    if bun:
+        gateway_dir = PROJECT_DIR / "gateway"
+        info("Building gateway frontend ...")
+        ret = subprocess.call([bun, "run", "build"], cwd=str(gateway_dir))
+        if ret != 0:
+            warn("Frontend build failed — starting anyway")
+    gateway_start()
 
 
 def gateway_migrate_from_mongo(mongo_uri: str | None = None, force: bool = False) -> None:
@@ -895,6 +869,6 @@ def gateway_migrate_from_mongo(mongo_uri: str | None = None, force: bool = False
 
     if ret == 0:
         info("Migration finished successfully.")
-        info("Restart the gateway to pick up the new data: litellmctl gateway restart")
+        info("Restart the gateway to pick up the new data: litellmctl restart gateway")
     else:
         error(f"Migration exited with code {ret}")

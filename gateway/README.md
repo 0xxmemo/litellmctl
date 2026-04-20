@@ -74,23 +74,23 @@ All endpoints are callable from the CLI using human-readable commands — no HTT
 
 ```bash
 # List all endpoints (parsed from TypeScript source — works offline)
-litellmctl gateway routes
+litellmctl routes
 
 # Call endpoints using path segments as commands
-litellmctl gateway api health
-litellmctl gateway api stats user
-litellmctl gateway api admin users
-litellmctl gateway api models extended
-litellmctl gateway api search q=hello
-litellmctl gateway api admin approve -d '{"email":"user@example.com"}'
+litellmctl api health
+litellmctl api stats user
+litellmctl api admin users
+litellmctl api models extended
+litellmctl api search q=hello
+litellmctl api admin approve -d '{"email":"user@example.com"}'
 ```
 
 Tab completion discovers commands from route source files (no gateway needed):
 
 ```bash
-litellmctl gateway api <TAB>          # health, stats, admin, keys, ...
-litellmctl gateway api stats <TAB>    # user, requests, ...
-litellmctl gateway api admin <TAB>    # users, approve, reject, ...
+litellmctl api <TAB>          # health, stats, admin, keys, ...
+litellmctl api stats <TAB>    # user, requests, ...
+litellmctl api admin <TAB>    # users, approve, reject, ...
 ```
 
 ### How it works

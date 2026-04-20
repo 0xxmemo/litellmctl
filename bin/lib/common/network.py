@@ -46,10 +46,14 @@ def searxng_http_check(base_url: str, timeout: int = 3) -> bool:
 
 
 def port_in_use(port: int) -> bool:
-    """Return True if something is listening on the given port."""
+    """Return True if something is LISTENING on the given TCP port.
+
+    Important: we filter for LISTEN sockets. Otherwise `lsof -i :N` matches
+    any connection using N as an ephemeral source port too (false positive).
+    """
     if shutil.which("lsof"):
         return subprocess.call(
-            ["lsof", "-i", f":{port}"],
+            ["lsof", f"-iTCP:{port}", "-sTCP:LISTEN", "-P", "-n"],
             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
         ) == 0
     if shutil.which("ss"):
@@ -60,10 +64,13 @@ def port_in_use(port: int) -> bool:
         return bool(result.stdout.strip())
     if shutil.which("netstat"):
         result = subprocess.run(
-            ["netstat", "-tlnp"],
+            ["netstat", "-an", "-p", "tcp"],
             capture_output=True, text=True,
         )
-        return f":{port} " in result.stdout
+        for line in result.stdout.splitlines():
+            if f".{port} " in line and "LISTEN" in line:
+                return True
+        return False
     return False
 
 

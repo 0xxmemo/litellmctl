@@ -135,7 +135,7 @@ def searxng_status() -> None:
         )
         if container in result2.stdout.splitlines():
             console.print("  Status:   [yellow]stopped[/]")
-            console.print(f"  [dim]Start: docker start {container}[/]")
+            console.print("  [dim]Start: litellmctl start searxng[/]")
         else:
             console.print("  Status:   [yellow]not installed[/]")
             console.print("  [dim]Install: litellmctl install --with-searxng[/]")

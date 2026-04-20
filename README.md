@@ -43,31 +43,41 @@ litellmctl auth export [p...]     Copy credentials as transfer script
 litellmctl auth import            Read credentials from stdin
 ```
 
-### Gateway
+### Lifecycle (features)
+
+All services (`proxy | gateway | searxng | protonmail | embedding | transcription`) are managed with the same four verbs:
 
 ```
-litellmctl gateway status         Show gateway status
-litellmctl gateway logs           Tail gateway logs
-litellmctl gateway routes         List all API endpoints (parsed from source)
-litellmctl gateway api <cmd...>   Call any endpoint using human commands
-litellmctl gateway users          List all gateway users
-litellmctl gateway set-role <email> <role>
-                                  Set user role (guest/user/admin)
+litellmctl start [features...]     Start one or more features (multi-select if omitted)
+litellmctl stop  [features...]     Stop
+litellmctl restart [features...]   Restart
+litellmctl status [feature]        Show status for one feature (default: all)
+litellmctl logs [feature]          Tail logs for one feature (default: proxy)
+```
+
+### Gateway data commands
+
+```
+litellmctl users                    List all gateway users
+litellmctl set-role <email> <role>  Set a user's role (guest/user/admin)
+litellmctl routes                   List all gateway API endpoints
+litellmctl api <cmd...>             Call any gateway endpoint (see below)
+litellmctl migrate-from-mongo       One-shot migration of legacy MongoDB → SQLite
 ```
 
 #### Gateway API
 
-Every gateway endpoint is callable using path segments as commands — no HTTP methods, URLs, or auth needed:
+Every gateway endpoint is callable using path segments as commands — no HTTP methods, URLs, or auth needed (the CLI uses a localhost-only bypass secret):
 
 ```bash
-litellmctl gateway api health
-litellmctl gateway api stats user
-litellmctl gateway api admin users
-litellmctl gateway api models extended
-litellmctl gateway api search q=hello
-litellmctl gateway api admin approve -d '{"email":"user@example.com"}'
-litellmctl gateway api admin litellm-config -d '{"router_settings":{"num_retries":5}}'
-litellmctl gateway api keys delete abc123
+litellmctl api health
+litellmctl api stats user
+litellmctl api admin users
+litellmctl api models extended
+litellmctl api search q=hello
+litellmctl api admin approve -d '{"email":"user@example.com"}'
+litellmctl api admin litellm-config -d '{"router_settings":{"num_retries":5}}'
+litellmctl api keys delete abc123
 ```
 
 Method is auto-inferred (GET by default, write method when `-d` or `key=val` given, `delete`/`create`/`update` action words).
@@ -75,11 +85,11 @@ Method is auto-inferred (GET by default, write method when `-d` or `key=val` giv
 Tab completion discovers commands from route source files (works offline):
 
 ```bash
-litellmctl gateway api <TAB>          # health, stats, admin, keys, ...
-litellmctl gateway api stats <TAB>    # user, requests, ...
+litellmctl api <TAB>                  # health, stats, admin, keys, ...
+litellmctl api stats <TAB>            # user, requests, ...
 ```
 
-Use `litellmctl gateway routes` to see all endpoints with descriptions.
+Use `litellmctl routes` to see all endpoints with descriptions.
 
 ### Config
 
@@ -104,12 +114,14 @@ litellmctl setup-completions      Add litellmctl alias + tab completion to shell
 
 ### ProtonMail (OTP delivery)
 
+ProtonMail is a feature like any other — use the unified verbs:
+
 ```
-litellmctl protonmail start       Start hydroxide SMTP bridge
-litellmctl protonmail stop        Stop hydroxide
-litellmctl protonmail restart     Restart hydroxide
-litellmctl protonmail status      Show bridge status
-litellmctl protonmail auth        Show authentication instructions
+litellmctl start protonmail       Start hydroxide SMTP bridge
+litellmctl stop protonmail        Stop
+litellmctl restart protonmail     Restart
+litellmctl status protonmail      Show bridge status
+litellmctl auth protonmail        Authenticate hydroxide with ProtonMail
 ```
 
 ### Uninstall
@@ -152,7 +164,7 @@ Default port: `14041`. Override with `GATEWAY_PORT` in `.env`.
 ### Feature Detection
 
 ```bash
-litellmctl gateway api GET /api/health
+litellmctl api GET /api/health
 ```
 
 ```json
@@ -175,7 +187,7 @@ Privacy-respecting metasearch, accessible via gateway or directly:
 
 ```bash
 # Via CLI (recommended)
-litellmctl gateway api GET "/api/search?q=AI+news"
+litellmctl api GET "/api/search?q=AI+news"
 
 # Direct SearXNG API
 curl "http://localhost:8888/search?q=your+query&format=json"

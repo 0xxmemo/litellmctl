@@ -36,10 +36,12 @@ class TestCliRouting:
         result = runner.invoke(app, ["this-command-does-not-exist"])
         assert result.exit_code != 0
 
-    def test_gateway_subcommand_help(self, runner, app):
-        result = runner.invoke(app, ["gateway", "--help"])
-        # Should show gateway subcommands
-        assert result.exit_code == 0
+    def test_status_feature_arg(self, runner, app):
+        """`status gateway` dispatches with feature='gateway'."""
+        with mock.patch("lib.commands.status.cmd_status") as mock_fn:
+            mock_fn.return_value = None
+            result = runner.invoke(app, ["status", "gateway"])
+            assert result.exit_code in (0, 1)
 
     def test_auth_status_dispatched(self, runner, app):
         """auth status should not crash — dispatch reaches auth module."""
@@ -65,15 +67,28 @@ class TestCliRouting:
             assert result.exit_code in (0, 1)
 
 
-class TestGatewaySubcommands:
-    def test_gateway_status(self, runner, app):
-        with mock.patch("lib.commands.gateway.cmd_gateway") as mock_fn:
+class TestFlatGatewayCommands:
+    def test_users(self, runner, app):
+        with mock.patch("lib.commands.gateway.gateway_user_list") as mock_fn:
             mock_fn.return_value = None
-            result = runner.invoke(app, ["gateway", "status"])
+            result = runner.invoke(app, ["users"])
             assert result.exit_code in (0, 1)
 
-    def test_gateway_start(self, runner, app):
-        with mock.patch("lib.commands.gateway.gateway_start") as mock_fn:
+    def test_routes(self, runner, app):
+        with mock.patch("lib.commands.gateway.gateway_routes") as mock_fn:
             mock_fn.return_value = None
-            result = runner.invoke(app, ["gateway", "start"])
+            result = runner.invoke(app, ["routes"])
+            assert result.exit_code in (0, 1)
+
+    def test_start_gateway_feature(self, runner, app):
+        """`start gateway` hits the features dispatch."""
+        with mock.patch("lib.common.features.feature_start") as mock_fn:
+            mock_fn.return_value = None
+            result = runner.invoke(app, ["start", "gateway"])
+            assert result.exit_code in (0, 1)
+
+    def test_logs_gateway_feature(self, runner, app):
+        with mock.patch("lib.commands.service.cmd_logs") as mock_fn:
+            mock_fn.return_value = None
+            result = runner.invoke(app, ["logs", "gateway"])
             assert result.exit_code in (0, 1)

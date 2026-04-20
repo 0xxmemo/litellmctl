@@ -17,15 +17,18 @@ pytestmark = pytest.mark.skipif(
 )
 
 # Mock target: patch where the name is looked up, not where it's defined.
-_PROMPTS_REQ = "lib.wizard.prompts.require_questionary"
-_INTERACTIVE_REQ = "lib.interactive.require_questionary"
+# common/prompts.py is the actual location of pick_one/pick_many/confirm/select.
+_PROMPTS_REQ = "lib.common.prompts.require_questionary"
+# interactive.py uses the shared helpers in common/prompts, so its
+# questionary resolves through that module's import.
+_INTERACTIVE_PROMPTS_REQ = "lib.common.prompts.require_questionary"
 
 
-class TestWizardPrompts:
-    """Test questionary wrappers in lib/wizard/prompts.py."""
+class TestCommonPrompts:
+    """Test questionary wrappers in lib/common/prompts.py."""
 
-    def test_ask_calls_questionary_select(self):
-        from lib.wizard import prompts as p
+    def test_pick_one_calls_questionary_select(self):
+        from lib.common import prompts as p
         with mock.patch(_PROMPTS_REQ) as mock_req:
             mock_q = mock.MagicMock()
             mock_req.return_value = mock_q
@@ -36,8 +39,8 @@ class TestWizardPrompts:
             assert result == 0
             mock_q.select.assert_called_once()
 
-    def test_ask_handles_keyboard_interrupt(self):
-        from lib.wizard import prompts as p
+    def test_pick_one_handles_keyboard_interrupt(self):
+        from lib.common import prompts as p
         with mock.patch(_PROMPTS_REQ) as mock_req:
             mock_q = mock.MagicMock()
             mock_req.return_value = mock_q
@@ -48,7 +51,7 @@ class TestWizardPrompts:
                 p.pick_one("Pick one:", ["a", "b"])
 
     def test_pick_many_calls_checkbox(self):
-        from lib.wizard import prompts as p
+        from lib.common import prompts as p
         with mock.patch(_PROMPTS_REQ) as mock_req:
             mock_q = mock.MagicMock()
             mock_req.return_value = mock_q
@@ -61,7 +64,7 @@ class TestWizardPrompts:
             mock_q.checkbox.assert_called_once()
 
     def test_confirm_calls_questionary_confirm(self):
-        from lib.wizard import prompts as p
+        from lib.common import prompts as p
         with mock.patch(_PROMPTS_REQ) as mock_req:
             mock_q = mock.MagicMock()
             mock_req.return_value = mock_q
@@ -76,7 +79,7 @@ class TestInteractiveMenu:
     """Test interactive_menu exits cleanly when questionary returns 'exit'."""
 
     def test_menu_exits_on_quit_selection(self):
-        with mock.patch(_INTERACTIVE_REQ) as mock_req, \
+        with mock.patch(_INTERACTIVE_PROMPTS_REQ) as mock_req, \
              mock.patch("lib.common.process.get_proxy_port", return_value=4000), \
              mock.patch("lib.common.process.find_proxy_pid", return_value=None):
             mock_q = mock.MagicMock()
@@ -92,7 +95,7 @@ class TestInteractiveMenu:
                 assert e.code in (0, None)
 
     def test_menu_keyboard_interrupt_is_clean(self):
-        with mock.patch(_INTERACTIVE_REQ) as mock_req, \
+        with mock.patch(_INTERACTIVE_PROMPTS_REQ) as mock_req, \
              mock.patch("lib.common.process.get_proxy_port", return_value=4000), \
              mock.patch("lib.common.process.find_proxy_pid", return_value=None):
             mock_q = mock.MagicMock()
@@ -114,7 +117,7 @@ class TestAuthInteractive:
     """Test auth_interactive with mocked questionary."""
 
     def test_auth_interactive_dispatches_on_choice(self):
-        with mock.patch(_INTERACTIVE_REQ) as mock_req:
+        with mock.patch(_INTERACTIVE_PROMPTS_REQ) as mock_req:
             mock_q = mock.MagicMock()
             mock_req.return_value = mock_q
             mock_select = mock.MagicMock()

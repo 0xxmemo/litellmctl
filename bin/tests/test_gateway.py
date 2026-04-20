@@ -424,13 +424,13 @@ class TestGatewayCliDispatch:
     def test_gateway_routes_dispatched(self, runner, app):
         with mock.patch("lib.commands.gateway.gateway_routes") as mock_fn:
             mock_fn.return_value = None
-            result = runner.invoke(app, ["gateway", "routes"])
+            result = runner.invoke(app, ["routes"])
             assert result.exit_code in (0, 1)
 
     def test_gateway_api_dispatched(self, runner, app):
         with mock.patch("lib.commands.gateway.gateway_api") as mock_fn:
             mock_fn.return_value = None
-            result = runner.invoke(app, ["gateway", "api", "health"])
+            result = runner.invoke(app, ["api", "health"])
             if result.exit_code == 0:
                 mock_fn.assert_called_once()
                 assert mock_fn.call_args[0][0] == ["health"]
@@ -438,7 +438,7 @@ class TestGatewayCliDispatch:
     def test_gateway_api_with_data_flag(self, runner, app):
         with mock.patch("lib.commands.gateway.gateway_api") as mock_fn:
             mock_fn.return_value = None
-            result = runner.invoke(app, ["gateway", "api", "admin", "approve", "-d", '{"email":"x"}'])
+            result = runner.invoke(app, ["api", "admin", "approve", "-d", '{"email":"x"}'])
             if result.exit_code == 0:
                 args, kwargs = mock_fn.call_args
                 assert args[0] == ["admin", "approve"]
@@ -447,7 +447,7 @@ class TestGatewayCliDispatch:
     def test_gateway_api_no_args_shows_help(self, runner, app):
         with mock.patch("lib.commands.gateway.gateway_api") as mock_fn:
             mock_fn.return_value = None
-            result = runner.invoke(app, ["gateway", "api"])
+            result = runner.invoke(app, ["api"])
             # Either shows help or calls gateway_api with empty args
             assert result.exit_code in (0, 1)
 

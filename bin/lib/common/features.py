@@ -76,8 +76,8 @@ def _gateway_stop() -> None:
 
 
 def _gateway_restart() -> None:
-    from ..commands.gateway import cmd_gateway
-    cmd_gateway("restart")
+    from ..commands.gateway import gateway_restart
+    gateway_restart()
 
 
 # SearXNG

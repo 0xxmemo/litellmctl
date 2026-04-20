@@ -23,6 +23,7 @@ USAGE = """\
   auth gemini               Login to Gemini CLI (browser PKCE)
   auth qwen                 Login to Qwen Portal (device code)
   auth kimi                 Login to Kimi Code (device code)
+  auth protonmail           Authenticate hydroxide SMTP bridge
   auth refresh <name>       Refresh token (chatgpt|gemini|qwen|kimi)
   auth status               Show token status
   auth providers            List available providers (key|label, one per line)
@@ -47,6 +48,9 @@ def auth_dispatch(args: list[str]) -> None:
             qwen_login()
         elif cmd in ("kimi", "kimi_code", "kimi-code"):
             kimi_login()
+        elif cmd in ("protonmail", "proton", "hydroxide"):
+            from ..commands.protonmail import protonmail_auth
+            protonmail_auth()
         elif cmd == "refresh":
             if len(args) < 2:
                 console.print("[red]Usage: auth refresh <chatgpt|gemini|qwen|kimi>[/]"); sys.exit(1)

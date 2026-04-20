@@ -456,7 +456,7 @@ export function userUsageTotals(emails: string[]): Record<string, { requests: nu
 }
 
 // ============================================================================
-// CLI SECRET (localhost bypass for litellmctl gateway api)
+// CLI SECRET (localhost bypass for `litellmctl api`)
 // ============================================================================
 
 let _cliSecret: string | null = null;

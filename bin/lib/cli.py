@@ -13,12 +13,6 @@ app = typer.Typer(
     no_args_is_help=False,
 )
 
-gateway_app = typer.Typer(help="Manage LLM API Gateway UI.")
-app.add_typer(gateway_app, name="gateway")
-
-protonmail_app = typer.Typer(help="Manage ProtonMail SMTP bridge (hydroxide).")
-app.add_typer(protonmail_app, name="protonmail")
-
 
 @app.command()
 def start(
@@ -155,10 +149,12 @@ def restart_alias() -> None:
 
 
 @app.command()
-def logs() -> None:
-    """Tail proxy logs."""
+def logs(
+    feature: Optional[str] = typer.Argument(None, help="proxy | gateway | protonmail | searxng (default: proxy)"),
+) -> None:
+    """Tail logs for a feature (proxy, gateway, protonmail, searxng)."""
     from .commands.service import cmd_logs
-    cmd_logs()
+    cmd_logs(feature)
 
 
 @app.command()
@@ -173,10 +169,12 @@ def proxy(
 
 
 @app.command()
-def status() -> None:
-    """Show auth + proxy + local server status."""
+def status(
+    feature: Optional[str] = typer.Argument(None, help="proxy | gateway | searxng | protonmail | embedding | transcription | auth (default: all)"),
+) -> None:
+    """Show status for a feature (default: everything)."""
     from .commands.status import cmd_status
-    cmd_status()
+    cmd_status(feature)
 
 
 @app.command()
@@ -307,79 +305,53 @@ def help() -> None:
     _show_help()
 
 
-# Gateway subcommands
-# start/stop/restart also exist here (same as litellmctl start gateway, etc.)
+# ── Flat gateway utility commands ────────────────────────────────────────────
+# All service lifecycle (start/stop/restart/status/logs) goes through the
+# top-level commands, NOT through a nested `gateway` sub-app. These are gateway-
+# specific data commands that don't fit elsewhere.
 
-@gateway_app.command("start")
-def gateway_start_cmd() -> None:
-    """Start the gateway UI server."""
-    from .commands.gateway import cmd_gateway
-    cmd_gateway("start")
-
-
-@gateway_app.command("stop")
-def gateway_stop_cmd() -> None:
-    """Stop the gateway UI server."""
-    from .commands.gateway import cmd_gateway
-    cmd_gateway("stop")
+@app.command("users")
+def users_cmd() -> None:
+    """List all gateway users and their roles."""
+    from .commands.gateway import gateway_user_list
+    gateway_user_list()
 
 
-@gateway_app.command("restart")
-def gateway_restart_cmd() -> None:
-    """Rebuild (if needed) and restart the gateway UI server."""
-    from .commands.gateway import cmd_gateway
-    cmd_gateway("restart")
-
-
-@gateway_app.command("status")
-def gateway_status_cmd() -> None:
-    """Show gateway status."""
-    from .commands.gateway import cmd_gateway
-    cmd_gateway("status")
-
-
-@gateway_app.command("logs")
-def gateway_logs() -> None:
-    """Tail gateway logs."""
-    from .commands.gateway import cmd_gateway
-    cmd_gateway("logs")
-
-
-@gateway_app.command("set-role")
-def gateway_set_role_cmd(
+@app.command("set-role")
+def set_role_cmd(
     email: str = typer.Argument(..., help="User email address"),
-    role: str = typer.Argument(..., help="Role to assign: guest | user | admin"),
+    role: str = typer.Argument(..., help="guest | user | admin"),
 ) -> None:
     """Set a gateway user's role (guest/user/admin)."""
     from .commands.gateway import gateway_set_role
     gateway_set_role(email, role)
 
 
-@gateway_app.command("users")
-def gateway_users_cmd() -> None:
-    """List all gateway users and their roles."""
-    from .commands.gateway import gateway_user_list
-    gateway_user_list()
-
-
-@gateway_app.command("routes")
-def gateway_routes_cmd() -> None:
-    """List all gateway API endpoints."""
+@app.command("routes")
+def routes_cmd() -> None:
+    """List all gateway API endpoints (parsed from source)."""
     from .commands.gateway import gateway_routes
     gateway_routes()
 
 
-@gateway_app.command("api", context_settings={"allow_extra_args": True, "allow_interspersed_args": True, "ignore_unknown_options": True})
-def gateway_api_cmd(ctx: typer.Context) -> None:
-    """Call a gateway API endpoint (bypasses auth).
+@app.command(
+    "api",
+    context_settings={
+        "allow_extra_args": True,
+        "allow_interspersed_args": True,
+        "ignore_unknown_options": True,
+    },
+)
+def api_cmd(ctx: typer.Context) -> None:
+    """Call a gateway API endpoint via the CLI (bypasses auth via localhost secret).
 
     Examples:
-        gateway api health
-        gateway api stats requests
-        gateway api admin users
-        gateway api keys delete abc123
-        gateway api search q=hello
-        gateway api admin approve -d '{"email":"x@y.com"}'
+        litellmctl api health
+        litellmctl api stats requests
+        litellmctl api admin users
+        litellmctl api keys delete abc123
+        litellmctl api search q=hello
+        litellmctl api admin approve -d '{"email":"x@y.com"}'
     """
     from .commands.gateway import gateway_api
     # Parse -d/--data from extra args manually (typer can't with allow_extra_args)
@@ -397,40 +369,14 @@ def gateway_api_cmd(ctx: typer.Context) -> None:
     gateway_api(args, data)
 
 
-# ProtonMail subcommands
-@protonmail_app.command("start")
-def protonmail_start() -> None:
-    """Start hydroxide SMTP bridge."""
-    from .commands.protonmail import cmd_protonmail
-    cmd_protonmail("start")
-
-
-@protonmail_app.command("stop")
-def protonmail_stop() -> None:
-    """Stop hydroxide SMTP bridge."""
-    from .commands.protonmail import cmd_protonmail
-    cmd_protonmail("stop")
-
-
-@protonmail_app.command("restart")
-def protonmail_restart() -> None:
-    """Restart hydroxide SMTP bridge."""
-    from .commands.protonmail import cmd_protonmail
-    cmd_protonmail("restart")
-
-
-@protonmail_app.command("status")
-def protonmail_status_cmd() -> None:
-    """Show ProtonMail bridge status."""
-    from .commands.protonmail import cmd_protonmail
-    cmd_protonmail("status")
-
-
-@protonmail_app.command("auth")
-def protonmail_auth() -> None:
-    """Show how to authenticate hydroxide."""
-    from .commands.protonmail import cmd_protonmail
-    cmd_protonmail("auth")
+@app.command("migrate-from-mongo")
+def migrate_from_mongo_cmd(
+    mongo_uri: Optional[str] = typer.Option(None, "--mongo-uri", help="MongoDB URI (defaults to GATEWAY_MONGODB_URI env var)"),
+    force: bool = typer.Option(False, "--force", help="Overlay onto a non-empty SQLite DB (may create duplicates in usage_logs)"),
+) -> None:
+    """One-shot migration of legacy MongoDB data into the gateway SQLite DB."""
+    from .commands.gateway import gateway_migrate_from_mongo
+    gateway_migrate_from_mongo(mongo_uri=mongo_uri, force=force)
 
 
 def _show_help() -> None:
@@ -440,39 +386,44 @@ def _show_help() -> None:
 
 [bold]Usage:[/]  litellmctl <command> [args...]
 
-[bold]Commands:[/]
-  wizard               Interactive config.yaml generator (providers, tiers, fallbacks)
-  install [options]     Install / rebuild LiteLLM (local servers, gateway, etc.)
-  init-env             Detect auth files and update .env with correct paths
-  auth chatgpt         Login to ChatGPT / Codex (browser PKCE)
-  auth gemini          Login to Gemini CLI (browser PKCE)
-  auth qwen            Login to Qwen Portal (device-code)
-  auth kimi            Login to Kimi Code (device-code)
-  auth refresh <p>     Refresh token for <chatgpt|gemini|qwen|kimi>
-  auth export [p...]   Copy credentials as a paste-able transfer script
-  auth import          Read credentials from stdin
-  auth status          Show auth token status
-  start [features...]  Start features (multi-select if omitted)
-  stop [features...]   Stop features (multi-select if omitted)
-  restart [features..] Restart features (multi-select if omitted)
-                       Features: proxy, gateway, searxng, protonmail, embedding, transcription
-  logs                 Tail proxy logs
-  proxy [--port N]     Start proxy in foreground (for debugging)
-  status               Show auth + proxy + local server status
-  local [status]       Check local inference server reachability
-  gateway [status|logs|routes|api]
-                       Manage LLM API Gateway UI (web dashboard)
-  gateway routes       List all API endpoints (parsed from source)
-  gateway api health   Call gateway endpoints using human commands
-  gateway api stats requests
-  gateway api admin approve email=user@example.com
-  gateway api keys delete <id>
-  protonmail [start|stop|restart|status|auth]
-                       Manage hydroxide SMTP bridge for OTP emails
-  uninstall [target]   Stop and remove components
-  toggle-claude        Toggle Claude Code between direct API and proxy
-  setup-completions    Add litellmctl to your shell
-  help                 Show this help
+[bold]Features[/]  (used as arguments to start/stop/restart/status/logs):
+  proxy | gateway | searxng | protonmail | embedding | transcription
+
+[bold]Lifecycle:[/]
+  install [options]             Install / rebuild LiteLLM (local servers, gateway, etc.)
+  uninstall [target]            Stop and remove components
+  start [features...]           Start features (multi-select if omitted)
+  stop [features...]            Stop features (multi-select if omitted)
+  restart [features...]         Restart features (multi-select if omitted)
+  status [feature]              Show status for one feature (default: all)
+  logs [feature]                Tail logs for one feature (default: proxy)
+
+[bold]Auth:[/]
+  auth chatgpt                  Login to ChatGPT / Codex (browser PKCE)
+  auth gemini                   Login to Gemini CLI (browser PKCE)
+  auth qwen                     Login to Qwen Portal (device-code)
+  auth kimi                     Login to Kimi Code (device-code)
+  auth protonmail               Authenticate hydroxide SMTP bridge
+  auth refresh <provider>       Refresh token for <chatgpt|gemini|qwen|kimi>
+  auth status                   Show auth token status
+  auth export [providers...]    Copy credentials as a paste-able transfer script
+  auth import                   Read credentials from stdin
+
+[bold]Gateway data:[/]
+  users                         List all gateway users and roles
+  set-role <email> <role>       Set a gateway user's role (guest/user/admin)
+  routes                        List all gateway API endpoints
+  api <cmd...> [-d json] [k=v]  Call a gateway API endpoint via CLI
+  migrate-from-mongo            Migrate legacy MongoDB data into SQLite
+
+[bold]Other:[/]
+  wizard                        Interactive config.yaml generator
+  init-env                      Detect auth files and update .env paths
+  proxy [--port N]              Start proxy in foreground (for debugging)
+  local [status]                Check local inference server reachability
+  toggle-claude                 Toggle Claude Code between direct API and proxy
+  setup-completions             Add litellmctl to your shell
+  help                          Show this help
 
 [bold]Service:[/]
   macOS: launchd agent (~/Library/LaunchAgents/)

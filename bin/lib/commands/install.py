@@ -179,7 +179,7 @@ def cmd_install(
         installed=searxng_installed,
         setup_prompt="Set up SearXNG search server?",
         start_prompt="SearXNG is installed but stopped. Start it now?",
-        start_hint="docker start searxng",
+        start_hint="litellmctl start searxng",
         running_message="SearXNG already running — skipping",
     )
 

@@ -70,10 +70,16 @@ class TestCompletionConstants:
         from lib.commands.completions import BASH_COMPLETIONS, ZSH_COMPLETIONS
         assert BASH_COMPLETIONS != ZSH_COMPLETIONS
 
-    def test_generate_functions_return_constants(self):
+    def test_generate_functions_substitute_placeholders(self):
+        """generate_* must return fully-substituted strings (no __PLACEHOLDER__ left)."""
         from lib.commands.completions import (
-            BASH_COMPLETIONS, ZSH_COMPLETIONS,
             generate_completions, generate_zsh_completions,
         )
-        assert generate_completions() is BASH_COMPLETIONS
-        assert generate_zsh_completions() is ZSH_COMPLETIONS
+        bash = generate_completions()
+        zsh = generate_zsh_completions()
+        assert "__" not in bash or "$HOME" in bash  # $HOME is the only valid __-adjacent
+        assert "__TOP_COMMANDS__" not in bash and "__TOP_COMMANDS__" not in zsh
+        assert "__FEATURES__" not in bash and "__FEATURES__" not in zsh
+        # Sanity: both contain expected top-level commands
+        assert "start" in bash and "stop" in bash and "users" in bash
+        assert "start" in zsh and "stop" in zsh and "users" in zsh
