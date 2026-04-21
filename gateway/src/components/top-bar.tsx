@@ -9,19 +9,11 @@ import {
 } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
 import type { UseAuthReturn } from '@/hooks/use-auth'
+import { roleBadgeVariant } from '@/lib/role-badge'
 
 interface TopBarProps {
   auth: UseAuthReturn
   onLogout: () => void
-}
-
-function roleVariant(role: string): 'default' | 'success' | 'warning' | 'outline' {
-  switch (role) {
-    case 'admin': return 'default'
-    case 'user': return 'success'
-    case 'guest': return 'warning'
-    default: return 'outline'
-  }
 }
 
 export function TopBar({ auth, onLogout }: TopBarProps) {
@@ -47,7 +39,7 @@ export function TopBar({ auth, onLogout }: TopBarProps) {
               {!loading && user && (
                 <>
                   <p className="text-xs text-muted-foreground break-all">{user.email}</p>
-                  <Badge variant={roleVariant(user.role)}>
+                  <Badge variant={roleBadgeVariant(user.role)}>
                     {user.role}
                   </Badge>
                 </>

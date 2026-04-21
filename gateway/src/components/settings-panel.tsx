@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { cn, errorMessage } from '@/lib/utils'
+import { roleBadgeVariant } from '@/lib/role-badge'
 import { ModelSelector } from '@/components/model-selector'
 import type { UseAuthReturn, UseLogoutReturn } from '@/hooks/use-auth'
 import type { UseModelOverridesReturn, UseTierAliasesReturn, UseSaveModelOverridesReturn, UseSaveProfileReturn } from '@/hooks/use-settings'
@@ -15,12 +16,6 @@ import {
   Loader2,
   Layers
 } from 'lucide-react'
-
-const ROLE_BADGE_VARIANT: Record<string, 'destructive' | 'default' | 'secondary' | 'outline'> = {
-  admin: 'destructive',
-  user: 'default',
-  guest: 'secondary',
-}
 
 interface SettingsPanelProps {
   auth: UseAuthReturn
@@ -177,7 +172,7 @@ export function SettingsPanel({ auth, logout, modelOverrides, tierAliases, saveM
               {loading ? (
                 <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               ) : user?.role ? (
-                <Badge variant={ROLE_BADGE_VARIANT[user.role] ?? 'secondary'}>
+                <Badge variant={roleBadgeVariant(user.role)}>
                   {user.role}
                 </Badge>
               ) : null}

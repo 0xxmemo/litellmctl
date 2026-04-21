@@ -23,6 +23,7 @@ import { toast } from 'sonner'
 import { PrettyDate } from '@/components/pretty-date'
 import { PrettyAmount } from '@/components/pretty-amount'
 import { errorMessage } from '@/lib/utils'
+import { roleBadgeVariant } from '@/lib/role-badge'
 export function Admin() {
   const { user: currentUser } = useAuth()
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
@@ -399,9 +400,7 @@ export function Admin() {
                             </span>
                           </TableCell>
                           <TableCell>
-                            <Badge
-                              variant={user.role === 'admin' ? 'default' : 'success'}
-                            >
+                            <Badge variant={roleBadgeVariant(user.role)}>
                               {user.role}
                             </Badge>
                           </TableCell>
