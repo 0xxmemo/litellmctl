@@ -383,9 +383,10 @@ def _aws_deploy() -> None:
     set_secret("AWS_DEPLOY_ROLE_ARN", role_arn)
     set_secret("AWS_REGION", region)
     set_secret("APP_NAME", app_name)
-    set_secret("GITHUB_ORG", gh_org)
-    set_secret("GITHUB_REPO", gh_repo)
     set_secret("GATEWAY_ADMIN_EMAILS", admin_emails)
+    # Note: we don't set GITHUB_ORG / GITHUB_REPO — GitHub reserves the
+    # GITHUB_ prefix for its own context vars, and the workflow already
+    # knows them via ${{ github.repository_owner }} / github.event.repository.name.
     if not reuse_key:
         set_secret("LITELLM_MASTER_KEY", master_key)
         console.print("  [dim]   master key saved only to GitHub secrets — store it yourself if you want a copy.[/]")

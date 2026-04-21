@@ -30,8 +30,10 @@ jobs:
       APP_NAME: ${{ secrets.APP_NAME }}
       AWS_REGION: ${{ secrets.AWS_REGION }}
       STACK_NAME: ${{ secrets.APP_NAME }}
-      GITHUB_ORG: ${{ secrets.GITHUB_ORG }}
-      GITHUB_REPO: ${{ secrets.GITHUB_REPO }}
+      # Repo owner/name come from the built-in github.* context — no
+      # secret needed (and GITHUB_* secrets are actually forbidden).
+      REPO_OWNER: ${{ github.repository_owner }}
+      REPO_NAME: ${{ github.event.repository.name }}
 
     steps:
       - name: Checkout
@@ -49,10 +51,8 @@ jobs:
             echo "::error::AWS_DEPLOY_ROLE_ARN is not a valid IAM role ARN."
             fail=1
           fi
-          [ -n "$AWS_REGION" ]   || { echo "::error::AWS_REGION empty.";   fail=1; }
-          [ -n "$APP_NAME" ]     || { echo "::error::APP_NAME empty.";     fail=1; }
-          [ -n "$GITHUB_ORG" ]   || { echo "::error::GITHUB_ORG empty.";   fail=1; }
-          [ -n "$GITHUB_REPO" ]  || { echo "::error::GITHUB_REPO empty.";  fail=1; }
+          [ -n "$AWS_REGION" ] || { echo "::error::AWS_REGION empty."; fail=1; }
+          [ -n "$APP_NAME" ]   || { echo "::error::APP_NAME empty.";   fail=1; }
           exit $fail
 
       - name: Configure AWS credentials (OIDC)
@@ -88,8 +88,8 @@ jobs:
             --no-fail-on-empty-changeset \
             --parameter-overrides \
               AppName="${APP_NAME}" \
-              GithubOrg="${GITHUB_ORG}" \
-              GithubRepo="${GITHUB_REPO}" \
+              GithubOrg="${REPO_OWNER}" \
+              GithubRepo="${REPO_NAME}" \
               GithubBranch="${{ github.ref_type == 'tag' && 'main' || github.ref_name }}" \
               InstanceType="${{ inputs.instance_type || 'c7g.xlarge' }}" \
               AdminEmails="${{ secrets.GATEWAY_ADMIN_EMAILS }}" \
