@@ -2,6 +2,28 @@
 
 All notable changes to litellmctl are documented here.
 
+## [1.5.6] - 2026-04-21
+
+### Features
+
+- **Image generation.** New `google` provider template with `nano-banana-pro` (gemini-3-pro-image-preview) and `nano-banana` (gemini-2.5-flash-image). `GOOGLE_AI_API_KEY` gates wizard visibility and the `/api/health` `image` flag. Wizard YAML generator now emits a top-level `image_models` section.
+- **Native MCP endpoint.** `POST /mcp` speaks JSON-RPC 2.0 (Streamable HTTP, stateless) and exposes `generate_image` as an MCP tool. Register with `claude mcp add --transport http …` — Claude Code then calls `/v1/images/generations` without the user pasting endpoints. Tool hides from `tools/list` when `imageGenerationHealthy()` is false.
+- **Centralized feature health.** `gateway/lib/features.ts` is the single source of truth for feature gating; `/api/health` gains `features.image`.
+- **Plugin stats.** New monitoring endpoints for plugin usage.
+- **Team management.** Admin panel for team creation / membership; vectordb collections unioned across team members, writes stay per-user.
+- **UI.** Glassmorphism styling; ModelSelector dropdown positioning fixes; logout moved into SettingsPanel.
+- **Claude-context plugin.** PID-file lock, state dir resolution, session-start + user-prompt-submit hooks, bundled source shipped via the plugin endpoint.
+- **Docs.** Added AGENTS.md and CLAUDE.md.
+
+### Fixes
+
+- **`/v1/audio/transcriptions` 422.** Gateway proxy now converts JSON bodies with `{file: "data:audio/...;base64,..."}` into multipart `FormData` before forwarding to LiteLLM. Existing multipart uploads are untouched.
+- **sqlite-vec install.** Now pulled from GitHub Releases (macOS + Linux) instead of npm; idempotent.
+
+### Breaking / Rename
+
+- Product name rebranded **"LLM API Gateway" → "LitellmCTL"** across UI and docs. No code imports broke — `bin/litellmctl` CLI name was already the canonical form.
+
 ## [1.1.0] - 2026-03-18
 
 ### Breaking / Architecture
