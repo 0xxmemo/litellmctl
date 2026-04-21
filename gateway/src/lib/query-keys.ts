@@ -50,4 +50,7 @@ export const queryKeys = {
 
   // Health
   health: ['health'] as const,
+
+  // App version (GitHub releases)
+  appVersion: ['app', 'version'] as const,
 } as const

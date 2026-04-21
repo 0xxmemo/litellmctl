@@ -7,10 +7,12 @@ import { Button } from '@/components/ui/button'
 import { Menu } from 'lucide-react'
 import { Toaster } from 'sonner'
 import { useAuth, useLogout } from '@/hooks/useAuth'
+import { useAppVersion } from '@/hooks/use-app-version'
 
 export function DashboardLayout() {
   const auth = useAuth()
   const logoutMutation = useLogout()
+  const { version } = useAppVersion()
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [theme, setTheme] = useState<'light' | 'dark' | 'system'>('dark')
 
@@ -57,13 +59,20 @@ export function DashboardLayout() {
               aria-label="LitellmCTL home"
             >
               <img
-                src="/icon-32.png"
+                src="/public/logo.svg"
                 alt="LitellmCTL"
                 width={28}
                 height={28}
                 className="flex-shrink-0"
               />
-              <span className="text-base lg:text-lg font-bold truncate">LitellmCTL</span>
+              <div className="flex flex-col min-w-0">
+                <span className="text-base lg:text-lg font-bold truncate leading-tight">LitellmCTL</span>
+                {version && (
+                  <span className="text-[10px] text-muted-foreground font-mono leading-none opacity-70">
+                    {version}
+                  </span>
+                )}
+              </div>
             </a>
           </div>
           <div className="p-3 lg:p-4">
@@ -87,13 +96,20 @@ export function DashboardLayout() {
                 aria-label="LitellmCTL home"
               >
                 <img
-                  src="/icon-32.png"
+                  src="/public/logo.svg"
                   alt="LitellmCTL"
                   width={24}
                   height={24}
-                  className="flex-shrink-0"
+                  className="shrink-0"
                 />
-                <span className="text-base font-bold truncate">LitellmCTL</span>
+                <div className="flex flex-col min-w-0">
+                  <span className="text-base font-bold truncate leading-tight">LitellmCTL</span>
+                  {version && (
+                    <span className="text-[10px] text-muted-foreground font-mono leading-none opacity-70">
+                      {version}
+                    </span>
+                  )}
+                </div>
               </a>
             </div>
             <div className="p-3 flex-1 overflow-y-auto">
@@ -125,11 +141,11 @@ export function DashboardLayout() {
               aria-label="LitellmCTL home"
             >
               <img
-                src="/icon-32.png"
+                src="/public/logo.svg"
                 alt="LitellmCTL"
                 width={24}
                 height={24}
-                className="flex-shrink-0"
+                className="shrink-0"
               />
               <span className="text-sm font-bold truncate hidden sm:block">LitellmCTL</span>
             </a>

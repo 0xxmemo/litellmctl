@@ -1,96 +1,164 @@
 @import "tailwindcss";
 @import "@xterm/xterm/css/xterm.css";
 
+@custom-variant dark (&:is(.dark *));
+
 @plugin "@tailwindcss/forms";
 @plugin "@tailwindcss/typography";
 
 @import "./theme.css";
 @import "./components/ui/glass.css";
 
-@theme {
-  --color-border: hsl(214.3 31.8% 91.4%);
-  --color-input: hsl(214.3 31.8% 91.4%);
-  --color-ring: hsl(222.2 47.4% 11.2%);
-  --color-background: hsl(0 0% 100%);
-  --color-foreground: hsl(222.2 47.4% 11.2%);
-  --color-primary: hsl(222.2 47.4% 11.2%);
-  --color-primary-foreground: hsl(210 40% 98%);
-  --color-secondary: hsl(210 40% 96.1%);
-  --color-secondary-foreground: hsl(222.2 47.4% 11.2%);
-  --color-destructive: hsl(0 100% 50%);
-  --color-destructive-foreground: hsl(210 40% 98%);
-  --color-muted: hsl(210 40% 96.1%);
-  --color-muted-foreground: hsl(215.4 16.3% 46.9%);
-  --color-accent: hsl(210 40% 96.1%);
-  --color-accent-foreground: hsl(222.2 47.4% 11.2%);
-  --color-popover: hsl(0 0% 100%);
-  --color-popover-foreground: hsl(222.2 47.4% 11.2%);
-  --color-card: hsl(0 0% 100%);
-  --color-card-foreground: hsl(222.2 47.4% 11.2%);
-
-  /* Chart / accent bases (ref/opentrade palette, light) */
-  --color-chart-1: rgb(96, 96, 96);
-  --color-chart-2: rgb(71, 102, 102);
-  --color-chart-3: rgb(144, 144, 144);
-  --color-chart-4: rgb(168, 168, 168);
-  --color-chart-5: rgb(192, 192, 192);
-  
-  --radius-lg: 0.5rem;
-  --radius-md: calc(0.5rem - 2px);
-  --radius-sm: calc(0.5rem - 4px);
+/* ── Doom64 design tokens ──────────────────────────── */
+:root {
+  --background: rgb(204, 204, 204);
+  --foreground: rgb(31, 31, 31);
+  --card: rgb(176, 176, 176);
+  --card-foreground: rgb(31, 31, 31);
+  --popover: rgb(176, 176, 176);
+  --popover-foreground: rgb(31, 31, 31);
+  --primary: rgb(183, 28, 28);
+  --primary-foreground: rgb(255, 255, 255);
+  --secondary: rgb(85, 107, 47);
+  --secondary-foreground: rgb(255, 255, 255);
+  --muted: rgb(184, 184, 184);
+  --muted-foreground: rgb(74, 74, 74);
+  --accent: rgb(70, 130, 180);
+  --accent-foreground: rgb(255, 255, 255);
+  --destructive: rgb(255, 111, 0);
+  --destructive-foreground: rgb(0, 0, 0);
+  --border: rgb(80, 80, 80);
+  --input: rgb(80, 80, 80);
+  --ring: rgb(183, 28, 28);
+  --chart-1: rgb(183, 28, 28);
+  --chart-2: rgb(85, 107, 47);
+  --chart-3: rgb(70, 130, 180);
+  --chart-4: rgb(255, 111, 0);
+  --chart-5: rgb(141, 110, 99);
+  --sidebar: rgb(176, 176, 176);
+  --sidebar-foreground: rgb(31, 31, 31);
+  --sidebar-primary: rgb(183, 28, 28);
+  --sidebar-primary-foreground: rgb(255, 255, 255);
+  --sidebar-accent: rgb(70, 130, 180);
+  --sidebar-accent-foreground: rgb(255, 255, 255);
+  --sidebar-border: rgb(80, 80, 80);
+  --sidebar-ring: rgb(183, 28, 28);
+  --font-sans: "Share Tech Mono", monospace;
+  --font-serif: ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+  --font-mono: "Source Code Pro", monospace;
+  --radius: 0px;
+  --shadow-2xs: 0px 2px 4px 0px hsl(0 0% 0% / 0.20);
+  --shadow-xs: 0px 2px 4px 0px hsl(0 0% 0% / 0.20);
+  --shadow-sm: 0px 2px 4px 0px hsl(0 0% 0% / 0.40), 0px 1px 2px -1px hsl(0 0% 0% / 0.40);
+  --shadow: 0px 2px 4px 0px hsl(0 0% 0% / 0.40), 0px 1px 2px -1px hsl(0 0% 0% / 0.40);
+  --shadow-md: 0px 2px 4px 0px hsl(0 0% 0% / 0.40), 0px 2px 4px -1px hsl(0 0% 0% / 0.40);
+  --shadow-lg: 0px 2px 4px 0px hsl(0 0% 0% / 0.40), 0px 4px 6px -1px hsl(0 0% 0% / 0.40);
+  --shadow-xl: 0px 2px 4px 0px hsl(0 0% 0% / 0.40), 0px 8px 10px -1px hsl(0 0% 0% / 0.40);
+  --shadow-2xl: 0px 2px 4px 0px hsl(0 0% 0% / 1.00);
 }
 
 .dark {
-  --color-border: hsl(217.2 32.6% 17.5%);
-  --color-input: hsl(217.2 32.6% 17.5%);
-  --color-ring: hsl(212.7 26.8% 83.9%);
-  --color-background: hsl(222.2 84% 4.9%);
-  --color-foreground: hsl(210 40% 98%);
-  --color-primary: hsl(210 40% 98%);
-  --color-primary-foreground: hsl(222.2 47.4% 11.2%);
-  --color-secondary: hsl(217.2 32.6% 17.5%);
-  --color-secondary-foreground: hsl(210 40% 98%);
-  --color-destructive: hsl(0 62.8% 30.6%);
-  --color-destructive-foreground: hsl(210 40% 98%);
-  --color-muted: hsl(217.2 32.6% 17.5%);
-  --color-muted-foreground: hsl(215 20.2% 65.1%);
-  --color-accent: hsl(217.2 32.6% 17.5%);
-  --color-accent-foreground: hsl(210 40% 98%);
-  --color-popover: hsl(222.2 84% 4.9%);
-  --color-popover-foreground: hsl(210 40% 98%);
-  --color-card: hsl(222.2 84% 4.9%);
-  --color-card-foreground: hsl(210 40% 98%);
+  --background: rgb(26, 26, 26);
+  --foreground: rgb(224, 224, 224);
+  --card: rgb(42, 42, 42);
+  --card-foreground: rgb(224, 224, 224);
+  --popover: rgb(42, 42, 42);
+  --popover-foreground: rgb(224, 224, 224);
+  --primary: rgb(229, 57, 53);
+  --primary-foreground: rgb(255, 255, 255);
+  --secondary: rgb(104, 159, 56);
+  --secondary-foreground: rgb(0, 0, 0);
+  --muted: rgb(37, 37, 37);
+  --muted-foreground: rgb(160, 160, 160);
+  --accent: rgb(100, 181, 246);
+  --accent-foreground: rgb(0, 0, 0);
+  --destructive: rgb(255, 160, 0);
+  --destructive-foreground: rgb(0, 0, 0);
+  --border: rgb(74, 74, 74);
+  --input: rgb(74, 74, 74);
+  --ring: rgb(229, 57, 53);
+  --chart-1: rgb(229, 57, 53);
+  --chart-2: rgb(104, 159, 56);
+  --chart-3: rgb(100, 181, 246);
+  --chart-4: rgb(255, 160, 0);
+  --chart-5: rgb(161, 136, 127);
+  --sidebar: rgb(20, 20, 20);
+  --sidebar-foreground: rgb(224, 224, 224);
+  --sidebar-primary: rgb(229, 57, 53);
+  --sidebar-primary-foreground: rgb(255, 255, 255);
+  --sidebar-accent: rgb(100, 181, 246);
+  --sidebar-accent-foreground: rgb(0, 0, 0);
+  --sidebar-border: rgb(74, 74, 74);
+  --sidebar-ring: rgb(229, 57, 53);
+  --font-sans: "Share Tech Mono", monospace;
+  --font-mono: "Source Code Pro", monospace;
+  --radius: 0px;
+  --shadow-2xs: 0px 2px 5px 0px hsl(0 0% 0% / 0.30);
+  --shadow-xs: 0px 2px 5px 0px hsl(0 0% 0% / 0.30);
+  --shadow-sm: 0px 2px 5px 0px hsl(0 0% 0% / 0.60), 0px 1px 2px -1px hsl(0 0% 0% / 0.60);
+  --shadow: 0px 2px 5px 0px hsl(0 0% 0% / 0.60), 0px 1px 2px -1px hsl(0 0% 0% / 0.60);
+  --shadow-md: 0px 2px 5px 0px hsl(0 0% 0% / 0.60), 0px 2px 4px -1px hsl(0 0% 0% / 0.60);
+  --shadow-lg: 0px 2px 5px 0px hsl(0 0% 0% / 0.60), 0px 4px 6px -1px hsl(0 0% 0% / 0.60);
+  --shadow-xl: 0px 2px 5px 0px hsl(0 0% 0% / 0.60), 0px 8px 10px -1px hsl(0 0% 0% / 0.60);
+  --shadow-2xl: 0px 2px 5px 0px hsl(0 0% 0% / 1.50);
+}
 
-  --color-chart-1: rgb(160, 160, 160);
-  --color-chart-2: rgb(126, 156, 160);
-  --color-chart-3: rgb(112, 112, 112);
-  --color-chart-4: rgb(88, 88, 88);
-  --color-chart-5: rgb(64, 64, 64);
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-serif: var(--font-serif);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --shadow-2xs: var(--shadow-2xs);
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow: var(--shadow);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-2xl: var(--shadow-2xl);
 }
 
 @layer base {
-  /* HSL triplets for hsl(var(--*)) — matches @theme colors; used by charts & overlays */
-  :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 47.4% 11.2%;
-    --card: 0 0% 100%;
-    --popover: 0 0% 100%;
-    --border: 214.3 31.8% 91.4%;
-    --muted: 210 40% 96.1%;
-    --primary: 222.2 47.4% 11.2%;
-  }
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --popover: 222.2 84% 4.9%;
-    --border: 217.2 32.6% 17.5%;
-    --muted: 217.2 32.6% 17.5%;
-    --primary: 210 40% 98%;
-  }
-
   * {
-    @apply border-border;
+    @apply border-border outline-ring/50;
   }
   html, body {
     width: 100%;
@@ -100,8 +168,8 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans);
     font-feature-settings: "rlig" 1, "calt" 1;
-    /* REMOVED: word-break: break-all; — breaks tables */
   }
   #root {
     width: 100%;
@@ -114,16 +182,16 @@
   .animate-fade-in {
     animation: fadeIn 0.3s ease-out;
   }
-  
+
   .animate-slide-in {
     animation: slideIn 0.3s ease-out;
   }
-  
+
   @keyframes fadeIn {
     from { opacity: 0; }
     to { opacity: 1; }
   }
-  
+
   @keyframes slideIn {
     from { transform: translateX(-10px); opacity: 0; }
     to { transform: translateX(0); opacity: 1; }
@@ -135,55 +203,52 @@
     word-break: break-all;
     word-wrap: break-word;
   }
-  
+
   .table-scroll {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
   }
-  
+
   .table-scroll table {
     min-width: 100%;
     white-space: nowrap;
   }
 
-  /** App shell: soft mesh behind glass panels */
+  /* App shell: subtle Doom64-palette mesh behind glass panels */
   .gateway-bg {
     @apply bg-background;
     background-image:
-      radial-gradient(ellipse 110% 85% at 0% -15%, hsl(217 91% 60% / 0.11), transparent 52%),
-      radial-gradient(ellipse 90% 55% at 100% 0%, hsl(280 55% 55% / 0.08), transparent 48%),
-      radial-gradient(ellipse 80% 60% at 45% 105%, hsl(200 70% 45% / 0.07), transparent 55%);
+      radial-gradient(ellipse 110% 85% at 0% -15%, rgb(183 28 28 / 0.07), transparent 52%),
+      radial-gradient(ellipse 90% 55% at 100% 0%, rgb(85 107 47 / 0.05), transparent 48%),
+      radial-gradient(ellipse 80% 60% at 45% 105%, rgb(70 130 180 / 0.04), transparent 55%);
   }
   .dark .gateway-bg {
     background-image:
-      radial-gradient(ellipse 110% 85% at 0% -15%, hsl(217 91% 60% / 0.18), transparent 52%),
-      radial-gradient(ellipse 90% 55% at 100% 0%, hsl(280 60% 50% / 0.12), transparent 48%),
-      radial-gradient(ellipse 80% 60% at 45% 105%, hsl(199 80% 45% / 0.1), transparent 55%);
+      radial-gradient(ellipse 110% 85% at 0% -15%, rgb(229 57 53 / 0.10), transparent 52%),
+      radial-gradient(ellipse 90% 55% at 100% 0%, rgb(104 159 56 / 0.07), transparent 48%),
+      radial-gradient(ellipse 80% 60% at 45% 105%, rgb(100 181 246 / 0.06), transparent 55%);
   }
 
-  /** Native selects — pair with `glass glass--outline` (ref/opentrade pattern) */
+  /* Native selects */
   .gateway-select {
-    @apply flex h-9 w-full rounded-md px-3 py-1 text-sm shadow-none;
+    @apply flex h-9 w-full px-3 py-1 text-sm shadow-none;
     @apply focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring;
     @apply disabled:cursor-not-allowed disabled:opacity-50;
   }
 
-  /** Modal stack */
+  /* Modal stack */
   .glass-overlay {
     @apply bg-black/45 backdrop-blur-[3px];
   }
 
-  /** From ref/opentrade/gateway/app/index.css */
   .overflow-y-auto::-webkit-scrollbar {
     width: 8px;
   }
   .overflow-y-auto::-webkit-scrollbar-track {
     background: color-mix(in srgb, var(--color-muted) 40%, transparent);
-    border-radius: 4px;
   }
   .overflow-y-auto::-webkit-scrollbar-thumb {
     background: color-mix(in srgb, var(--color-muted-foreground) 35%, transparent);
-    border-radius: 4px;
   }
   .overflow-y-auto::-webkit-scrollbar-thumb:hover {
     background: color-mix(in srgb, var(--color-muted-foreground) 55%, transparent);

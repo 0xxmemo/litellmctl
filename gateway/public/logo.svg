@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <!-- Doom64 dark background -->
+  <rect width="32" height="32" fill="#1a1a1a"/>
+  <!-- Banana body: outer arc right, inner arc left — crescent pointing NE→SW -->
+  <path d="M 22,4 C 27,7 27,21 17,28 C 8,23 10,11 22,4 Z" fill="#F9C74F"/>
+  <!-- Inner shadow / depth on concave side -->
+  <path d="M 22,4 C 14,10 12,20 17,28 C 13,25 11,18 12,13 Z" fill="#E6A817" opacity="0.6"/>
+  <!-- Stem tip (Doom64 red accent) -->
+  <rect x="21" y="3" width="3" height="3" fill="#E53935"/>
+</svg>
