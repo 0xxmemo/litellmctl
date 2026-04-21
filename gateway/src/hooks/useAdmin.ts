@@ -171,3 +171,132 @@ export type UseAddUserReturn = ReturnType<typeof useAddUser>
 export type UseDeleteUserReturn = ReturnType<typeof useDeleteUser>
 export type UseDisapproveAllReturn = ReturnType<typeof useDisapproveAll>
 export type UseRevokeAllKeysReturn = ReturnType<typeof useRevokeAllKeys>
+
+// ── Teams ────────────────────────────────────────────────────────────────────
+
+export interface TeamRecord {
+  id: string
+  name: string
+  createdAt: number
+  createdBy: string
+  memberCount: number
+}
+
+async function fetchTeams(): Promise<TeamRecord[]> {
+  const res = await fetch('/api/admin/teams', {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  })
+  if (res.status === 403) throw new Error('Access denied — admin role required')
+  if (!res.ok) throw new Error(`Server error: HTTP ${res.status}`)
+  const data = await res.json()
+  return data.teams || []
+}
+
+async function fetchTeamMembers(teamId: string): Promise<string[]> {
+  const res = await fetch(`/api/admin/teams/${encodeURIComponent(teamId)}/members`, {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  })
+  if (!res.ok) throw new Error(`Server error: HTTP ${res.status}`)
+  const data = await res.json()
+  return data.members || []
+}
+
+export function useTeams(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.adminTeams,
+    queryFn: fetchTeams,
+    enabled,
+  })
+}
+
+export function useTeamMembers(teamId: string | null) {
+  return useQuery({
+    queryKey: queryKeys.adminTeamMembers(teamId ?? ''),
+    queryFn: () => fetchTeamMembers(teamId as string),
+    enabled: !!teamId,
+  })
+}
+
+export function useCreateTeam() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (name: string) => {
+      const res = await fetch('/api/admin/teams', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ name }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      return data.team as TeamRecord
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.adminTeams }),
+  })
+}
+
+export function useDeleteTeam() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/admin/teams/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+        headers: { Accept: 'application/json' },
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      return id
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.adminTeams }),
+  })
+}
+
+export function useAddTeamMember() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ teamId, email }: { teamId: string; email: string }) => {
+      const res = await fetch(`/api/admin/teams/${encodeURIComponent(teamId)}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      return { teamId, email }
+    },
+    onSuccess: ({ teamId }) => {
+      qc.invalidateQueries({ queryKey: queryKeys.adminTeamMembers(teamId) })
+      qc.invalidateQueries({ queryKey: queryKeys.adminTeams })
+    },
+  })
+}
+
+export function useRemoveTeamMember() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ teamId, email }: { teamId: string; email: string }) => {
+      const res = await fetch(
+        `/api/admin/teams/${encodeURIComponent(teamId)}/members/${encodeURIComponent(email)}`,
+        { method: 'DELETE', credentials: 'include' },
+      )
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      return { teamId, email }
+    },
+    onSuccess: ({ teamId }) => {
+      qc.invalidateQueries({ queryKey: queryKeys.adminTeamMembers(teamId) })
+      qc.invalidateQueries({ queryKey: queryKeys.adminTeams })
+    },
+  })
+}
+
+export type UseTeamsReturn = ReturnType<typeof useTeams>
+export type UseTeamMembersReturn = ReturnType<typeof useTeamMembers>
+export type UseCreateTeamReturn = ReturnType<typeof useCreateTeam>
+export type UseDeleteTeamReturn = ReturnType<typeof useDeleteTeam>
+export type UseAddTeamMemberReturn = ReturnType<typeof useAddTeamMember>
+export type UseRemoveTeamMemberReturn = ReturnType<typeof useRemoveTeamMember>

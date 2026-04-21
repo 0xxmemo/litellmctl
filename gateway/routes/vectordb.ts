@@ -10,7 +10,15 @@
  * longer used to partition data.
  */
 
-import { requireUser, requireAdmin } from "../lib/db";
+import {
+  db,
+  requireUser,
+  requireAdmin,
+  listUserTeams,
+  teamRefId,
+  userMemoryRefId,
+  isVecLoaded,
+} from "../lib/db";
 import {
   createCollection,
   dropCollection,
@@ -25,12 +33,29 @@ import {
   validateRefId,
   listExistingChunkIds,
   setRefOverlay,
+  appendRefOverlay,
   getRefOverlay,
   gcOrphanedChunks,
   type VectorDocument,
   type RefOverlayEntry,
 } from "../lib/vectordb";
-import { isVecLoaded } from "../lib/db";
+
+/**
+ * Collection name that the supermemory plugin writes into. Chunks in this
+ * collection are automatically scoped by the authenticated user's email (and,
+ * on read, unioned with every team the user belongs to) via ref overlays —
+ * teams are how admins let users share a memory pool.
+ */
+const MEMORIES_COLLECTION = "memories";
+
+/** Pseudo-file path used for memory-scoped ref overlay rows. */
+const MEMORY_REF_FILE = "memory";
+
+function memoryReadRefs(email: string): string[] {
+  const refs = [userMemoryRefId(email)];
+  for (const t of listUserTeams(email)) refs.push(teamRefId(t.id));
+  return refs;
+}
 
 function errJson(message: string, status = 400): Response {
   return Response.json({ error: message }, { status });
@@ -169,6 +194,17 @@ async function handleInsert(req: Request): Promise<Response | null> {
 
   try {
     const res = insertDocuments(name, body.documents);
+    // For the memories collection, auto-tag freshly inserted chunks with the
+    // caller's user ref. Reads union this ref with the caller's teams so each
+    // user sees their own memories plus any team memories they're in on.
+    if (name === MEMORIES_COLLECTION) {
+      const chunkIds = body.documents
+        .map((d) => d?.id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0);
+      if (chunkIds.length > 0) {
+        appendRefOverlay(name, userMemoryRefId(auth.email), MEMORY_REF_FILE, chunkIds);
+      }
+    }
     return Response.json(res);
   } catch (err) {
     return errJson(err instanceof Error ? err.message : String(err));
@@ -205,13 +241,21 @@ async function handleSearch(req: Request): Promise<Response | null> {
   const refId = url.searchParams.get("ref");
   if (refId !== null && !validateRefId(refId)) return errJson("Invalid ref id");
 
+  // For the memories collection: if the caller didn't pass an explicit ?ref=,
+  // auto-scope to the caller's own memories plus every team they belong to.
+  // Callers who *do* pass ?ref= (e.g. admin tools, tests) keep full control.
+  const refArg: string | string[] | null =
+    name === MEMORIES_COLLECTION && refId === null
+      ? memoryReadRefs(auth.email)
+      : refId;
+
   try {
     const results = searchVectors(
       name,
       body.queryVector,
       body.topK ?? 10,
       body.filterExpr ?? null,
-      refId,
+      refArg,
     );
     return Response.json({ results });
   } catch (err) {
@@ -241,8 +285,28 @@ async function handleDelete(req: Request): Promise<Response | null> {
   }
   if (!Array.isArray(body.ids)) return errJson("ids must be an array");
 
+  // For the memories collection, restrict deletes to chunks the caller owns
+  // (i.e. that are in their user:<email> ref overlay). Team memories can only
+  // be deleted by admins via the team-scoped admin API — not here.
+  let ids = body.ids.filter((x): x is string => typeof x === "string" && x.length > 0);
+  if (name === MEMORIES_COLLECTION && ids.length > 0) {
+    ids = listExistingChunkIds(name, ids);
+    if (ids.length > 0) {
+      const ownRef = userMemoryRefId(auth.email);
+      const phs = ids.map(() => "?").join(",");
+      const owned = db
+        .prepare(
+          `SELECT DISTINCT chunk_id FROM plugin_ref_chunks
+            WHERE collection = ? AND ref_id = ? AND chunk_id IN (${phs})`,
+        )
+        .all(MEMORIES_COLLECTION, ownRef, ...ids) as { chunk_id: string }[];
+      ids = owned.map((r) => r.chunk_id);
+    }
+    if (ids.length === 0) return Response.json({ deleted: 0 });
+  }
+
   try {
-    const res = deleteByIds(name, body.ids);
+    const res = deleteByIds(name, ids);
     return Response.json(res);
   } catch (err) {
     return errJson(err instanceof Error ? err.message : String(err));
@@ -274,12 +338,17 @@ async function handleQuery(req: Request): Promise<Response | null> {
   if (!body.filterExpr) return errJson("filterExpr required");
   if (!hasCollection(name)) return errJson("Collection not found", 404);
 
+  // Same memory-collection scoping as /search — keep the two endpoints aligned.
+  const refs: string[] | null =
+    name === MEMORIES_COLLECTION ? memoryReadRefs(auth.email) : null;
+
   try {
     const rows = queryByFilter(
       name,
       body.filterExpr,
       body.outputFields ?? null,
       body.limit ?? 1000,
+      refs,
     );
     return Response.json({ rows });
   } catch (err) {

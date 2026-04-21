@@ -146,6 +146,21 @@ export async function connectDB(): Promise<void> {
       ON plugin_ref_chunks(collection, ref_id);
     CREATE INDEX IF NOT EXISTS idx_ref_chunks_chunk
       ON plugin_ref_chunks(collection, chunk_id);
+
+    CREATE TABLE IF NOT EXISTS teams (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      created_at INTEGER NOT NULL,
+      created_by TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS team_members (
+      team_id TEXT NOT NULL,
+      email TEXT NOT NULL,
+      added_at INTEGER NOT NULL,
+      PRIMARY KEY (team_id, email)
+    );
+    CREATE INDEX IF NOT EXISTS idx_team_members_email ON team_members(email);
   `;
 
   // One-shot cleanup of pre-v2 per-tenant rows. Detect via the legacy
@@ -606,6 +621,111 @@ export function userUsageTotals(emails: string[]): Record<string, { requests: nu
   const out: Record<string, { requests: number; tokens: number }> = {};
   for (const r of rows) out[r.email.toLowerCase()] = { requests: r.requests, tokens: r.tokens };
   return out;
+}
+
+// ============================================================================
+// TEAMS
+// ============================================================================
+
+export interface TeamRecord {
+  id: string;
+  name: string;
+  createdAt: number;
+  createdBy: string;
+  memberCount: number;
+}
+
+/** Deterministic ref_id used to tag plugin_chunks owned by a team. */
+export function teamRefId(teamId: string): string {
+  return `team:${teamId}`;
+}
+
+/** Deterministic ref_id used to tag plugin_chunks owned by a user's memories. */
+export function userMemoryRefId(email: string): string {
+  return `user:${email.toLowerCase()}`;
+}
+
+export function listTeams(): TeamRecord[] {
+  const rows = db
+    .prepare(
+      `SELECT t.id, t.name, t.created_at AS createdAt, t.created_by AS createdBy,
+              (SELECT COUNT(*) FROM team_members m WHERE m.team_id = t.id) AS memberCount
+         FROM teams t
+        ORDER BY t.name`,
+    )
+    .all() as TeamRecord[];
+  return rows;
+}
+
+export function createTeam(name: string, createdBy: string): TeamRecord {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Team name required");
+  if (trimmed.length > 64) throw new Error("Team name too long (max 64)");
+  const id = randomUUID();
+  const createdAt = Date.now();
+  db.prepare(
+    `INSERT INTO teams (id, name, created_at, created_by) VALUES (?, ?, ?, ?)`,
+  ).run(id, trimmed, createdAt, createdBy.toLowerCase());
+  return { id, name: trimmed, createdAt, createdBy: createdBy.toLowerCase(), memberCount: 0 };
+}
+
+/** Delete a team, its memberships, and its ref-overlay rows on plugin_chunks. */
+export function deleteTeam(id: string): void {
+  const ref = teamRefId(id);
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM plugin_ref_chunks WHERE ref_id = ?").run(ref);
+    db.prepare("DELETE FROM team_members WHERE team_id = ?").run(id);
+    db.prepare("DELETE FROM teams WHERE id = ?").run(id);
+  });
+  tx();
+}
+
+export function getTeam(id: string): TeamRecord | null {
+  const row = db
+    .prepare(
+      `SELECT t.id, t.name, t.created_at AS createdAt, t.created_by AS createdBy,
+              (SELECT COUNT(*) FROM team_members m WHERE m.team_id = t.id) AS memberCount
+         FROM teams t
+        WHERE t.id = ?`,
+    )
+    .get(id) as TeamRecord | undefined;
+  return row ?? null;
+}
+
+export function listTeamMembers(teamId: string): string[] {
+  const rows = db
+    .prepare(
+      `SELECT email FROM team_members WHERE team_id = ? ORDER BY email`,
+    )
+    .all(teamId) as { email: string }[];
+  return rows.map((r) => r.email);
+}
+
+export function addTeamMember(teamId: string, email: string): void {
+  const e = email.toLowerCase();
+  db.prepare(
+    `INSERT OR IGNORE INTO team_members (team_id, email, added_at) VALUES (?, ?, ?)`,
+  ).run(teamId, e, Date.now());
+}
+
+export function removeTeamMember(teamId: string, email: string): void {
+  db.prepare("DELETE FROM team_members WHERE team_id = ? AND email = ?").run(
+    teamId,
+    email.toLowerCase(),
+  );
+}
+
+export function listUserTeams(email: string): Array<{ id: string; name: string }> {
+  const rows = db
+    .prepare(
+      `SELECT t.id, t.name
+         FROM teams t
+         JOIN team_members m ON m.team_id = t.id
+        WHERE m.email = ?
+        ORDER BY t.name`,
+    )
+    .all(email.toLowerCase()) as Array<{ id: string; name: string }>;
+  return rows;
 }
 
 // ============================================================================

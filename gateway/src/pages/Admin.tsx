@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { AlertCircle, AlertTriangle, CheckCircle, XCircle, UserPlus, Trash2, Users } from 'lucide-react'
+import { AlertCircle, AlertTriangle, CheckCircle, XCircle, UserPlus, Trash2, Users, UsersRound } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import {
   useAdminUsers,
@@ -18,6 +18,7 @@ import {
   useRevokeAllKeys,
 } from '@/hooks/useAdmin'
 import { AdminErrorBoundary } from '@/components/AdminErrorBoundary'
+import { TeamsPanel } from '@/components/TeamsPanel'
 import { toast } from 'sonner'
 import { PrettyDate } from '@/components/PrettyDate'
 import { PrettyAmount } from '@/components/PrettyAmount'
@@ -144,7 +145,14 @@ export function Admin() {
           <TabsTrigger value="users" className="gap-1.5">
             <Users className="w-4 h-4" /> User Management
           </TabsTrigger>
+          <TabsTrigger value="teams" className="gap-1.5">
+            <UsersRound className="w-4 h-4" /> Teams
+          </TabsTrigger>
         </TabsList>
+
+        <TabsContent value="teams">
+          <TeamsPanel />
+        </TabsContent>
 
         <TabsContent value="users">
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">

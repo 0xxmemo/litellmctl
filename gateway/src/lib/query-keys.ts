@@ -26,6 +26,8 @@ export const queryKeys = {
 
   // Admin
   adminUsers: ['admin', 'users'] as const,
+  adminTeams: ['admin', 'teams'] as const,
+  adminTeamMembers: (teamId: string) => ['admin', 'teams', teamId, 'members'] as const,
 
   // Config
   configAliases: ['config', 'aliases'] as const,

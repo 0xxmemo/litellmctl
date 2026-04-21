@@ -285,6 +285,44 @@ export function setRefOverlay(
   return { inserted };
 }
 
+/**
+ * Append-only variant of setRefOverlay. Used by incremental writers (e.g.
+ * the memories collection, which adds one chunk at a time and must not wipe
+ * prior overlay rows the way setRefOverlay does). For each chunkId, insert a
+ * single (collection, refId, filePath, chunkId) row; existing rows are left
+ * alone via INSERT OR IGNORE.
+ */
+export function appendRefOverlay(
+  collection: string,
+  refId: string,
+  filePath: string,
+  chunkIds: string[],
+): { inserted: number } {
+  if (!validateName(collection)) throw new Error("Invalid collection name");
+  if (!validateRefId(refId)) throw new Error("Invalid ref id");
+  if (!chunkIds.length) return { inserted: 0 };
+  if (typeof filePath !== "string" || !filePath) {
+    throw new Error("filePath required for appendRefOverlay");
+  }
+
+  const ins = db.prepare(
+    `INSERT OR IGNORE INTO plugin_ref_chunks
+       (collection, ref_id, file_path, chunk_id, updated_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  );
+  const now = Date.now();
+  let inserted = 0;
+  const tx = db.transaction(() => {
+    for (const chunkId of chunkIds) {
+      if (typeof chunkId !== "string" || !chunkId) continue;
+      const res = ins.run(collection, refId, filePath, chunkId, now);
+      if ((res as { changes?: number }).changes) inserted++;
+    }
+  });
+  tx();
+  return { inserted };
+}
+
 export function getRefOverlay(
   collection: string,
   refId: string,
@@ -364,11 +402,21 @@ export function searchVectors(
   queryVector: number[],
   topK: number,
   filterExpr: string | null,
-  refId: string | null = null,
+  refId: string | string[] | null = null,
 ): VectorSearchResult[] {
   requireVec();
   if (!validateName(collection)) throw new Error("Invalid collection name");
-  if (refId !== null && !validateRefId(refId)) throw new Error("Invalid ref id");
+  const refIds: string[] | null = refId === null
+    ? null
+    : Array.isArray(refId)
+      ? refId
+      : [refId];
+  if (refIds !== null) {
+    for (const r of refIds) {
+      if (!validateRefId(r)) throw new Error(`Invalid ref id: ${r}`);
+    }
+    if (refIds.length === 0) return [];
+  }
   const coll = db
     .prepare("SELECT dimension FROM plugin_collections WHERE name = ?")
     .get(collection) as { dimension: number } | undefined;
@@ -384,7 +432,7 @@ export function searchVectors(
   const k = Math.max(1, Math.min(200, Math.floor(topK) || 10));
 
   // Overfetch when post-KNN filtering is active (filter expr or ref overlay).
-  const postFilter = parsed !== null || refId !== null;
+  const postFilter = parsed !== null || refIds !== null;
   const knnLimit = postFilter ? k * 4 : k;
   const nearest = db
     .prepare(
@@ -415,12 +463,13 @@ export function searchVectors(
   const chunkByRowId = new Map<number, Record<string, unknown>>();
   for (const r of chunkRows) chunkByRowId.set(r.rowid as number, r);
 
-  // Ref-overlay filter: only keep chunk_ids that the overlay currently owns.
+  // Ref-overlay filter: only keep chunk_ids owned by any of the given refs.
   let allowedChunkIds: Set<string> | null = null;
-  if (refId !== null) {
+  if (refIds !== null) {
     const chunkIds = chunkRows.map((r) => r.chunk_id as string).filter(Boolean);
     if (chunkIds.length === 0) return [];
     const CAP = 800;
+    const refPhs = refIds.map(() => "?").join(",");
     allowedChunkIds = new Set();
     for (let i = 0; i < chunkIds.length; i += CAP) {
       const slice = chunkIds.slice(i, i + CAP);
@@ -428,9 +477,9 @@ export function searchVectors(
       const rows = db
         .prepare(
           `SELECT DISTINCT chunk_id FROM plugin_ref_chunks
-            WHERE collection = ? AND ref_id = ? AND chunk_id IN (${phs})`,
+            WHERE collection = ? AND ref_id IN (${refPhs}) AND chunk_id IN (${phs})`,
         )
-        .all(collection, refId, ...slice) as { chunk_id: string }[];
+        .all(collection, ...refIds, ...slice) as { chunk_id: string }[];
       for (const r of rows) allowedChunkIds.add(r.chunk_id);
     }
   }
@@ -526,6 +575,7 @@ export function queryByFilter(
   filterExpr: string,
   outputFields: string[] | null,
   limit: number,
+  refIds: string[] | null = null,
 ): Record<string, unknown>[] {
   if (!validateName(collection)) throw new Error("Invalid collection name");
   const parsed = parseFilterExpr(filterExpr);
@@ -533,16 +583,31 @@ export function queryByFilter(
   const cap = Math.max(1, Math.min(10_000, Math.floor(limit) || 1000));
 
   if (parsed.values.length === 0) return [];
+  if (refIds !== null) {
+    if (refIds.length === 0) return [];
+    for (const r of refIds) {
+      if (!validateRefId(r)) throw new Error(`Invalid ref id: ${r}`);
+    }
+  }
 
   const placeholders = parsed.values.map(() => "?").join(",");
-  const rows = db
-    .prepare(
-      `SELECT * FROM plugin_chunks
-        WHERE collection = ?
-          AND ${parsed.column} IN (${placeholders})
-        LIMIT ?`,
-    )
-    .all(collection, ...parsed.values, cap) as Record<string, unknown>[];
+  let sql = `SELECT pc.* FROM plugin_chunks pc
+              WHERE pc.collection = ?
+                AND pc.${parsed.column} IN (${placeholders})`;
+  const args: (string | number)[] = [collection, ...parsed.values];
+  if (refIds !== null) {
+    const refPhs = refIds.map(() => "?").join(",");
+    sql += ` AND EXISTS (
+               SELECT 1 FROM plugin_ref_chunks rc
+                WHERE rc.collection = pc.collection
+                  AND rc.chunk_id = pc.chunk_id
+                  AND rc.ref_id IN (${refPhs})
+             )`;
+    args.push(...refIds);
+  }
+  sql += ` LIMIT ?`;
+  args.push(cap);
+  const rows = db.prepare(sql).all(...args) as Record<string, unknown>[];
 
   return rows.map((r) => projectRow(r, outputFields));
 }

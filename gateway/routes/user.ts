@@ -5,6 +5,7 @@ import {
   updateUserProfile,
   getUserModelOverrides,
   setUserModelOverrides,
+  listUserTeams,
 } from "../lib/db";
 import { invalidateModelOverridesCache } from "./proxy";
 
@@ -85,8 +86,16 @@ async function getConfigAliasesHandler(req: Request) {
   }
 }
 
+// GET /api/user/teams — teams the current user belongs to
+async function getUserTeamsHandler(req: Request) {
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
+  return Response.json({ teams: listUserTeams(auth.email) });
+}
+
 export const userRoutes = {
   "/api/user/profile":         { PUT: userProfileHandler },
   "/api/user/model-overrides": { GET: getUserModelOverridesHandler, PUT: putUserModelOverridesHandler },
   "/api/user/aliases":         { GET: getConfigAliasesHandler },
+  "/api/user/teams":           { GET: getUserTeamsHandler },
 };

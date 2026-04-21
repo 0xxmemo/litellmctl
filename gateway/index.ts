@@ -20,7 +20,7 @@ import { keysRoutes, handleKeyById } from "./routes/keys";
 import { modelsRoutes } from "./routes/models";
 import { statsRoutes } from "./routes/stats";
 import { userRoutes } from "./routes/user";
-import { adminRoutes } from "./routes/admin";
+import { adminRoutes, handleAdminTeamsByPath } from "./routes/admin";
 import { proxyRoutes } from "./routes/proxy";
 import { searchRoutes } from "./routes/search";
 import { healthRoutes } from "./routes/health";
@@ -284,6 +284,12 @@ Bun.serve({
     // /api/vectordb/collections/:name[/insert|/search|/delete|/query]
     if (url.pathname.startsWith("/api/vectordb/collections/")) {
       const res = await handleVectorDbByName(req);
+      if (res) return res;
+    }
+
+    // /api/admin/teams/:id[/members[/:email]]
+    if (url.pathname.startsWith("/api/admin/teams/")) {
+      const res = await handleAdminTeamsByPath(req);
       if (res) return res;
     }
 
