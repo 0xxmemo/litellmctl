@@ -18,10 +18,15 @@
 #    --with-node-gyp        nodejs + npm + node-gyp (for native addons)
 #    --with-gateway         `litellmctl install --with-gateway`
 #    --with-protonmail      `litellmctl install --with-protonmail` + auto-auth
-#    --with-embedding       Ollama + nomic-embed-text-v2-moe model
-#    --with-transcription   uv + speaches (faster-whisper OpenAI-compat server)
-#    --with-searxng         Docker + SearXNG container (implies --with-docker)
+#    --with-embedding       Ollama + nomic-embed-text-v2-moe model (detached)
+#    --with-transcription   uv + speaches faster-whisper server (detached)
+#    --with-searxng         Docker + SearXNG container (detached; implies --with-docker)
 #    --with-docker          dnf install docker + enable service + add APP_USER to group
+#                           (Embedding/transcription/searxng detach into the
+#                            litellm-install-extras.service systemd unit in
+#                            --pipeline mode to avoid SSM IPC timeout on the
+#                            multi-GB model downloads — follow with
+#                            `journalctl -u litellm-install-extras.service -f`.)
 #    --start-services       systemd start proxy + gateway + protonmail
 #    --fingerprint          Skip ALL steps on re-run if HEAD + .env + this
 #                           script are unchanged and services are healthy
@@ -614,27 +619,67 @@ if [ "$WITH_DOCKER" = 1 ] && [ "$PLATFORM" = "Linux" ]; then
   fi
 fi
 
-# ── Pipeline: litellmctl install (gateway + optional embedding/transcription/searxng) ──
-# Bundle every --with-* the Python installer understands into a single call so
-# _resolve_install_mode() can sequence them and hit its non-interactive path
-# exactly once. Separate calls each re-activate the venv and re-load .env —
-# wasted work, and the protonmail call used to clobber the gateway call's
-# interactive prompts.
-if [ "$WITH_GATEWAY" = 1 ] || [ "$WITH_EMBEDDING" = 1 ] || [ "$WITH_TRANSCRIPTION" = 1 ] || [ "$WITH_SEARXNG" = 1 ] || [ "$WITH_PROTONMAIL" = 1 ]; then
-  LLMCTL_FLAGS=""
-  [ "$WITH_GATEWAY" = 1 ]       && LLMCTL_FLAGS="$LLMCTL_FLAGS --with-gateway"
-  [ "$WITH_EMBEDDING" = 1 ]     && LLMCTL_FLAGS="$LLMCTL_FLAGS --with-embedding"
-  [ "$WITH_TRANSCRIPTION" = 1 ] && LLMCTL_FLAGS="$LLMCTL_FLAGS --with-transcription"
-  [ "$WITH_SEARXNG" = 1 ]       && LLMCTL_FLAGS="$LLMCTL_FLAGS --with-searxng"
-  [ "$WITH_PROTONMAIL" = 1 ]    && LLMCTL_FLAGS="$LLMCTL_FLAGS --with-protonmail"
-  info "Running litellmctl install$LLMCTL_FLAGS ..."
-  # `sg docker -c` gives the install step an active docker-group membership
-  # without a relogin, so install_searxng()'s `docker ps` call succeeds on
-  # the first pipeline run. Skipped when docker isn't in play.
-  if [ "$WITH_SEARXNG" = 1 ] && getent group docker >/dev/null 2>&1; then
-    as_user "cd '$INSTALL_DIR' && sg docker -c './bin/litellmctl install$LLMCTL_FLAGS'"
+# ── Pipeline: litellmctl install — FAST step (gateway + protonmail) ───────
+# Kept synchronous because the deploy workflow's health check on :14041 needs
+# the gateway built + running before the SSM command returns. bun install +
+# frontend build takes ~30–60s on a fresh box, fine inside SSM's IPC window.
+if [ "$WITH_GATEWAY" = 1 ] || [ "$WITH_PROTONMAIL" = 1 ]; then
+  FAST_FLAGS=""
+  [ "$WITH_GATEWAY" = 1 ]    && FAST_FLAGS="$FAST_FLAGS --with-gateway"
+  [ "$WITH_PROTONMAIL" = 1 ] && FAST_FLAGS="$FAST_FLAGS --with-protonmail"
+  info "Running litellmctl install$FAST_FLAGS (synchronous) ..."
+  as_user "cd '$INSTALL_DIR' && ./bin/litellmctl install$FAST_FLAGS"
+fi
+
+# ── Pipeline: litellmctl install — SLOW step (embedding/transcription/searxng) ──
+# These pull multi-GB assets (Ollama nomic-embed-text-v2-moe ≈ 1.2 GB, Whisper
+# large-v3-turbo ≈ 1.5 GB, searxng docker image ≈ 200 MB) with very chatty
+# progress output. When invoked under SSM's AWS-RunShellScript the spam fills
+# the ssm-document-worker's output buffer and/or the downloads outlive SSM's
+# ~3 min IPC heartbeat window — SSM then reports:
+#     "document process failed unexpectedly: ipc messaging received timeout
+#      signal, check [ssm-document-worker]/[ssm-session-worker] log"
+# and the deploy job fails even though the core services are healthy. Detach
+# into a transient systemd unit so install.sh returns immediately; watch the
+# background job with:
+#     journalctl -u litellm-install-extras.service -f
+if [ "$WITH_EMBEDDING" = 1 ] || [ "$WITH_TRANSCRIPTION" = 1 ] || [ "$WITH_SEARXNG" = 1 ]; then
+  SLOW_FLAGS=""
+  [ "$WITH_EMBEDDING" = 1 ]     && SLOW_FLAGS="$SLOW_FLAGS --with-embedding"
+  [ "$WITH_TRANSCRIPTION" = 1 ] && SLOW_FLAGS="$SLOW_FLAGS --with-transcription"
+  [ "$WITH_SEARXNG" = 1 ]       && SLOW_FLAGS="$SLOW_FLAGS --with-searxng"
+  SLOW_UNIT="litellm-install-extras.service"
+
+  if command -v systemd-run >/dev/null 2>&1 && [ "$(id -u)" -eq 0 ]; then
+    # If a previous deploy's detached unit is still running or left behind,
+    # stop it first — systemd-run refuses to reuse a busy unit name.
+    sudo systemctl stop "$SLOW_UNIT" 2>/dev/null || true
+    sudo systemctl reset-failed "$SLOW_UNIT" 2>/dev/null || true
+
+    APP_HOME="$(getent passwd "$APP_USER" 2>/dev/null | cut -d: -f6)"
+    [ -n "$APP_HOME" ] || APP_HOME="/home/$APP_USER"
+
+    info "Launching litellmctl install$SLOW_FLAGS as detached $SLOW_UNIT ..."
+    sudo systemd-run \
+      --unit="$SLOW_UNIT" \
+      --description="LiteLLM heavy service installs (embedding/transcription/searxng)" \
+      --working-directory="$INSTALL_DIR" \
+      --uid="$APP_USER" --gid="$APP_USER" \
+      --setenv=HOME="$APP_HOME" \
+      --setenv=PATH="$APP_HOME/.local/bin:$APP_HOME/.cargo/bin:/usr/local/bin:/usr/bin:/bin" \
+      --collect \
+      bash -lc "cd '$INSTALL_DIR' && ./bin/litellmctl install$SLOW_FLAGS"
+    ok "detached — follow with: sudo journalctl -u $SLOW_UNIT -f"
   else
-    as_user "cd '$INSTALL_DIR' && ./bin/litellmctl install$LLMCTL_FLAGS"
+    # Fallback for macOS / non-root / no-systemd — run inline and hope output
+    # is short enough not to wedge the caller.
+    warn "systemd-run unavailable — running litellmctl install$SLOW_FLAGS inline (may be slow)"
+    if [ "$WITH_SEARXNG" = 1 ] && getent group docker >/dev/null 2>&1 \
+         && ! id -nG "$APP_USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+      as_user "cd '$INSTALL_DIR' && sg docker -c './bin/litellmctl install$SLOW_FLAGS'"
+    else
+      as_user "cd '$INSTALL_DIR' && ./bin/litellmctl install$SLOW_FLAGS"
+    fi
   fi
 fi
 
