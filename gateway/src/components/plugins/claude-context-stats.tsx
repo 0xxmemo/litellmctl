@@ -73,7 +73,7 @@ export function ClaudeContextStats({ query }: Props) {
         <CardHeader>
           <CardTitle className="text-base">Indexed Codebases</CardTitle>
           <CardDescription>
-            What <code>index_codebase</code> has stored on your API key.
+            What <code>index_codebase</code> has stored on this gateway (shared across keys).
           </CardDescription>
         </CardHeader>
         <CardContent>

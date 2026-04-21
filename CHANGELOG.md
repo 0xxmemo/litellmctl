@@ -2,6 +2,12 @@
 
 All notable changes to litellmctl are documented here.
 
+## [1.5.8] - 2026-04-21
+
+### Fixes
+
+- **Plugin usage endpoints return 500.** `/api/plugins/claude-context/usage` and `/api/plugins/supermemory/usage` were still querying the pre-v2 `api_key_hash` column that was removed by `feat(vectordb): refactor for global shared collections and branch-level isolation`, so every request threw `SQLiteError: no such column: api_key_hash`. Both handlers are rewritten against the v2 schema: claude-context stats report the gateway-wide view of `code_chunks_*` collections (shared across keys in v2), supermemory stats stay user-scoped via the `user:<email>` + team-ref overlays (same auto-scoping the search path uses). UI copy for the claude-context table updated to match the shared model.
+
 ## [1.5.7] - 2026-04-21
 
 ### Fixes
