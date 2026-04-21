@@ -28,7 +28,8 @@ const argv = process.argv.slice(2);
 const force = argv.includes("--force");
 const dbNameArg = argv.find((a) => a.startsWith("--db-name="));
 const mongoUriArg = argv.find((a) => a.startsWith("--mongo-uri="));
-const mongoUri = mongoUriArg?.split("=").slice(1).join("=") || process.env.GATEWAY_MONGODB_URI;
+const mongoUri =
+  mongoUriArg?.split("=").slice(1).join("=") || process.env.GATEWAY_MONGODB_URI;
 const dbName = dbNameArg?.split("=")[1] || "llm-gateway";
 
 if (!mongoUri) {
@@ -39,6 +40,7 @@ if (!mongoUri) {
 // ── dynamic mongo import (dep is optional) ──────────────────────────────────
 let MongoClient: any;
 try {
+  // @ts-expect-error - this dep is installed temporarily for the migration
   ({ MongoClient } = await import("mongodb"));
 } catch {
   console.error(
@@ -64,7 +66,9 @@ function toMs(v: unknown): number | null {
 }
 
 function tableEmpty(name: string): boolean {
-  const row = db.prepare(`SELECT COUNT(*) AS n FROM ${name}`).get() as { n: number };
+  const row = db.prepare(`SELECT COUNT(*) AS n FROM ${name}`).get() as {
+    n: number;
+  };
   return row.n === 0;
 }
 
@@ -130,10 +134,11 @@ ensureEmpty("api_keys");
        (id, key_hash, name, alias, email, revoked, created_at, revoked_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
   );
-  let count = 0, skipped = 0;
+  let count = 0,
+    skipped = 0;
   for await (const k of cursor) {
     if (!k.keyHash || !k.email) {
-      skipped++;      // skip legacy bcrypt-only keys (no sha256 hash)
+      skipped++; // skip legacy bcrypt-only keys (no sha256 hash)
       continue;
     }
     stmt.run(
@@ -148,7 +153,9 @@ ensureEmpty("api_keys");
     );
     count++;
   }
-  console.log(`  api_keys: ${count}${skipped ? ` (skipped ${skipped} legacy bcrypt-only)` : ""}`);
+  console.log(
+    `  api_keys: ${count}${skipped ? ` (skipped ${skipped} legacy bcrypt-only)` : ""}`,
+  );
 }
 
 // ── otps ────────────────────────────────────────────────────────────────────
@@ -186,7 +193,8 @@ ensureEmpty("sessions");
     const id = s._id != null ? String(s._id) : null;
     if (!id || !s.session) continue;
     const expires = toMs(s.expires) ?? Date.now() + 86400000;
-    const sessionStr = typeof s.session === "string" ? s.session : JSON.stringify(s.session);
+    const sessionStr =
+      typeof s.session === "string" ? s.session : JSON.stringify(s.session);
     stmt.run(id, sessionStr, expires);
     count++;
   }
@@ -216,7 +224,8 @@ ensureEmpty("usage_logs");
     const model = u.model || u.actualModel || "unknown";
     const prompt = Number(u.promptTokens ?? 0) || 0;
     const completion = Number(u.completionTokens ?? 0) || 0;
-    const tokens = Number(u.tokens ?? u.totalTokens ?? prompt + completion) || 0;
+    const tokens =
+      Number(u.tokens ?? u.totalTokens ?? prompt + completion) || 0;
     batch.push([
       String(u.email).toLowerCase(),
       model,

@@ -59,7 +59,7 @@ export function DashboardLayout() {
               aria-label="LitellmCTL home"
             >
               <img
-                src="/public/logo.svg"
+                src="/public/logo.png"
                 alt="LitellmCTL"
                 width={28}
                 height={28}
@@ -96,7 +96,7 @@ export function DashboardLayout() {
                 aria-label="LitellmCTL home"
               >
                 <img
-                  src="/public/logo.svg"
+                  src="/public/logo.png"
                   alt="LitellmCTL"
                   width={24}
                   height={24}
@@ -141,7 +141,7 @@ export function DashboardLayout() {
               aria-label="LitellmCTL home"
             >
               <img
-                src="/public/logo.svg"
+                src="/public/logo.png"
                 alt="LitellmCTL"
                 width={24}
                 height={24}
