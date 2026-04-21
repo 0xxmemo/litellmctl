@@ -30,6 +30,7 @@ import { vectorDbRoutes, handleVectorDbByName } from "./routes/vectordb";
 import { pluginsRoutes } from "./routes/plugins";
 import { pluginStatsRoutes } from "./routes/plugin-stats";
 import { consoleRoutes } from "./routes/console";
+import { mcpRoutes } from "./routes/mcp";
 import {
   attachPty,
   detachPty,
@@ -90,7 +91,7 @@ await initCliSecret();
 const allRoutes = [
   authRoutes, keysRoutes, modelsRoutes, statsRoutes,
   userRoutes, adminRoutes, proxyRoutes, searchRoutes, healthRoutes, setupRoutes, skillsRoutes,
-  vectorDbRoutes, pluginsRoutes, pluginStatsRoutes, consoleRoutes,
+  vectorDbRoutes, pluginsRoutes, pluginStatsRoutes, consoleRoutes, mcpRoutes,
 ];
 
 function buildRouteManifest() {
@@ -249,6 +250,7 @@ Bun.serve({
     ...pluginsRoutes,
     ...pluginStatsRoutes,
     ...consoleRoutes,
+    ...mcpRoutes,
 
     // Icons (served from /public/)
     "/favicon.ico": async () => (await serveStaticFile("/public/favicon.ico")) || new Response("Not found", { status: 404 }),
