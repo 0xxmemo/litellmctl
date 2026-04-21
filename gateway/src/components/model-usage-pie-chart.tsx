@@ -1,19 +1,14 @@
-import { useState } from 'react'
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
+import { useMemo, useState } from 'react'
+import { Label, Pie, PieChart } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from '@/components/ui/chart'
 import { formatProviderName, getProviderBadgeClassName, extractProvider, resolveProvider } from '@lib/models'
-
-const COLORS = [
-  'var(--color-chart-3)',
-  'var(--color-chart-1)',
-  'var(--color-chart-2)',
-  'var(--color-chart-4)',
-  'var(--color-destructive)',
-  'var(--color-chart-5)',
-  'var(--color-accent)',
-  'var(--color-primary)',
-]
 
 interface ModelUsagePieChartProps {
   data: Array<{
@@ -26,14 +21,46 @@ interface ModelUsagePieChartProps {
   }>
 }
 
-/** Strip provider prefix from model name for compact display */
 function shortModelName(name: string): string {
   const parts = name.split('/')
   return parts[parts.length - 1] ?? name
 }
 
+function sliceThemeColor(index: number): string {
+  return `var(--chart-${(index % 5) + 1})`
+}
+
 export function ModelUsagePieChart({ data }: ModelUsagePieChartProps) {
   const [legendExpanded, setLegendExpanded] = useState(false)
+
+  const totalRequests = useMemo(
+    () => data.reduce((acc, d) => acc + (d.value ?? 0), 0),
+    [data]
+  )
+
+  const { chartConfig, pieRows } = useMemo(() => {
+    const cfg: ChartConfig = {
+      value: { label: 'Requests' },
+    }
+    const rows = data.map((d, i) => {
+      const sliceKey = `s${i}`
+      cfg[sliceKey] = {
+        label: shortModelName(d.name),
+        color: sliceThemeColor(i),
+      }
+      return {
+        sliceKey,
+        value: d.value,
+        percentage: d.percentage,
+        name: d.name,
+        requested_aliases: d.requested_aliases,
+        provider: d.provider,
+        providerName: d.providerName,
+        fill: `var(--color-${sliceKey})`,
+      }
+    })
+    return { chartConfig: cfg, pieRows: rows }
+  }, [data])
 
   if (!data || data.length === 0) {
     return (
@@ -50,53 +77,36 @@ export function ModelUsagePieChart({ data }: ModelUsagePieChartProps) {
     )
   }
 
-  const renderCustomLabel = ({ cx, cy, midAngle, innerRadius, outerRadius, percentage }: any) => {
-    const RADIAN = Math.PI / 180
-    const radius = innerRadius + (outerRadius - innerRadius) * 0.5
-    const x = cx + radius * Math.cos(-midAngle * RADIAN)
-    const y = cy + radius * Math.sin(-midAngle * RADIAN)
-    const pct = typeof percentage === 'number' && isFinite(percentage) ? percentage : 0
-    if (pct < 8) return null
-    return (
-      <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={12} fontWeight={600}>
-        {`${pct.toFixed(0)}%`}
-      </text>
-    )
-  }
-
-  // Custom compact legend — 2 columns on desktop, 1 on mobile
   const MOBILE_SHOW = 5
   const visibleItems = legendExpanded ? data : data.slice(0, MOBILE_SHOW)
   const hasMore = data.length > MOBILE_SHOW
 
   const CustomLegend = () => (
     <div className="mt-3">
-      {/* Grid legend: 2 cols on sm+, 1 col on xs */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1">
-        {/* On mobile show only first MOBILE_SHOW unless expanded */}
         {(legendExpanded ? data : visibleItems).map((entry, index) => (
-          <div
-            key={`${entry.name}-${index}`}
-            className="flex items-center gap-1.5 min-w-0"
-            title={entry.name}
-          >
-            <span
-              className="inline-block w-2.5 h-2.5 rounded-sm flex-shrink-0"
-              style={{ backgroundColor: COLORS[index % COLORS.length] }}
-            />
-            <span className="text-xs text-muted-foreground truncate leading-tight">
-              {shortModelName(entry.name)}
-            </span>
-            <span className="text-xs text-muted-foreground/60 flex-shrink-0 ml-auto pl-1">
-              {entry.percentage}%
-            </span>
-          </div>
+            <div
+              key={`${entry.name}-${index}`}
+              className="flex items-center gap-1.5 min-w-0"
+              title={entry.name}
+            >
+              <span
+                className="inline-block w-2.5 h-2.5 rounded-sm shrink-0"
+                style={{ backgroundColor: sliceThemeColor(index) }}
+              />
+              <span className="text-xs text-muted-foreground truncate leading-tight">
+                {shortModelName(entry.name)}
+              </span>
+              <span className="text-xs text-muted-foreground/60 shrink-0 ml-auto pl-1">
+                {entry.percentage}%
+              </span>
+            </div>
         ))}
       </div>
 
-      {/* Show "N more" toggle on mobile */}
       {hasMore && (
         <button
+          type="button"
           onClick={() => setLegendExpanded(v => !v)}
           className="mt-1.5 text-xs text-muted-foreground/70 hover:text-muted-foreground transition-colors sm:hidden"
         >
@@ -112,99 +122,106 @@ export function ModelUsagePieChart({ data }: ModelUsagePieChartProps) {
         <CardTitle>Model Usage Distribution</CardTitle>
       </CardHeader>
       <CardContent className="px-0 pb-0">
-        <ResponsiveContainer width="100%" height={240}>
+        <ChartContainer config={chartConfig} className="mx-auto aspect-square max-h-[260px] w-full">
           <PieChart>
+            <ChartTooltip cursor={false} content={<ChartTooltipContent />} />
             <Pie
-              data={data}
-              cx="50%"
-              cy="50%"
-              labelLine={false}
-              label={renderCustomLabel}
-              outerRadius={95}
-              fill="var(--color-primary)"
+              data={pieRows}
               dataKey="value"
+              nameKey="sliceKey"
+              innerRadius={56}
+              outerRadius={88}
+              strokeWidth={4}
             >
-              {data.map((entry, index) => (
-                <Cell key={`${entry.name}-${index}`} fill={COLORS[index % COLORS.length]} />
-              ))}
+              <Label
+                content={({ viewBox }) => {
+                  if (viewBox && 'cx' in viewBox && 'cy' in viewBox) {
+                    const cx = viewBox.cx ?? 0
+                    const cy = viewBox.cy ?? 0
+                    return (
+                      <text x={cx} y={cy} textAnchor="middle" dominantBaseline="middle">
+                        <tspan x={cx} y={cy} className="fill-foreground font-sans text-2xl font-bold">
+                          {totalRequests.toLocaleString()}
+                        </tspan>
+                        <tspan x={cx} y={cy + 22} className="fill-muted-foreground font-sans text-[11px]">
+                          requests
+                        </tspan>
+                      </text>
+                    )
+                  }
+                }}
+              />
             </Pie>
-            <Tooltip
-              formatter={((value: number | undefined, name: string | undefined, props: any) => [
-                `${(value ?? 0).toLocaleString()} (${props?.payload?.percentage ?? '0'}%)`,
-                props?.payload?.name ?? name
-              ]) as any}
-              contentStyle={{
-                backgroundColor: 'var(--card)',
-                border: '1px solid var(--border)',
-                borderRadius: '8px',
-                fontSize: '13px',
-                color: 'var(--foreground)',
-              }}
-              labelStyle={{ color: 'var(--foreground)', fontWeight: 600 }}
-              itemStyle={{ color: 'var(--muted-foreground)' }}
-            />
           </PieChart>
-        </ResponsiveContainer>
+        </ChartContainer>
 
-        {/* Compact custom legend */}
         <CustomLegend />
-        
-        {/* Stats table — compact + responsive + scrollable */}
+
         <div className="mt-4 -mx-1">
           <div className="max-h-64 sm:max-h-80 overflow-y-auto overflow-x-auto rounded-sm">
-          <Table className="text-xs min-w-[340px]">
-            <TableHeader className="glass glass--muted sticky top-0 z-10 shadow-none">
-              <TableRow className="h-7">
-                <TableHead className="py-1.5 pl-2 pr-1 w-auto">Model</TableHead>
-                <TableHead className="py-1.5 px-2 w-16 text-right hidden sm:table-cell">Reqs</TableHead>
-                <TableHead className="py-1.5 px-2 w-24 text-right">%</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {data.map((model, index) => {
-                const aliases = (model.requested_aliases || []).filter(a => a && a !== model.name)
-                const effectiveProvider = model.provider || extractProvider(model.name) || resolveProvider(model.name, '')
-                const providerBadgeClass = getProviderBadgeClassName(effectiveProvider, 'xs')
-                const effectiveProviderName = model.providerName || formatProviderName(effectiveProvider)
-                const pct = typeof model.percentage === 'number' ? model.percentage : parseFloat(String(model.percentage)) || 0
-                return (
-                  <TableRow key={`${model.name}-${index}`} className="h-8">
-                    <TableCell className="py-1 pl-2 pr-1 font-medium max-w-0">
-                      <div className="flex items-center gap-1.5 min-w-0">
-                        <span
-                          className="inline-block w-2 h-2 rounded-sm flex-shrink-0"
-                          style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                        />
-                        <span className={providerBadgeClass}>
-                          {effectiveProviderName}
-                        </span>
-                        <span className="truncate text-xs" title={model.name}>{shortModelName(model.name)}</span>
-                        {aliases.length > 0 && (
-                          <span className="hidden md:inline text-[10px] text-muted-foreground/60 flex-shrink-0" title={`Requested as: ${aliases.join(', ')}`}>
-                            ·{aliases.length}alias
-                          </span>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="py-1 px-2 text-right text-muted-foreground tabular-nums hidden sm:table-cell">
-                      {model.value?.toLocaleString() ?? '0'}
-                    </TableCell>
-                    <TableCell className="py-1 px-2">
-                      <div className="flex items-center justify-end gap-1.5">
-                        <div className="w-12 h-1.5 rounded-full bg-muted overflow-hidden flex-shrink-0 hidden xs:block sm:block">
-                          <div
-                            className="h-full rounded-full"
-                            style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: COLORS[index % COLORS.length] }}
+            <Table className="text-xs min-w-[340px]">
+              <TableHeader className="glass glass--muted sticky top-0 z-10 shadow-none">
+                <TableRow className="h-7">
+                  <TableHead className="py-1.5 pl-2 pr-1 w-auto">Model</TableHead>
+                  <TableHead className="py-1.5 px-2 w-16 text-right hidden sm:table-cell">Reqs</TableHead>
+                  <TableHead className="py-1.5 px-2 w-24 text-right">%</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {data.map((model, index) => {
+                  const aliases = (model.requested_aliases || []).filter(a => a && a !== model.name)
+                  const effectiveProvider =
+                    model.provider || extractProvider(model.name) || resolveProvider(model.name, '')
+                  const providerBadgeClass = getProviderBadgeClassName(effectiveProvider, 'xs')
+                  const effectiveProviderName = model.providerName || formatProviderName(effectiveProvider)
+                  const pct =
+                    typeof model.percentage === 'number'
+                      ? model.percentage
+                      : parseFloat(String(model.percentage)) || 0
+                  return (
+                    <TableRow key={`${model.name}-${index}`} className="h-8">
+                      <TableCell className="py-1 pl-2 pr-1 font-medium max-w-0">
+                        <div className="flex items-center gap-1.5 min-w-0">
+                          <span
+                            className="inline-block w-2 h-2 rounded-sm shrink-0"
+                            style={{ backgroundColor: sliceThemeColor(index) }}
                           />
+                          <span className={providerBadgeClass}>{effectiveProviderName}</span>
+                          <span className="truncate text-xs" title={model.name}>
+                            {shortModelName(model.name)}
+                          </span>
+                          {aliases.length > 0 && (
+                            <span
+                              className="hidden md:inline text-[10px] text-muted-foreground/60 shrink-0"
+                              title={`Requested as: ${aliases.join(', ')}`}
+                            >
+                              ·{aliases.length}alias
+                            </span>
+                          )}
                         </div>
-                        <span className="tabular-nums text-right w-9">{pct.toFixed(1)}%</span>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
+                      </TableCell>
+                      <TableCell className="py-1 px-2 text-right text-muted-foreground tabular-nums hidden sm:table-cell">
+                        {model.value?.toLocaleString() ?? '0'}
+                      </TableCell>
+                      <TableCell className="py-1 px-2">
+                        <div className="flex items-center justify-end gap-1.5">
+                          <div className="w-12 h-1.5 rounded-full bg-muted overflow-hidden shrink-0 hidden xs:block sm:block">
+                            <div
+                              className="h-full rounded-full"
+                              style={{
+                                width: `${Math.min(pct, 100)}%`,
+                                backgroundColor: sliceThemeColor(index),
+                              }}
+                            />
+                          </div>
+                          <span className="tabular-nums text-right w-9">{pct.toFixed(1)}%</span>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
           </div>
         </div>
       </CardContent>

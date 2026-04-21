@@ -117,18 +117,40 @@ async function userStatsHandler(req: Request) {
 }
 
 // Temporal-proximity grouping: two rows with the same (provider|model|endpoint)
-// key merge into one group as long as the gap between them is within
-// PROXIMITY_MS — even if rows with *different* keys appeared in between. This
-// matches the UX intent that the request list should show one row per "session
-// of activity" per model rather than reshuffling the stack every time the
-// caller briefly hops to a different model.
-const GROUP_PROXIMITY_MS = 10 * 60 * 1000; // 10 minutes
+// key merge into one group as long as the gap between them is within the
+// proximity window — even if rows with *different* keys appeared in between.
+// This matches the UX intent that the list should show one row per "session of
+// activity" per model, not a new stack every time the caller briefly hops to
+// another model.
+//
+// 60 min is a session-shaped window: quick prompts back-to-back, thinking +
+// typing, and even a short context-switch all live in the same bucket. Gaps
+// bigger than that (lunch, overnight) correctly split the session. Tunable
+// per-request via ?proximity=<N>m|<N>h (minutes/hours) for ad-hoc views.
+const GROUP_PROXIMITY_DEFAULT_MS = 60 * 60 * 1000;
+const GROUP_PROXIMITY_MIN_MS = 60 * 1000;          // 1 min
+const GROUP_PROXIMITY_MAX_MS = 24 * 60 * 60 * 1000; // 24 h
 
 // Upper bound on how far back we'll scan when the top-N groups are still
 // absorbing rows. Prevents a user with millions of closely-spaced rows from
 // pinning the event loop. In practice the break-when-done condition fires
 // well before this.
 const GROUP_SCAN_BUDGET = 5000;
+
+/** Parse `?proximity=30m` / `90m` / `2h` / `45` (bare = minutes). */
+function parseProximityMs(raw: string | null): number {
+  if (!raw) return GROUP_PROXIMITY_DEFAULT_MS;
+  const m = raw.trim().match(/^(\d+(?:\.\d+)?)\s*(ms|s|m|h)?$/i);
+  if (!m) return GROUP_PROXIMITY_DEFAULT_MS;
+  const n = parseFloat(m[1]);
+  const unit = (m[2] || "m").toLowerCase();
+  const ms =
+    unit === "ms" ? n :
+    unit === "s"  ? n * 1000 :
+    unit === "h"  ? n * 60 * 60 * 1000 :
+                    n * 60 * 1000;
+  return Math.max(GROUP_PROXIMITY_MIN_MS, Math.min(GROUP_PROXIMITY_MAX_MS, Math.round(ms)));
+}
 
 interface OpenGroup {
   id: string;
@@ -157,6 +179,7 @@ async function groupedRequestsHandler(req: Request) {
     const url = new URL(req.url);
     const page = Math.max(1, parseInt(url.searchParams.get("page") || "1", 10));
     const pageSize = Math.min(100, Math.max(1, parseInt(url.searchParams.get("pageSize") || "20", 10)));
+    const proximityMs = parseProximityMs(url.searchParams.get("proximity"));
 
     const keyHashes = listUserKeyHashes(auth.email);
     const m = buildUserMatch(auth.email, keyHashes);
@@ -200,7 +223,7 @@ async function groupedRequestsHandler(req: Request) {
       // Seal any open group whose oldest item is now too far from `ts` to
       // possibly absorb it — or any further (older) row.
       for (const [k, g] of active) {
-        if (g._lastMs - ts > GROUP_PROXIMITY_MS) {
+        if (g._lastMs - ts > proximityMs) {
           active.delete(k);
         }
       }

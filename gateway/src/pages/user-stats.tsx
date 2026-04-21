@@ -1,10 +1,20 @@
 import { useEffect, useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
+import { LineChart, Line, XAxis, YAxis, CartesianGrid } from 'recharts'
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from '@/components/ui/chart'
 import { Activity, Key, TrendingUp, RefreshCw } from 'lucide-react'
 import { PrettyAmount } from '@/components/pretty-amount'
 import { useUserStats } from '@/hooks/use-stats'
+
+const requestHistoryChartConfig = {
+  requests: { label: 'Requests', color: 'var(--chart-1)' },
+} satisfies ChartConfig
 
 /** Shows "Updated Xs ago" with spinning icon during background refetch */
 function LastUpdated({ dataUpdatedAt, isFetching }: { dataUpdatedAt: number; isFetching: boolean }) {
@@ -115,34 +125,41 @@ export function UserStats() {
           <CardDescription>Daily API usage over the last 7 days</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="h-[300px] sm:h-[400px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={requestHistory.length > 0 ? requestHistory : []}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="date" className="text-xs" />
-                <YAxis className="text-xs" />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'hsl(var(--card))',
-                    border: '1px solid hsl(var(--border))',
-                    borderRadius: '8px',
-                  }}
+          {requestHistory.length === 0 ? (
+            <div className="flex h-[300px] sm:h-[400px] items-center justify-center text-muted-foreground">
+              {isLoading ? 'Loading...' : 'No request history available'}
+            </div>
+          ) : (
+            <ChartContainer
+              config={requestHistoryChartConfig}
+              className="h-[300px] sm:h-[400px] w-full min-h-[300px]"
+            >
+              <LineChart
+                accessibilityLayer
+                data={requestHistory}
+                margin={{ left: 8, right: 8, top: 8, bottom: 4 }}
+              >
+                <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis
+                  dataKey="date"
+                  tickLine={false}
+                  axisLine={false}
+                  tickMargin={8}
+                  tick={{ fontSize: 11 }}
                 />
+                <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11 }} width={44} />
+                <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
                 <Line
                   type="monotone"
                   dataKey="requests"
-                  stroke="hsl(222.2 47.4% 11.2%)"
+                  stroke="var(--color-requests)"
                   strokeWidth={2}
-                  dot={false}
+                  dot={{ r: 3, fill: 'var(--color-requests)' }}
+                  activeDot={{ r: 5 }}
                 />
               </LineChart>
-            </ResponsiveContainer>
-            {requestHistory.length === 0 && (
-              <div className="flex items-center justify-center h-full text-muted-foreground">
-                {isLoading ? 'Loading...' : 'No request history available'}
-              </div>
-            )}
-          </div>
+            </ChartContainer>
+          )}
         </CardContent>
       </Card>
 

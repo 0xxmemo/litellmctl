@@ -12,15 +12,13 @@ import { getDisplayName, formatProviderName, extractProvider, resolveProvider } 
 import { useUserStats } from '@/hooks/use-stats'
 import { useAuth } from '@/hooks/use-auth'
 import { useRequestsTable } from '@/hooks/use-requests'
+import { CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts'
 import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts'
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from '@/components/ui/chart'
 
 // Build chart data from real daily breakdown returned by the API.
 // Falls back to a 30-day zero-filled array if no data is available yet.
@@ -39,6 +37,13 @@ function buildUserChart(stats: { requests: number; dailyRequests?: Array<{ date:
   return days
 }
 
+const usageLineConfig = {
+  requests: {
+    label: 'Requests',
+    color: 'var(--chart-1)',
+  },
+} satisfies ChartConfig
+
 function UsageChart({ data, loading }: { data: Array<{ date: string; requests: number }>; loading: boolean }) {
   return (
     <Card>
@@ -47,35 +52,34 @@ function UsageChart({ data, loading }: { data: Array<{ date: string; requests: n
         <CardDescription>Daily API request volume</CardDescription>
       </CardHeader>
       <CardContent>
-        <div className="h-[260px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={data}>
-              <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-              <XAxis dataKey="date" className="text-xs" tick={{ fontSize: 11 }} />
-              <YAxis className="text-xs" tick={{ fontSize: 11 }} />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: 'hsl(var(--card))',
-                  border: '1px solid hsl(var(--border))',
-                  borderRadius: '8px',
-                }}
+        {loading ? (
+          <div className="flex h-[260px] items-center justify-center text-muted-foreground text-sm">
+            Loading chart...
+          </div>
+        ) : (
+          <ChartContainer config={usageLineConfig} className="h-[260px] w-full min-h-[260px]">
+            <LineChart accessibilityLayer data={data} margin={{ left: 8, right: 8, top: 8, bottom: 4 }}>
+              <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-muted" />
+              <XAxis
+                dataKey="date"
+                tickLine={false}
+                axisLine={false}
+                tickMargin={8}
+                tick={{ fontSize: 11 }}
               />
+              <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11 }} width={44} />
+              <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
               <Line
                 type="monotone"
                 dataKey="requests"
-                stroke="var(--color-primary)"
+                stroke="var(--color-requests)"
                 strokeWidth={2}
-                dot={{ r: 3 }}
-                name="Requests"
+                dot={{ r: 3, fill: 'var(--color-requests)' }}
+                activeDot={{ r: 5 }}
               />
             </LineChart>
-          </ResponsiveContainer>
-          {loading && (
-            <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-              Loading chart...
-            </div>
-          )}
-        </div>
+          </ChartContainer>
+        )}
       </CardContent>
     </Card>
   )

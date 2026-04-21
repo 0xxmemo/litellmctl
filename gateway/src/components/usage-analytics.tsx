@@ -2,20 +2,23 @@ import { useState, useMemo } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts'
 import {
-  LineChart,
-  Line,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  Legend,
-  ResponsiveContainer
-} from 'recharts'
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from '@/components/ui/chart'
 import { Calendar, Download } from 'lucide-react'
 import { useUserStatsAnalytics } from '@/hooks/use-stats'
+
+const requestsTimeConfig = {
+  requests: { label: 'Requests', color: 'var(--chart-1)' },
+} satisfies ChartConfig
+
+const tokensByModelConfig = {
+  tokens: { label: 'Tokens', color: 'var(--chart-2)' },
+} satisfies ChartConfig
 
 export function UsageAnalytics() {
   const [dateRange, setDateRange] = useState('7d')
@@ -86,44 +89,35 @@ export function UsageAnalytics() {
           <CardDescription>Daily API request volume</CardDescription>
         </CardHeader>
         <CardContent className="h-full">
-          <div className="h-[300px] sm:h-[400px]">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={analytics.requests}>
-                <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                <XAxis dataKey="date" className="text-xs" />
-                <YAxis className="text-xs" />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: 'hsl(var(--card))',
-                    border: '1px solid hsl(var(--border))',
-                    borderRadius: '8px',
-                  }}
-                />
-                <Legend />
+          {analytics.requests.length === 0 ? (
+            <div className="flex h-[300px] sm:h-[400px] items-center justify-center text-muted-foreground">
+              {loading ? 'Loading chart data...' : 'No data available'}
+            </div>
+          ) : (
+            <ChartContainer
+              config={requestsTimeConfig}
+              className="h-[300px] sm:h-[400px] w-full min-h-[300px]"
+            >
+              <LineChart
+                accessibilityLayer
+                data={analytics.requests}
+                margin={{ left: 8, right: 8, top: 8, bottom: 4 }}
+              >
+                <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-muted" />
+                <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} tick={{ fontSize: 11 }} />
+                <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11 }} width={44} />
+                <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
                 <Line
                   type="monotone"
                   dataKey="requests"
-                  stroke="hsl(222.2 47.4% 11.2%)"
+                  stroke="var(--color-requests)"
                   strokeWidth={2}
-                  dot={false}
-                  name="Requests"
-                />
-                <Line
-                  type="monotone"
-                  dataKey="tokens"
-                  stroke="hsl(210 40% 98%)"
-                  strokeWidth={2}
-                  dot={false}
-                  name="Tokens"
+                  dot={{ r: 3, fill: 'var(--color-requests)' }}
+                  activeDot={{ r: 5 }}
                 />
               </LineChart>
-            </ResponsiveContainer>
-            {analytics.requests.length === 0 && (
-              <div className="flex items-center justify-center h-full text-muted-foreground">
-                {loading ? 'Loading chart data...' : 'No data available'}
-              </div>
-            )}
-          </div>
+            </ChartContainer>
+          )}
         </CardContent>
       </Card>
 
@@ -135,28 +129,37 @@ export function UsageAnalytics() {
             <CardDescription>Distribution across AI models</CardDescription>
           </CardHeader>
           <CardContent className="h-full">
-            <div className="h-[250px] sm:h-[300px]">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={analytics.models}>
-                  <CartesianGrid strokeDasharray="3 3" className="stroke-muted" />
-                  <XAxis dataKey="model" className="text-xs" tick={{fontSize: 10}} angle={-45} textAnchor="end" height={60} />
-                  <YAxis className="text-xs" />
-                  <Tooltip
-                    contentStyle={{
-                      backgroundColor: 'hsl(var(--card))',
-                      border: '1px solid hsl(var(--border))',
-                      borderRadius: '8px',
-                    }}
+            {analytics.models.length === 0 ? (
+              <div className="flex h-[250px] sm:h-[300px] items-center justify-center text-muted-foreground">
+                {loading ? 'Loading...' : 'No model data'}
+              </div>
+            ) : (
+              <ChartContainer
+                config={tokensByModelConfig}
+                className="h-[250px] sm:h-[300px] w-full min-h-[250px]"
+              >
+                <BarChart
+                  accessibilityLayer
+                  data={analytics.models}
+                  margin={{ left: 8, right: 8, top: 8, bottom: 48 }}
+                >
+                  <CartesianGrid vertical={false} strokeDasharray="3 3" className="stroke-muted" />
+                  <XAxis
+                    dataKey="model"
+                    tickLine={false}
+                    axisLine={false}
+                    tickMargin={8}
+                    tick={{ fontSize: 10 }}
+                    angle={-35}
+                    textAnchor="end"
+                    height={70}
                   />
-                  <Bar dataKey="tokens" fill="hsl(222.2 47.4% 11.2%)" radius={[4, 4, 0, 0]} />
+                  <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11 }} width={44} />
+                  <ChartTooltip content={<ChartTooltipContent />} />
+                  <Bar dataKey="tokens" fill="var(--color-tokens)" radius={[5, 5, 0, 0]} />
                 </BarChart>
-              </ResponsiveContainer>
-              {analytics.models.length === 0 && (
-                <div className="flex items-center justify-center h-full text-muted-foreground">
-                  {loading ? 'Loading...' : 'No model data'}
-                </div>
-              )}
-            </div>
+              </ChartContainer>
+            )}
           </CardContent>
         </Card>
 

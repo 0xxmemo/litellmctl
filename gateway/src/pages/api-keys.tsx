@@ -16,7 +16,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import {
   Plus,
   Search,
-  Copy,
   Trash2,
   Key,
   Pencil,
