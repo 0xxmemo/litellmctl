@@ -6,9 +6,12 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import { ClipboardAddon } from '@xterm/addon-clipboard'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { RefreshCw, Eraser, Search, X, Copy, Maximize2, Minimize2 } from 'lucide-react'
+import { RefreshCw, Eraser, Search, X, Copy, Maximize2, Minimize2, Power, AlertTriangle } from 'lucide-react'
+import { toast } from 'sonner'
 import { useAuth } from '@/hooks/use-auth'
 import { useHealth } from '@/hooks/use-health'
+import { useRestartGateway } from '@/hooks/use-admin'
+import { Button } from '@/components/ui/button'
 
 type ConnState = 'connecting' | 'open' | 'closed' | 'error' | 'denied'
 
@@ -58,6 +61,8 @@ export function Console() {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [fullscreen, setFullscreen] = useState(false)
+  const [showRestartConfirm, setShowRestartConfirm] = useState(false)
+  const restartMutation = useRestartGateway()
 
   // ── Connect / reconnect logic ─────────────────────────────────────────
   const connect = useCallback((term: Terminal) => {
@@ -325,6 +330,13 @@ export function Console() {
           >
             {fullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
           </ToolbarButton>
+          <div className="mx-1 h-4 w-px bg-border/50" />
+          <ToolbarButton
+            title="Restart Gateway"
+            onClick={() => setShowRestartConfirm(true)}
+          >
+            <Power className="w-3.5 h-3.5 text-ui-danger-fg" />
+          </ToolbarButton>
         </div>
       </div>
 
@@ -373,6 +385,59 @@ export function Console() {
           <span className="ml-auto">
             Right-click selects word · Shift+click extends selection · URLs are clickable
           </span>
+        </div>
+      )}
+
+      {showRestartConfirm && (
+        <div className="glass-overlay fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="glass glass--muted w-full max-w-md rounded-xl text-card-foreground shadow-none ring-1 ring-ui-danger-border">
+            <div className="p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <AlertTriangle className="h-6 w-6 text-ui-danger-fg" />
+                <h3 className="text-lg font-bold">Restart Gateway?</h3>
+              </div>
+              <p className="text-muted-foreground mb-4">
+                The gateway will stop and restart immediately. This console session,
+                all open browser sessions, and any in-flight API requests will drop
+                for <strong>~5&ndash;15 seconds</strong> while the frontend rebuilds
+                and the service comes back up.
+              </p>
+              <p className="text-sm text-ui-danger-fg mb-6">
+                Use this when the running gateway needs to pick up new code or
+                config. The UI will reconnect automatically once the service is
+                back.
+              </p>
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowRestartConfirm(false)}
+                  disabled={restartMutation.isPending}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() =>
+                    restartMutation.mutate(undefined, {
+                      onSuccess: () => {
+                        toast.success('Restart scheduled — reconnecting shortly…')
+                        setShowRestartConfirm(false)
+                      },
+                      onError: (err: unknown) => {
+                        const msg = err instanceof Error ? err.message : String(err)
+                        toast.error(`Restart failed: ${msg}`)
+                      },
+                    })
+                  }
+                  disabled={restartMutation.isPending}
+                  className="flex-1"
+                >
+                  {restartMutation.isPending ? 'Restarting…' : 'Restart'}
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </div>

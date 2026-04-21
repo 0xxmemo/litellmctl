@@ -139,6 +139,45 @@ async function adminRevokeAllKeysHandler(req: Request) {
   return Response.json({ success: true, count });
 }
 
+// POST /api/admin/restart — detaches `litellmctl restart gateway` into a new
+// systemd transient scope so it survives this process going down. Plain
+// Bun.spawn(detached: true) would still die with the gateway unit's cgroup
+// under systemd's default KillMode=control-group.
+async function adminRestartGatewayHandler(req: Request) {
+  const auth = await requireAdmin(req);
+  if (auth instanceof Response) return auth;
+
+  const proc = Bun.spawn(
+    [
+      "systemd-run", "--user", "--scope", "--no-block",
+      "sh", "-c", "sleep 1 && exec litellmctl restart gateway",
+    ],
+    { stdout: "ignore", stderr: "pipe", stdin: "ignore" },
+  );
+  proc.unref();
+
+  // Race systemd-run's stderr against a short deadline — we want fast
+  // launch failures (e.g. "Failed to connect to bus") reported to the UI,
+  // but we won't wait for the actual restart.
+  let launchErr = "";
+  try {
+    launchErr = (await Promise.race([
+      new Response(proc.stderr as ReadableStream).text(),
+      new Promise<string>((resolve) => setTimeout(() => resolve(""), 300)),
+    ])).trim();
+  } catch {
+    // stderr read failure isn't fatal — proceed optimistically.
+  }
+
+  if (launchErr && /failed|error|not found/i.test(launchErr)) {
+    return Response.json(
+      { error: `restart launch failed: ${launchErr}` },
+      { status: 500 },
+    );
+  }
+  return Response.json({ scheduled: true }, { status: 202 });
+}
+
 // ── Teams ───────────────────────────────────────────────────────────────────
 
 async function adminListTeamsHandler(req: Request) {
@@ -271,5 +310,6 @@ export const adminRoutes = {
   "/api/admin/reject":               { POST: adminRejectUserHandler },
   "/api/admin/disapprove-all":       { POST: adminDisapproveAllHandler },
   "/api/admin/keys/revoke-all":      { POST: adminRevokeAllKeysHandler },
+  "/api/admin/restart":              { POST: adminRestartGatewayHandler },
   "/api/admin/teams":                { GET: adminListTeamsHandler, POST: adminCreateTeamHandler },
 };

@@ -164,6 +164,22 @@ export function useRevokeAllKeys() {
   })
 }
 
+async function restartGatewayApi(): Promise<void> {
+  const res = await fetch('/api/admin/restart', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error || `HTTP ${res.status}`)
+  }
+}
+
+export function useRestartGateway() {
+  return useMutation({ mutationFn: restartGatewayApi })
+}
+
 export type UseAdminUsersReturn = ReturnType<typeof useAdminUsers>
 export type UseApproveUserReturn = ReturnType<typeof useApproveUser>
 export type UseRejectUserReturn = ReturnType<typeof useRejectUser>
@@ -171,6 +187,7 @@ export type UseAddUserReturn = ReturnType<typeof useAddUser>
 export type UseDeleteUserReturn = ReturnType<typeof useDeleteUser>
 export type UseDisapproveAllReturn = ReturnType<typeof useDisapproveAll>
 export type UseRevokeAllKeysReturn = ReturnType<typeof useRevokeAllKeys>
+export type UseRestartGatewayReturn = ReturnType<typeof useRestartGateway>
 
 // ── Teams ────────────────────────────────────────────────────────────────────
 
