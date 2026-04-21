@@ -7,7 +7,13 @@
 
 import { SignJWT, jwtVerify } from 'jose';
 
-const SESSION_SECRET = process.env.SESSION_SECRET || 'your-secret-min-32-chars';
+const SESSION_SECRET = process.env.GATEWAY_SESSION_SECRET;
+if (!SESSION_SECRET || SESSION_SECRET.length < 32) {
+  throw new Error(
+    'GATEWAY_SESSION_SECRET must be set to a value of at least 32 chars. ' +
+      'Generate one with: head -c 48 /dev/urandom | base64 | tr -d =+/ | head -c 48',
+  );
+}
 const secret = new TextEncoder().encode(SESSION_SECRET);
 
 export async function signSession(payload: any): Promise<string> {

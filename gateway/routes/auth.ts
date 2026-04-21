@@ -80,7 +80,7 @@ async function verifyOtpHandler(req: Request) {
   const response = Response.json({ success: true, role: actualRole });
   response.headers.set(
     "Set-Cookie",
-    `sessionId=${sessionToken}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${365 * 24 * 60 * 60}`,
+    `sessionId=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=${365 * 24 * 60 * 60}`,
   );
   return response;
 }
@@ -104,7 +104,7 @@ async function logoutHandler() {
   const response = Response.json({ success: true });
   response.headers.set(
     "Set-Cookie",
-    "sessionId=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+    "sessionId=; Path=/; HttpOnly; Secure; SameSite=Strict; Expires=Thu, 01 Jan 1970 00:00:00 GMT",
   );
   return response;
 }

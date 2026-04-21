@@ -534,9 +534,19 @@ if [ "$WITH_CADDY" = 1 ] && [ "$PLATFORM" = "Linux" ]; then
   CADDYFILE="$INSTALL_DIR/Caddyfile"
   if [ ! -f "$CADDYFILE" ]; then
     cat | sudo -u "$APP_USER" tee "$CADDYFILE" >/dev/null <<'CADDY'
-# Default Caddyfile — proxies all :80 traffic to the gateway.
-# Replace the `:80` block with `your.domain.com { reverse_proxy localhost:14041 }`
-# for automatic HTTPS, then: sudo systemctl reload caddy
+# Default Caddyfile — proxies :80 to the gateway until you configure a domain.
+#
+# Once you have a domain pointed at this box, replace the whole :80 block with:
+#
+#   your.domain.com {
+#     reverse_proxy localhost:14041
+#   }
+#   :80 {
+#     redir https://your.domain.com{uri} permanent
+#   }
+#
+# The redirect-only :80 block prevents plaintext bypass of session cookies
+# via http://<public-ip>/. Then: sudo systemctl reload caddy
 :80 {
   reverse_proxy localhost:14041
 }
