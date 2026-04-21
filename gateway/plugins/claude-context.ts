@@ -18,6 +18,7 @@ import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
 import {
   createCollection,
   dropCollection,
+  getRefOverlay,
   hasCollection,
   insertDocuments,
   listExistingChunkIds,
@@ -334,33 +335,60 @@ async function handleOverlay(req: Request): Promise<Response> {
   return Response.json(result);
 }
 
-// POST /search — body: { codebaseId, branch, query, limit }
+// POST /search — body: { codebaseId, branch, query, limit } OR
+//                       { refs: [{codebaseId, branch}], query, limit }
+// The refs[] shape fans out across multiple codebases (parent + submodules)
+// and merges results by score. Legacy single-codebase shape still works.
 async function handleSearch(req: Request): Promise<Response> {
   const auth = await requireUser(req);
   if (auth instanceof Response) return auth;
 
-  let body: { codebaseId?: string; branch?: string; query?: string; limit?: number };
+  let body: {
+    codebaseId?: string;
+    branch?: string;
+    query?: string;
+    limit?: number;
+    refs?: Array<{ codebaseId?: string; branch?: string }>;
+  };
   try {
     body = await req.json();
   } catch {
     return errJson("Invalid JSON body");
   }
 
-  const { codebaseId, branch, query, limit = 10 } = body;
-  if (!isValidCodebaseId(codebaseId)) return errJson("codebaseId required");
-  if (!isValidBranch(branch)) return errJson("branch required");
+  const { query, limit = 10 } = body;
   if (!query || typeof query !== "string") return errJson("query required");
 
-  const row = db
-    .prepare(
-      "SELECT * FROM plugin_indexing_jobs WHERE codebase_id = ? AND branch = ?",
-    )
-    .get(codebaseId, branch) as IndexingJob | undefined;
+  const refInputs: Array<{ codebaseId: string; branch: string }> = [];
+  if (Array.isArray(body.refs) && body.refs.length > 0) {
+    for (const r of body.refs) {
+      if (!isValidCodebaseId(r.codebaseId)) return errJson("invalid codebaseId in refs");
+      if (!isValidBranch(r.branch)) return errJson("invalid branch in refs");
+      refInputs.push({ codebaseId: r.codebaseId as string, branch: r.branch as string });
+    }
+  } else {
+    if (!isValidCodebaseId(body.codebaseId)) return errJson("codebaseId required");
+    if (!isValidBranch(body.branch)) return errJson("branch required");
+    refInputs.push({ codebaseId: body.codebaseId as string, branch: body.branch as string });
+  }
 
-  if (!row) return Response.json({ error: "not_indexed" }, { status: 404 });
-  const job = reapIfStale(row);
-  if (!hasCollection(job.collection)) {
-    return Response.json({ error: "collection_missing" }, { status: 404 });
+  // Resolve each ref to a live job + collection. Refs with no job are silently
+  // skipped when part of a multi-ref fanout; a single-ref request still 404s
+  // to preserve the old contract the CLI hook relies on.
+  const resolved: Array<{ codebaseId: string; branch: string; job: IndexingJob }> = [];
+  for (const ref of refInputs) {
+    const row = db
+      .prepare(
+        "SELECT * FROM plugin_indexing_jobs WHERE codebase_id = ? AND branch = ?",
+      )
+      .get(ref.codebaseId, ref.branch) as IndexingJob | undefined;
+    if (!row) continue;
+    const job = reapIfStale(row);
+    if (!hasCollection(job.collection)) continue;
+    resolved.push({ ...ref, job });
+  }
+  if (resolved.length === 0) {
+    return Response.json({ error: "not_indexed" }, { status: 404 });
   }
 
   let queryVector: number[];
@@ -370,16 +398,56 @@ async function handleSearch(req: Request): Promise<Response> {
     return Response.json({ error: `embedding_failed: ${err.message}` }, { status: 502 });
   }
 
-  const results = searchVectors(
-    job.collection,
-    queryVector,
-    Math.min(limit, 50),
-    null,
-    buildRefId(codebaseId as string, branch as string),
-  );
-  const indexing = job.status === "indexing";
+  const perRefLimit = Math.min(limit, 50);
+  const merged: Array<{ document: unknown; score: number }> = [];
+  let anyIndexing = false;
+  for (const ref of resolved) {
+    if (ref.job.status === "indexing") anyIndexing = true;
+    const rows = searchVectors(
+      ref.job.collection,
+      queryVector,
+      perRefLimit,
+      null,
+      buildRefId(ref.codebaseId, ref.branch),
+    );
+    for (const r of rows) merged.push(r);
+  }
+  merged.sort((a, b) => b.score - a.score);
+  const results = merged.slice(0, perRefLimit);
 
-  return Response.json({ results, indexing });
+  return Response.json({ results, indexing: anyIndexing });
+}
+
+// GET /overlay?codebaseId=X&branch=Y — returns the full overlay (file_path,
+// chunk_ids, file_hash) for this ref plus the current head_commit. Clients
+// use this to skip re-reading unchanged files during incremental sync.
+async function handleGetOverlay(req: Request): Promise<Response> {
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
+
+  const url = new URL(req.url);
+  const codebaseId = url.searchParams.get("codebaseId");
+  const branch = url.searchParams.get("branch");
+  if (!isValidCodebaseId(codebaseId)) return errJson("codebaseId required");
+  if (!isValidBranch(branch)) return errJson("branch required");
+
+  const row = db
+    .prepare(
+      "SELECT * FROM plugin_indexing_jobs WHERE codebase_id = ? AND branch = ?",
+    )
+    .get(codebaseId, branch) as IndexingJob | undefined;
+  if (!row) return Response.json({ status: "not_found" }, { status: 404 });
+
+  const job = reapIfStale(row);
+  const entries = hasCollection(job.collection)
+    ? getRefOverlay(job.collection, buildRefId(codebaseId as string, branch as string))
+    : [];
+
+  return Response.json({
+    status: job.status,
+    headCommit: job.head_commit,
+    entries,
+  });
 }
 
 // GET /usage — aggregated view for the UI, one row per codebase with per-branch detail.
@@ -476,7 +544,7 @@ export const claudeContextPlugin: GatewayPlugin = {
     "/jobs": { GET: handleGetJobs, POST: handleUpsertJob, DELETE: handleDeleteJob },
     "/chunks": { POST: handleInsertChunks },
     "/chunks/exists": { POST: handleChunksExists },
-    "/overlay": { POST: handleOverlay },
+    "/overlay": { GET: handleGetOverlay, POST: handleOverlay },
     "/search": { POST: handleSearch },
     "/usage": { GET: handleUsage },
   },
@@ -533,5 +601,14 @@ export const claudeContextPlugin: GatewayPlugin = {
       `CREATE INDEX IF NOT EXISTS idx_plugin_indexing_jobs_collection
          ON plugin_indexing_jobs(collection)`,
     );
+
+    // Add file_hash column to plugin_ref_chunks so the client can skip
+    // re-reading unchanged files during incremental sync. Idempotent guard.
+    const refCols = db
+      .prepare("PRAGMA table_info(plugin_ref_chunks)")
+      .all() as Array<{ name: string }>;
+    if (refCols.length > 0 && !refCols.some((c) => c.name === "file_hash")) {
+      db.run("ALTER TABLE plugin_ref_chunks ADD COLUMN file_hash TEXT");
+    }
   },
 };

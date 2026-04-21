@@ -15,11 +15,13 @@
 
 import * as fs from "fs";
 import {
+  buildSearchRefs,
   claudeContextToolDefs,
   collectionName,
   handleClaudeContextTool,
   resolveGitIdentity,
   runSync,
+  syncSubmodules,
 } from "./tools/claude-context";
 
 // ── Gateway credentials ───────────────────────────────────────────────────────
@@ -137,13 +139,47 @@ async function runCli(argv: string[]): Promise<void> {
         const result = await runSync(config, absPath, identity);
         if (result.shortCircuit) {
           log(`up-to-date (head ${identity.headCommit.slice(0, 8)}) — skipping`);
-          emit({ done: true, shortCircuit: true });
         } else {
           log(
             `synced ${identity.codebaseId}@${identity.branch}: ` +
               `${result.embeddedChunks} embedded, ${result.reusedChunks} reused, ${result.totalFiles} files`,
           );
-          emit({ done: true, ...result });
+        }
+
+        // Cascade into submodules so each gets its own codebaseId/collection.
+        // A submodule shared by multiple parents is embedded exactly once.
+        const visited = new Set<string>([identity.codebaseId]);
+        const submoduleReports = await syncSubmodules(
+          config,
+          absPath,
+          identity.codebaseId,
+          visited,
+          (sm, smIdentity) =>
+            log(
+              `sync ${smIdentity.codebaseId}@${smIdentity.branch} (submodule at ${sm.relPath}, head ${smIdentity.headCommit.slice(0, 8)}${smIdentity.isDirty ? ", dirty" : ""})`,
+            ),
+        );
+        for (const r of submoduleReports) {
+          if (r.skipped) {
+            log(`  skipped submodule ${r.relPath}: ${r.skipped}`);
+          } else if (r.error) {
+            log(`  submodule ${r.relPath} failed: ${r.error}`);
+          } else if (r.result) {
+            if (r.result.shortCircuit) {
+              log(`  submodule ${r.codebaseId}@${r.branch} up-to-date`);
+            } else {
+              log(
+                `  submodule ${r.codebaseId}@${r.branch}: ` +
+                  `${r.result.embeddedChunks} embedded, ${r.result.reusedChunks} reused, ${r.result.totalFiles} files`,
+              );
+            }
+          }
+        }
+
+        if (result.shortCircuit) {
+          emit({ done: true, shortCircuit: true, submodules: submoduleReports });
+        } else {
+          emit({ done: true, ...result, submodules: submoduleReports });
         }
       } catch (err) {
         emit({ error: err instanceof Error ? err.message : String(err) });
@@ -155,7 +191,7 @@ async function runCli(argv: string[]): Promise<void> {
     if (sub === "search") {
       if (!args.query) { log("search: --query required"); process.exit(1); }
 
-      // Check job exists first — hook expects exit 2 when not indexed.
+      // Check parent job exists first — hook expects exit 2 when not indexed.
       const statusRes = await gatewayGet(
         config,
         `/api/plugins/claude-context/jobs?codebaseId=${encodeURIComponent(identity.codebaseId)}&branch=${encodeURIComponent(identity.branch)}`,
@@ -165,9 +201,10 @@ async function runCli(argv: string[]): Promise<void> {
         process.exit(2);
       }
 
+      // Fan out across parent + any indexed submodules.
+      const refs = await buildSearchRefs(config, absPath, identity);
       const searchRes = await gatewayPost(config, "/api/plugins/claude-context/search", {
-        codebaseId: identity.codebaseId,
-        branch: identity.branch,
+        refs,
         query: args.query,
         limit: args.limit ?? 5,
       });

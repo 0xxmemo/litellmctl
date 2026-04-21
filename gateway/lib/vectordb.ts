@@ -28,6 +28,7 @@ export interface VectorSearchResult {
 export interface RefOverlayEntry {
   filePath: string;
   chunkIds: string[];
+  fileHash?: string;
 }
 
 const COLLECTION_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -264,8 +265,8 @@ export function setRefOverlay(
   );
   const ins = db.prepare(
     `INSERT OR IGNORE INTO plugin_ref_chunks
-       (collection, ref_id, file_path, chunk_id, updated_at)
-     VALUES (?, ?, ?, ?, ?)`,
+       (collection, ref_id, file_path, chunk_id, updated_at, file_hash)
+     VALUES (?, ?, ?, ?, ?, ?)`,
   );
 
   let inserted = 0;
@@ -274,9 +275,10 @@ export function setRefOverlay(
     for (const entry of entries) {
       if (typeof entry.filePath !== "string" || !entry.filePath) continue;
       if (!Array.isArray(entry.chunkIds)) continue;
+      const fileHash = typeof entry.fileHash === "string" ? entry.fileHash : null;
       for (const chunkId of entry.chunkIds) {
         if (typeof chunkId !== "string" || !chunkId) continue;
-        const res = ins.run(collection, refId, entry.filePath, chunkId, now);
+        const res = ins.run(collection, refId, entry.filePath, chunkId, now, fileHash);
         if ((res as { changes?: number }).changes) inserted++;
       }
     }
@@ -331,19 +333,35 @@ export function getRefOverlay(
   if (!validateRefId(refId)) throw new Error("Invalid ref id");
   const rows = db
     .prepare(
-      `SELECT file_path, chunk_id
+      `SELECT file_path, chunk_id, file_hash
          FROM plugin_ref_chunks
         WHERE collection = ? AND ref_id = ?
         ORDER BY file_path, chunk_id`,
     )
-    .all(collection, refId) as { file_path: string; chunk_id: string }[];
+    .all(collection, refId) as {
+      file_path: string;
+      chunk_id: string;
+      file_hash: string | null;
+    }[];
 
-  const byFile = new Map<string, string[]>();
+  const byFile = new Map<string, { chunkIds: string[]; fileHash: string | null }>();
   for (const r of rows) {
-    if (!byFile.has(r.file_path)) byFile.set(r.file_path, []);
-    byFile.get(r.file_path)!.push(r.chunk_id);
+    let entry = byFile.get(r.file_path);
+    if (!entry) {
+      entry = { chunkIds: [], fileHash: r.file_hash };
+      byFile.set(r.file_path, entry);
+    }
+    entry.chunkIds.push(r.chunk_id);
+    // All rows for the same (collection, ref_id, file_path) carry the same hash,
+    // but fall back to the first non-null one if older rows from a legacy writer
+    // left it as NULL.
+    if (!entry.fileHash && r.file_hash) entry.fileHash = r.file_hash;
   }
-  return Array.from(byFile.entries()).map(([filePath, chunkIds]) => ({ filePath, chunkIds }));
+  return Array.from(byFile.entries()).map(([filePath, v]) => ({
+    filePath,
+    chunkIds: v.chunkIds,
+    ...(v.fileHash ? { fileHash: v.fileHash } : {}),
+  }));
 }
 
 // ── Filter expression parser (minimal: `<field> in ["a", "b"]`) ─────────────

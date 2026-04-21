@@ -38,12 +38,6 @@ const SUPPORTED_EXTENSIONS = new Set([
   ".proto", ".tf", ".hcl", ".vue", ".svelte",
 ]);
 
-const DEFAULT_IGNORES = [
-  "node_modules", ".git", "__pycache__", ".venv", "venv",
-  "dist", "build", ".next", ".nuxt", "coverage", ".cache",
-  ".turbo", ".parcel-cache", "target", ".gradle", "vendor",
-  "*.lock", "*.min.js", "*.min.css",
-];
 
 // ── Gateway client ─────────────────────────────────────────────────────────────
 
@@ -145,11 +139,17 @@ async function pushChunks(
   }
 }
 
+interface OverlayEntry {
+  filePath: string;
+  chunkIds: string[];
+  fileHash?: string;
+}
+
 async function setOverlay(
   config: GatewayConfig,
   codebaseId: string,
   branch: string,
-  entries: Array<{ filePath: string; chunkIds: string[] }>,
+  entries: OverlayEntry[],
 ): Promise<void> {
   const res = await gatewayFetch(config, "POST", "/api/plugins/claude-context/overlay", {
     codebaseId,
@@ -160,6 +160,33 @@ async function setOverlay(
     const msg = await res.text().catch(() => "");
     throw new Error(`Overlay update failed ${res.status}: ${msg}`);
   }
+}
+
+/**
+ * Pull the current overlay for (codebase, branch). Returns empty on 404
+ * (first-time index). Carries fileHash per entry so the caller can skip
+ * re-reading unchanged files.
+ */
+async function fetchOverlay(
+  config: GatewayConfig,
+  codebaseId: string,
+  branch: string,
+): Promise<{ entries: OverlayEntry[]; headCommit: string | null }> {
+  const res = await gatewayFetch(
+    config,
+    "GET",
+    `/api/plugins/claude-context/overlay?codebaseId=${encodeURIComponent(codebaseId)}&branch=${encodeURIComponent(branch)}`,
+  );
+  if (res.status === 404) return { entries: [], headCommit: null };
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "");
+    throw new Error(`Overlay fetch failed ${res.status}: ${msg}`);
+  }
+  const data = (await res.json()) as {
+    entries: OverlayEntry[];
+    headCommit: string | null;
+  };
+  return { entries: data.entries ?? [], headCommit: data.headCommit ?? null };
 }
 
 // ── Git identity resolution ────────────────────────────────────────────────────
@@ -240,164 +267,103 @@ export function resolveGitIdentity(absPath: string): GitIdentity | null {
   return { codebaseId, branch, headCommit, isDirty };
 }
 
-// ── File walking & chunking ────────────────────────────────────────────────────
+// ── File selection (git-driven) ────────────────────────────────────────────────
 
-function loadIgnorePatterns(rootPath: string, agentExclusions: string[]): string[] {
-  const patterns = [...DEFAULT_IGNORES, ...agentExclusions];
-  const gitignorePath = path.join(rootPath, ".gitignore");
-  if (fs.existsSync(gitignorePath)) {
-    const lines = fs.readFileSync(gitignorePath, "utf-8").split("\n");
-    for (const line of lines) {
-      const t = line.trim();
-      if (t && !t.startsWith("#") && !t.startsWith("!")) patterns.push(t);
-    }
-  }
-  return patterns;
+/**
+ * Files tracked or untracked-but-not-ignored by git. Respects every .gitignore
+ * layer, .git/info/exclude, and core.excludesFile — so no custom pattern matcher
+ * is needed. `git ls-files` in a parent repo does NOT recurse into submodule
+ * contents, which is exactly what we want: the parent owns only its own files,
+ * and each submodule is indexed independently under its own codebaseId.
+ */
+function listTrackedFiles(absPath: string): string[] {
+  const out = gitCmd(absPath, ["ls-files", "-co", "--exclude-standard"]);
+  if (!out) return [];
+  return out
+    .split("\n")
+    .filter((s) => s.length > 0)
+    .filter((f) => SUPPORTED_EXTENSIONS.has(path.extname(f)));
 }
 
-function shouldIgnore(relPath: string, _name: string, patterns: string[]): boolean {
-  const parts = relPath.split(path.sep);
-  return patterns.some((p) => {
-    const pat = p.replace(/\/$/, "");
-    if (pat.includes("/")) return relPath.startsWith(pat) || relPath === pat;
-    return parts.some((part) => {
-      if (pat.includes("*")) {
-        const re = new RegExp(
-          "^" + pat.replace(/\./g, "\\.").replace(/\*/g, "[^/]*") + "$",
-        );
-        return re.test(part);
-      }
-      return part === pat;
-    });
-  });
+export interface Submodule {
+  absPath: string;
+  relPath: string;
 }
 
-function* walkDir(
-  dirPath: string,
-  rootPath: string,
-  patterns: string[],
-): Generator<string, void, undefined> {
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(dirPath, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const entry of entries) {
-    const full = path.join(dirPath, entry.name);
-    const rel = path.relative(rootPath, full);
-    if (shouldIgnore(rel, entry.name, patterns)) continue;
-    if (entry.isDirectory()) {
-      yield* walkDir(full, rootPath, patterns);
-    } else if (entry.isFile() && SUPPORTED_EXTENSIONS.has(path.extname(entry.name))) {
-      yield full;
-    }
-  }
+/**
+ * Parse .gitmodules and return each initialized submodule's checkout path.
+ * Uninitialized submodules (missing .git) are skipped silently.
+ */
+export function listSubmodules(absPath: string): Submodule[] {
+  const raw = gitCmd(absPath, [
+    "config",
+    "--file",
+    ".gitmodules",
+    "--get-regexp",
+    "path",
+  ]);
+  if (!raw) return [];
+  return raw
+    .split("\n")
+    .map((line) => {
+      // format: "submodule.<name>.path <rel-path>"
+      const relPath = line.split(/\s+/)[1];
+      if (!relPath) return null;
+      const abs = path.join(absPath, relPath);
+      if (!fs.existsSync(path.join(abs, ".git"))) return null;
+      return { absPath: abs, relPath };
+    })
+    .filter((s): s is Submodule => s !== null);
 }
 
-const SCOPE_TREE_MAX_DEPTH = 4;
-const SCOPE_TREE_PER_DIR_CAP = 60;
-const SCOPE_TREE_MAX_BYTES = 16 * 1024;
+function sha256File(absPath: string): string {
+  const buf = fs.readFileSync(absPath);
+  return "sha256:" + crypto.createHash("sha256").update(buf).digest("hex");
+}
 
-function buildScopeTree(rootPath: string): string {
-  const lines: string[] = [];
-  let byteBudget = SCOPE_TREE_MAX_BYTES;
+export interface SearchRef {
+  codebaseId: string;
+  branch: string;
+}
 
-  const walk = (dirPath: string, relPath: string, depth: number): void => {
-    if (depth > SCOPE_TREE_MAX_DEPTH || byteBudget <= 0) return;
-    let entries: fs.Dirent[];
-    try {
-      entries = fs.readdirSync(dirPath, { withFileTypes: true });
-    } catch {
-      return;
-    }
+/**
+ * Build the ref list for a search at `absPath`: the parent, plus every
+ * initialized submodule that has a gateway job row (so we don't issue
+ * search requests against codebases the gateway has never heard of).
+ *
+ * Submodules without an origin remote, or with no job, are skipped.
+ * Recurses so submodules-of-submodules are included.
+ */
+export async function buildSearchRefs(
+  config: GatewayConfig,
+  absPath: string,
+  parentIdentity: GitIdentity,
+): Promise<SearchRef[]> {
+  const refs: SearchRef[] = [{ codebaseId: parentIdentity.codebaseId, branch: parentIdentity.branch }];
+  const visited = new Set<string>([parentIdentity.codebaseId]);
 
-    const dirs = entries
-      .filter((e) => e.isDirectory() && !e.name.startsWith(".") && !shouldIgnore(
-        relPath ? path.posix.join(relPath, e.name) : e.name,
-        e.name,
-        DEFAULT_IGNORES,
-      ))
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .slice(0, SCOPE_TREE_PER_DIR_CAP);
+  const collect = async (root: string): Promise<void> => {
+    for (const sm of listSubmodules(root)) {
+      const id = resolveGitIdentity(sm.absPath);
+      if (!id) continue;
+      if (visited.has(id.codebaseId)) continue;
+      visited.add(id.codebaseId);
 
-    const fileCount = entries.filter((e) => e.isFile()).length;
-
-    for (const d of dirs) {
-      const childRel = relPath ? path.posix.join(relPath, d.name) : d.name;
-      const childAbs = path.join(dirPath, d.name);
-      let childEntries = 0;
-      try {
-        childEntries = fs.readdirSync(childAbs).length;
-      } catch {
-        // ignore
+      const res = await gatewayFetch(
+        config,
+        "GET",
+        `/api/plugins/claude-context/jobs?codebaseId=${encodeURIComponent(id.codebaseId)}&branch=${encodeURIComponent(id.branch)}`,
+      ).catch(() => null);
+      if (res && res.ok) {
+        refs.push({ codebaseId: id.codebaseId, branch: id.branch });
       }
-      const indent = "  ".repeat(depth);
-      const line = `${indent}${childRel}/  (${childEntries} entries)\n`;
-      if (line.length > byteBudget) {
-        byteBudget = 0;
-        return;
-      }
-      lines.push(line);
-      byteBudget -= line.length;
-      walk(childAbs, childRel, depth + 1);
-      if (byteBudget <= 0) return;
-    }
 
-    if (depth === 0 && fileCount > 0) {
-      const line = `(root has ${fileCount} top-level files)\n`;
-      if (line.length <= byteBudget) {
-        lines.push(line);
-        byteBudget -= line.length;
-      }
+      await collect(sm.absPath);
     }
   };
 
-  walk(rootPath, "", 0);
-  return lines.join("");
-}
-
-async function getAgentExclusions(
-  config: GatewayConfig,
-  rootPath: string,
-): Promise<string[]> {
-  try {
-    const tree = buildScopeTree(rootPath);
-    if (!tree) return [];
-
-    const res = await gatewayFetch(config, "POST", "/v1/chat/completions", {
-      model: "lite",
-      messages: [
-        {
-          role: "user",
-          content:
-            `Directory tree (up to depth ${SCOPE_TREE_MAX_DEPTH}) of a codebase to be indexed ` +
-            `for semantic code search. Entry counts are shown to help spot large subtrees:\n\n${tree}\n` +
-            `Return a JSON array of patterns to EXCLUDE from indexing. Exclude: build artifacts, ` +
-            `generated code, vendored dependencies, large data/fixture dirs, docs/cookbook/examples ` +
-            `that aren't source, and any deep subtrees that look like test fixtures or experimental ` +
-            `scratch code. Patterns can be a base name (e.g. "cookbook") OR a path prefix ` +
-            `(e.g. "litellm/tests", "litellm/docs"). Prefer path prefixes when excluding a specific ` +
-            `subtree inside a larger source dir. Only the JSON array, no other text.`,
-        },
-      ],
-      max_tokens: 800,
-    });
-
-    if (!res.ok) return [];
-    const data = (await res.json()) as {
-      choices: Array<{ message: { content: string } }>;
-    };
-    const content = data.choices?.[0]?.message?.content ?? "";
-    const match = content.match(/\[[\s\S]*?\]/);
-    if (!match) return [];
-    const patterns = JSON.parse(match[0]);
-    return Array.isArray(patterns)
-      ? patterns.filter((p): p is string => typeof p === "string")
-      : [];
-  } catch {
-    return [];
-  }
+  await collect(absPath);
+  return refs;
 }
 
 export function collectionName(codebaseId: string): string {
@@ -465,11 +431,21 @@ export interface SyncResult {
   totalFiles: number;
 }
 
+export interface SubmoduleSyncReport {
+  codebaseId: string;
+  branch: string;
+  absPath: string;
+  relPath: string;
+  result?: SyncResult;
+  skipped?: string;
+  error?: string;
+}
+
 /**
- * Diff-based sync. Walks the working tree, computes the desired chunk set,
- * skips chunks that already live on the gateway, embeds only the missing
- * ones, and replaces the branch's ref overlay with the full (file → chunkIds)
- * map. Short-circuits when head_commit matches and the tree is clean.
+ * Hash-carryover sync. Pulls the existing overlay from the gateway, hashes
+ * each tracked file once, reuses chunk IDs verbatim for files whose hash
+ * matches, and only reads + chunks + embeds files that actually changed.
+ * Short-circuits when head_commit matches and the tree is clean.
  */
 export async function runSync(
   config: GatewayConfig,
@@ -513,52 +489,89 @@ export async function runSync(
 
   await updateJob({ percentage: 0 });
 
-  const agentExclusions = await getAgentExclusions(config, absPath);
-  const ignorePatterns = loadIgnorePatterns(absPath, agentExclusions);
+  // Fetch the prior overlay so we can carry unchanged files forward without
+  // reading them. Missing overlay (first index) just leaves the map empty.
+  const prior = await fetchOverlay(config, codebaseId, branch).catch(() => ({
+    entries: [] as OverlayEntry[],
+    headCommit: null as string | null,
+  }));
+  const priorByFile = new Map<string, OverlayEntry>();
+  for (const e of prior.entries) priorByFile.set(e.filePath, e);
 
-  const files: string[] = [];
-  for (const f of walkDir(absPath, absPath, ignorePatterns)) files.push(f);
+  const relFiles = listTrackedFiles(absPath);
 
-  await updateJob({ total_files: files.length });
+  await updateJob({ total_files: relFiles.length });
 
-  // Walk + chunk everything up front. This gives us the desired overlay and
-  // lets us dedupe against the gateway in a single round-trip.
-  const allChunks: PendingChunk[] = [];
-  const overlayByFile = new Map<string, string[]>();
+  // Partition into (reused-verbatim) vs (needs-chunking). For the reused
+  // side: no file read, no chunk+hash. For the changed side: read once, chunk,
+  // and stage for the dedupe+embed pipeline.
+  const overlayEntries: OverlayEntry[] = [];
+  const changedChunks: PendingChunk[] = [];
+  let reusedFromHash = 0;
   let indexedFiles = 0;
 
-  for (const filePath of files) {
-    const relPath = path.relative(absPath, filePath);
-    const ext = path.extname(filePath);
+  for (const relPath of relFiles) {
+    const filePath = path.join(absPath, relPath);
+    const ext = path.extname(relPath);
+    let stat: fs.Stats;
     try {
-      const stat = fs.statSync(filePath);
-      if (stat.size > MAX_FILE_BYTES) continue;
-      const content = fs.readFileSync(filePath, "utf-8");
-      const chunks = chunkFile(relPath, content, ext);
-      if (chunks.length === 0) continue;
-      for (const c of chunks) allChunks.push(c);
-      overlayByFile.set(
-        relPath,
-        chunks.map((c) => c.id),
-      );
-      indexedFiles++;
+      stat = fs.statSync(filePath);
     } catch {
-      // skip unreadable files
+      continue;
     }
+    if (!stat.isFile()) continue;
+    if (stat.size > MAX_FILE_BYTES) continue;
+
+    let fileHash: string;
+    try {
+      fileHash = sha256File(filePath);
+    } catch {
+      continue;
+    }
+
+    const priorEntry = priorByFile.get(relPath);
+    if (priorEntry && priorEntry.fileHash === fileHash && priorEntry.chunkIds.length > 0) {
+      overlayEntries.push({
+        filePath: relPath,
+        chunkIds: priorEntry.chunkIds,
+        fileHash,
+      });
+      reusedFromHash += priorEntry.chunkIds.length;
+      indexedFiles++;
+      continue;
+    }
+
+    let content: string;
+    try {
+      content = fs.readFileSync(filePath, "utf-8");
+    } catch {
+      continue;
+    }
+    const chunks = chunkFile(relPath, content, ext);
+    if (chunks.length === 0) continue;
+    for (const c of chunks) changedChunks.push(c);
+    overlayEntries.push({
+      filePath: relPath,
+      chunkIds: chunks.map((c) => c.id),
+      fileHash,
+    });
+    indexedFiles++;
   }
 
-  // Dedupe: ask the gateway which chunk IDs it already has.
+  // Only the chunks from changed files need a dedupe round-trip. Unchanged
+  // files carry their overlay entries forward without touching the gateway.
   const existing = await chunksExists(
     config,
     codebaseId,
-    allChunks.map((c) => c.id),
+    changedChunks.map((c) => c.id),
   );
-  const missing = allChunks.filter((c) => !existing.has(c.id));
-  const reused = allChunks.length - missing.length;
+  const missing = changedChunks.filter((c) => !existing.has(c.id));
+  const reusedFromCollection = changedChunks.length - missing.length;
+  const totalChunks = reusedFromHash + changedChunks.length;
 
   await updateJob({
     indexed_files: indexedFiles,
-    total_chunks: allChunks.length,
+    total_chunks: totalChunks,
     percentage: missing.length === 0 ? 90 : 10,
   });
 
@@ -591,10 +604,6 @@ export async function runSync(
 
   // Atomically replace the overlay for this (codebase, branch). Files that
   // disappeared from the working tree drop out automatically.
-  const overlayEntries = Array.from(overlayByFile.entries()).map(([filePath, chunkIds]) => ({
-    filePath,
-    chunkIds,
-  }));
   await setOverlay(config, codebaseId, branch, overlayEntries);
 
   await upsertJob(config, {
@@ -605,17 +614,102 @@ export async function runSync(
     percentage: 100,
     head_commit: headCommit,
     indexed_files: indexedFiles,
-    total_chunks: allChunks.length,
-    total_files: files.length,
+    total_chunks: totalChunks,
+    total_files: relFiles.length,
   });
 
   return {
     shortCircuit: false,
-    totalChunks: allChunks.length,
+    totalChunks,
     embeddedChunks: embedded,
-    reusedChunks: reused,
-    totalFiles: files.length,
+    reusedChunks: reusedFromHash + reusedFromCollection,
+    totalFiles: relFiles.length,
   };
+}
+
+/**
+ * Walk submodules declared in .gitmodules (recursively) and sync each one
+ * under its own codebaseId. A submodule shared between parents is embedded
+ * exactly once because its codebaseId (its own origin remote) is what keys
+ * the collection, not the parent's.
+ *
+ * Cycles are broken with a visited-set keyed on codebaseId. Submodules
+ * without an origin remote are skipped quietly — same rule as the CLI
+ * applies to the parent path.
+ */
+export async function syncSubmodules(
+  config: GatewayConfig,
+  absPath: string,
+  parentCodebaseId: string,
+  visited: Set<string>,
+  onProgress?: (sm: Submodule, identity: GitIdentity) => void,
+): Promise<SubmoduleSyncReport[]> {
+  const reports: SubmoduleSyncReport[] = [];
+  for (const sm of listSubmodules(absPath)) {
+    const identity = resolveGitIdentity(sm.absPath);
+    if (!identity) {
+      reports.push({
+        codebaseId: "",
+        branch: "",
+        absPath: sm.absPath,
+        relPath: sm.relPath,
+        skipped: "no origin remote",
+      });
+      continue;
+    }
+    if (identity.codebaseId === parentCodebaseId || visited.has(identity.codebaseId)) {
+      reports.push({
+        codebaseId: identity.codebaseId,
+        branch: identity.branch,
+        absPath: sm.absPath,
+        relPath: sm.relPath,
+        skipped: "already visited",
+      });
+      continue;
+    }
+    visited.add(identity.codebaseId);
+
+    onProgress?.(sm, identity);
+
+    const collection = collectionName(identity.codebaseId);
+    try {
+      await upsertJob(config, {
+        codebaseId: identity.codebaseId,
+        branch: identity.branch,
+        collection,
+        status: "indexing",
+        percentage: 0,
+      });
+      const result = await runSync(config, sm.absPath, identity);
+      reports.push({
+        codebaseId: identity.codebaseId,
+        branch: identity.branch,
+        absPath: sm.absPath,
+        relPath: sm.relPath,
+        result,
+      });
+    } catch (err) {
+      reports.push({
+        codebaseId: identity.codebaseId,
+        branch: identity.branch,
+        absPath: sm.absPath,
+        relPath: sm.relPath,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      continue;
+    }
+
+    // Recurse — submodules of submodules each get their own index.
+    const child = await syncSubmodules(
+      config,
+      sm.absPath,
+      identity.codebaseId,
+      visited,
+      onProgress,
+    );
+    reports.push(...child);
+  }
+  return reports;
 }
 
 // ── Tool definitions ──────────────────────────────────────────────────────────
@@ -749,11 +843,22 @@ export async function handleClaudeContextTool(
         percentage: 0,
       });
 
-      // Fire-and-forget background indexing
-      runSync(config, absPath, identity).catch(console.error);
+      // Fire-and-forget background indexing — parent first, then submodules
+      // each under their own codebaseId.
+      (async () => {
+        try {
+          await runSync(config, absPath, identity);
+          const visited = new Set<string>([identity.codebaseId]);
+          await syncSubmodules(config, absPath, identity.codebaseId, visited);
+        } catch (err) {
+          console.error(err);
+        }
+      })();
 
+      const smCount = listSubmodules(absPath).length;
+      const smNote = smCount > 0 ? ` (+${smCount} submodule${smCount === 1 ? "" : "s"} queued)` : "";
       return textRes(
-        `Started sync for '${identity.codebaseId}@${identity.branch}'. Use get_indexing_status to track progress.`,
+        `Started sync for '${identity.codebaseId}@${identity.branch}'${smNote}. Use get_indexing_status to track progress.`,
       );
     }
 
@@ -768,9 +873,9 @@ export async function handleClaudeContextTool(
       const identity = resolveGitIdentity(absPath);
       if (!identity) return errRes(identityErr(absPath));
 
+      const refs = await buildSearchRefs(config, absPath, identity);
       const res = await gatewayFetch(config, "POST", "/api/plugins/claude-context/search", {
-        codebaseId: identity.codebaseId,
-        branch: identity.branch,
+        refs,
         query,
         limit,
       });
