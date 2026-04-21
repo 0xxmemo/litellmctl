@@ -214,10 +214,11 @@ jobs:
           grep -q '^GATEWAY_SESSION_SECRET=' "\$ENV_FILE" || \\
             echo "GATEWAY_SESSION_SECRET=\$(head -c 48 /dev/urandom | base64 | tr -d '=+/' | head -c 48)" >> "\$ENV_FILE"
 
-          # Idempotent bootstrap. Has its own fast-exit: if nothing since
-          # the last successful run has changed (HEAD, .env, script),
-          # it skips the expensive steps and just ensures services are up.
-          bash /home/ec2-user/.litellm/bin/bootstrap-instance.sh
+          # Idempotent install — --pipeline does the EC2 bootstrap bundle
+          # (swap, EBS mount, caddy, bun, claude, gateway, protonmail,
+          # services). --fingerprint is implicit: skips every step when
+          # HEAD + .env + this script are unchanged and services healthy.
+          bash /home/ec2-user/.litellm/install.sh --pipeline
           SCRIPT
 
           python3 -c "

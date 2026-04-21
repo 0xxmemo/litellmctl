@@ -270,10 +270,13 @@ Resources:
             chown ec2-user:ec2-user "$ENV_FILE"
           fi
 
-          # Hand off to the idempotent bootstrap. Fails here won't wreck
-          # the stack — `bash bootstrap-instance.sh` can be re-run any
-          # time via SSM to finish the setup.
-          bash /home/ec2-user/.litellm/bin/bootstrap-instance.sh
+          # Hand off to install.sh --pipeline. The same script is used
+          # for laptop/VPC installs; --pipeline adds EC2-specific setup
+          # (swap, EBS mount, caddy systemd, bun, claude, node-gyp,
+          # gateway + protonmail via litellmctl, service start, fast-exit
+          # fingerprint). Fails here won't wreck the stack — `bash
+          # install.sh --pipeline` can be re-run any time via SSM.
+          bash /home/ec2-user/.litellm/install.sh --pipeline
 
 Outputs:
   PublicIp:

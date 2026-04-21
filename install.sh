@@ -1,17 +1,51 @@
 #!/usr/bin/env bash
 # ---------------------------------------------------------------------------
-#  litellmctl installer — safe for first install AND retroactive re-runs.
+#  litellmctl installer — one entry point for laptop, VPC, and the EC2
+#  pipeline. Backward-compatible with the original "just run it" usage.
 #
+#  Laptop / VPC:
 #    curl -fsSL https://raw.githubusercontent.com/0xxmemo/litellmctl/main/install.sh | bash
 #
-#  Works on macOS (Homebrew or system Python) and Ubuntu/Debian.
-#  Preserves existing config.yaml, .env, and auth token files.
+#  Pipeline (EC2 AL2023, run by user-data or the deploy workflow's SSM step):
+#    bash install.sh --pipeline
+#
+#  Individual pipeline flags (mix and match for custom flows):
+#    --with-swap[=SIZE]     fallocate a SIZE-GB /swapfile (default 32)
+#    --with-ebs-mount[=DEV] Format + mount EBS at $HOME/.litellm
+#    --with-caddy           Caddy static binary + systemd unit
+#    --with-bun             Bun runtime (curl | bash installer)
+#    --with-claude          Claude Code CLI (native binary)
+#    --with-node-gyp        nodejs + npm + node-gyp (for native addons)
+#    --with-gateway         `litellmctl install --with-gateway`
+#    --with-protonmail      `litellmctl install --with-protonmail` + auto-auth
+#    --start-services       systemd start proxy + gateway + protonmail
+#    --fingerprint          Skip ALL steps on re-run if HEAD + .env + this
+#                           script are unchanged and services are healthy
+#    --app-user=NAME        Drop privileges to NAME when running as root
+#                           (default: ec2-user for pipeline mode, current user otherwise)
+#
+#  Safe to re-run. macOS and Debian/Ubuntu work without pipeline flags;
+#  --pipeline and most Linux-only flags require Amazon Linux 2023.
 # ---------------------------------------------------------------------------
 set -euo pipefail
 
+# ── Defaults ────────────────────────────────────────────────────────────────
+
 REPO_URL="https://github.com/0xxmemo/litellmctl.git"
-INSTALL_DIR="$HOME/.litellm"
+INSTALL_DIR="${LITELLM_DIR:-${HOME}/.litellm}"
 VENV_DIR="$INSTALL_DIR/venv"
+
+WITH_SWAP=0;      SWAP_SIZE_GB=32
+WITH_EBS_MOUNT=0; EBS_DEVICE=""
+WITH_CADDY=0;     CADDY_VERSION=2.8.4
+WITH_BUN=0
+WITH_CLAUDE=0
+WITH_NODE_GYP=0
+WITH_GATEWAY=0
+WITH_PROTONMAIL=0
+START_SERVICES=0
+USE_FINGERPRINT=0
+APP_USER=""
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -21,21 +55,70 @@ error() { printf "\033[1;31m==> %s\033[0m\n" "$*" >&2; }
 ok()    { printf "  \033[32m✓\033[0m %s\n" "$*"; }
 skip()  { printf "  \033[33m-\033[0m %s\n" "$*"; }
 
+print_help() {
+  sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'
+}
+
+# ── CLI flag parsing ────────────────────────────────────────────────────────
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --pipeline)
+      WITH_SWAP=1; WITH_EBS_MOUNT=1; WITH_CADDY=1
+      WITH_BUN=1; WITH_CLAUDE=1; WITH_NODE_GYP=1
+      WITH_GATEWAY=1; WITH_PROTONMAIL=1
+      START_SERVICES=1; USE_FINGERPRINT=1
+      APP_USER="${APP_USER:-ec2-user}"
+      ;;
+    --with-swap)          WITH_SWAP=1 ;;
+    --with-swap=*)        WITH_SWAP=1; SWAP_SIZE_GB="${1#*=}" ;;
+    --with-ebs-mount)     WITH_EBS_MOUNT=1 ;;
+    --with-ebs-mount=*)   WITH_EBS_MOUNT=1; EBS_DEVICE="${1#*=}" ;;
+    --with-caddy)         WITH_CADDY=1 ;;
+    --with-bun)           WITH_BUN=1 ;;
+    --with-claude)        WITH_CLAUDE=1 ;;
+    --with-node-gyp)      WITH_NODE_GYP=1 ;;
+    --with-gateway)       WITH_GATEWAY=1 ;;
+    --with-protonmail)    WITH_PROTONMAIL=1 ;;
+    --start-services)     START_SERVICES=1 ;;
+    --fingerprint)        USE_FINGERPRINT=1 ;;
+    --app-user=*)         APP_USER="${1#*=}" ;;
+    -h|--help)            print_help; exit 0 ;;
+    *) error "unknown flag: $1  (see: bash install.sh --help)"; exit 2 ;;
+  esac
+  shift
+done
+
+: "${APP_USER:=$(id -un)}"
+
+# When running as root (pipeline mode), INSTALL_DIR should be the app user's
+# home directory, not root's. Resolve it from the target user.
+if [ "$(id -u)" -eq 0 ] && [ -z "${LITELLM_DIR:-}" ] && [ "$APP_USER" != "root" ]; then
+  INSTALL_DIR="$(getent passwd "$APP_USER" | cut -d: -f6)/.litellm"
+  VENV_DIR="$INSTALL_DIR/venv"
+fi
+
+# Handy invocation helper — runs a command as the app user when we're root,
+# otherwise runs directly.
+as_user() {
+  if [ "$(id -u)" -eq 0 ] && [ "$APP_USER" != "root" ]; then
+    sudo -u "$APP_USER" -H bash -lc "$*"
+  else
+    bash -lc "$*"
+  fi
+}
+
 normalize_submodule_ref() {
   local dir="$1"
   [ -d "$dir/.git" ] || [ -f "$dir/.git" ] || return 0
 
   local head_sha main_sha current_branch
   head_sha=$(git -C "$dir" rev-parse HEAD 2>/dev/null || true)
-  if [ -z "$head_sha" ]; then
-    return 0
-  fi
+  [ -n "$head_sha" ] || return 0
 
   git -C "$dir" fetch --quiet origin main || true
   main_sha=$(git -C "$dir" rev-parse origin/main 2>/dev/null || true)
-  if [ -z "$main_sha" ]; then
-    main_sha=$(git -C "$dir" rev-parse main 2>/dev/null || true)
-  fi
+  [ -n "$main_sha" ] || main_sha=$(git -C "$dir" rev-parse main 2>/dev/null || true)
   [ -n "$main_sha" ] || return 0
 
   if [ "$head_sha" = "$main_sha" ]; then
@@ -65,11 +148,61 @@ case "$OS" in
   *)      error "Unsupported platform: $OS"; exit 1 ;;
 esac
 
+PM="none"
+if [ "$PLATFORM" = "Linux" ]; then
+  if command -v dnf &>/dev/null;  then PM="dnf"
+  elif command -v apt-get &>/dev/null; then PM="apt"
+  fi
+fi
+
+echo "  Platform: $PLATFORM ($(uname -m)) [$PM]"
+echo "  App user: $APP_USER"
+echo "  Install:  $INSTALL_DIR"
+echo ""
+
+# ── 2. Fingerprint fast-exit (pipeline re-runs) ───────────────────────────
+# Skip every step when HEAD, .env, and this very script are unchanged
+# since the last successful run AND the services are healthy. Any of
+# those three changing invalidates the cache and forces a full run.
+
+FINGERPRINT_FILE=/var/lib/litellm-install.fingerprint
+
+compute_fingerprint() {
+  local sha env_hash script_hash
+  sha="$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || echo none)"
+  env_hash="$(md5sum "$INSTALL_DIR/.env" 2>/dev/null | awk '{print $1}')"
+  script_hash="$(md5sum "$0" 2>/dev/null | awk '{print $1}')"
+  echo "${sha}:${env_hash}:${script_hash}"
+}
+
+services_healthy() {
+  [ "$START_SERVICES" = 1 ] || return 0
+  as_user "cd '$INSTALL_DIR' && ./bin/litellmctl status proxy 2>/dev/null | grep -q running"   || return 1
+  as_user "cd '$INSTALL_DIR' && ./bin/litellmctl status gateway 2>/dev/null | grep -q running" || return 1
+  if [ "$WITH_CADDY" = 1 ]; then
+    systemctl is-active caddy.service >/dev/null 2>&1 || return 1
+  fi
+  return 0
+}
+
+if [ "$USE_FINGERPRINT" = 1 ] && [ -d "$INSTALL_DIR/.git" ] && [ -f "$INSTALL_DIR/.env" ]; then
+  CURRENT_PRINT="$(compute_fingerprint)"
+  if [ -f "$FINGERPRINT_FILE" ] && [ "$(cat "$FINGERPRINT_FILE" 2>/dev/null || true)" = "$CURRENT_PRINT" ] && services_healthy; then
+    ok "fingerprint unchanged (${CURRENT_PRINT%%:*:*:*}), services healthy — skipping all steps"
+    date -u +%FT%TZ > /var/log/user-data-done 2>/dev/null || true
+    exit 0
+  fi
+  info "fingerprint changed or services unhealthy — running full install"
+fi
+
+# ── 3. System packages ────────────────────────────────────────────────────
+
 if ! command -v git &>/dev/null; then
   error "git is required."
-  case "$PLATFORM" in
-    macOS) echo "  Install with: xcode-select --install" ;;
-    Linux) echo "  Install with: sudo apt install git" ;;
+  case "$PM" in
+    apt) echo "  Install with: sudo apt install git" ;;
+    dnf) echo "  Install with: sudo dnf install -y git" ;;
+    none) [ "$PLATFORM" = "macOS" ] && echo "  Install with: xcode-select --install" ;;
   esac
   exit 1
 fi
@@ -93,112 +226,69 @@ if PYTHON=$(detect_python); then
   ok "Python: $($PYTHON --version 2>&1)"
 else
   error "Python 3.9+ not found."
-  case "$PLATFORM" in
-    macOS) echo "  Install with: brew install python3" ;;
-    Linux) echo "  Install with: sudo apt install python3 python3-venv" ;;
-  esac
   exit 1
 fi
 
+# Linux-only prereqs install (apt / dnf)
 if [ "$PLATFORM" = "Linux" ]; then
-  if ! $PYTHON -c "import venv" 2>/dev/null; then
-    warn "python3-venv not found — installing ..."
-    sudo apt-get update -qq && sudo apt-get install -y -qq python3-venv
-    ok "python3-venv installed"
-  fi
-  if ! $PYTHON -c "import ensurepip" 2>/dev/null; then
-    warn "python3-pip/ensurepip not found — installing ..."
-    sudo apt-get update -qq && sudo apt-get install -y -qq python3-pip
-    ok "python3-pip installed"
-  fi
+  case "$PM" in
+    apt)
+      if ! $PYTHON -c "import venv"     2>/dev/null; then sudo apt-get update -qq && sudo apt-get install -y -qq python3-venv; fi
+      if ! $PYTHON -c "import ensurepip" 2>/dev/null; then sudo apt-get update -qq && sudo apt-get install -y -qq python3-pip;  fi
+      ;;
+    dnf)
+      # AL2023 ships python3; in pipeline mode we also want build tools +
+      # sqlite headers for pip-built wheels. --allowerasing handles the
+      # curl-minimal vs curl conflict.
+      if [ "$USE_FINGERPRINT" = 1 ] || [ "$WITH_GATEWAY" = 1 ] || [ "$WITH_NODE_GYP" = 1 ]; then
+        sudo dnf install -y --allowerasing \
+          git jq unzip \
+          python3-pip python3-devel \
+          gcc gcc-c++ make \
+          sqlite sqlite-devel \
+          golang
+      fi
+      ;;
+  esac
 fi
 
-echo "  Platform: $PLATFORM ($(uname -m))"
-echo ""
+# ── 4. Clone or update repo ───────────────────────────────────────────────
 
-# ── 2. Clone or update repo ───────────────────────────────────────────────
+clone_into_dir() {
+  local dir="$1" branch="${GITHUB_BRANCH:-main}"
+  # mkfs.ext4 leaves a lost+found behind; wipe anything non-git so the
+  # clone doesn't fail with "destination not empty".
+  find "$dir" -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} +
+  as_user "git clone --branch '$branch' '$REPO_URL' '$dir'"
+}
 
 if [ -d "$INSTALL_DIR" ]; then
   if [ -d "$INSTALL_DIR/.git" ]; then
     info "Existing installation found — updating ..."
-    git -C "$INSTALL_DIR" pull --ff-only 2>/dev/null && ok "Pulled latest" \
+    as_user "git -C '$INSTALL_DIR' pull --ff-only 2>/dev/null" && ok "Pulled latest" \
       || warn "Could not fast-forward (local changes?). Continuing with current version."
   else
-    # ~/.litellm exists but isn't our repo (e.g. litellm's own config dir).
-    # Back up user files, clone, then restore.
-    info "~/.litellm exists but is not a git repo — merging into litellmctl ..."
-
-    BACKUP_DIR=$(mktemp -d)
-    info "Backing up existing files to $BACKUP_DIR ..."
-
-    # Move everything except hidden git stuff
-    for f in "$INSTALL_DIR"/*; do
-      [ -e "$f" ] && mv "$f" "$BACKUP_DIR/" && ok "Backed up $(basename "$f")"
-    done
-    for f in "$INSTALL_DIR"/.[!.]* "$INSTALL_DIR"/..?*; do
-      [ -e "$f" ] || continue
-      local_name="$(basename "$f")"
-      [ "$local_name" = ".git" ] && continue
-      mv "$f" "$BACKUP_DIR/" && ok "Backed up $local_name"
-    done
-
-    rmdir "$INSTALL_DIR" 2>/dev/null || rm -rf "$INSTALL_DIR"
-
-    info "Cloning litellmctl ..."
-    git clone "$REPO_URL" "$INSTALL_DIR"
-    ok "Cloned"
-
-    # Restore user files (config, .env, auth tokens) without overwriting repo files
-    info "Restoring your files ..."
-    for f in "$BACKUP_DIR"/*; do
-      [ -e "$f" ] || continue
-      local_name="$(basename "$f")"
-      case "$local_name" in
-        venv|litellm|bin|logs|__pycache__) skip "Skipped $local_name (will be rebuilt)" ;;
-        *)
-          if [ -e "$INSTALL_DIR/$local_name" ]; then
-            # User file conflicts with a repo file — keep user's version
-            cp -a "$f" "$INSTALL_DIR/$local_name"
-            ok "Restored $local_name (kept your version)"
-          else
-            cp -a "$f" "$INSTALL_DIR/$local_name"
-            ok "Restored $local_name"
-          fi
-          ;;
-      esac
-    done
-    for f in "$BACKUP_DIR"/.[!.]* "$BACKUP_DIR"/..?*; do
-      [ -e "$f" ] || continue
-      local_name="$(basename "$f")"
-      case "$local_name" in
-        .git|.DS_Store) continue ;;
-        .env|.proxy-port|.proxy.pid)
-          cp -a "$f" "$INSTALL_DIR/$local_name"
-          ok "Restored $local_name"
-          ;;
-        *)
-          [ ! -e "$INSTALL_DIR/$local_name" ] && cp -a "$f" "$INSTALL_DIR/$local_name" \
-            && ok "Restored $local_name"
-          ;;
-      esac
-    done
-
-    info "Backup kept at: $BACKUP_DIR"
-    echo ""
+    info "$INSTALL_DIR exists without .git — cloning into it"
+    clone_into_dir "$INSTALL_DIR"
   fi
 else
   info "Cloning litellmctl ..."
-  git clone "$REPO_URL" "$INSTALL_DIR"
+  mkdir -p "$(dirname "$INSTALL_DIR")"
+  as_user "git clone '$REPO_URL' '$INSTALL_DIR'"
   ok "Cloned to $INSTALL_DIR"
 fi
 
-# ── 3. Initialize submodule ───────────────────────────────────────────────
+# Ensure the app user owns the install dir (pipeline mode runs as root)
+if [ "$(id -u)" -eq 0 ] && [ "$APP_USER" != "root" ]; then
+  chown -R "$APP_USER:$APP_USER" "$INSTALL_DIR"
+fi
+
+# ── 5. Initialize submodule ───────────────────────────────────────────────
 
 SUBMODULE_DIR="$INSTALL_DIR/litellm"
-
 if [ ! -f "$SUBMODULE_DIR/pyproject.toml" ]; then
   info "Initializing litellm submodule ..."
-  git -C "$INSTALL_DIR" submodule update --init --depth 1 litellm
+  as_user "git -C '$INSTALL_DIR' submodule update --init --depth 1 litellm"
   normalize_submodule_ref "$SUBMODULE_DIR"
   ok "Submodule ready"
 else
@@ -206,167 +296,260 @@ else
   ok "Submodule already initialized"
 fi
 
-# ── 4. Python virtualenv ─────────────────────────────────────────────────
+# ── 6. Python virtualenv ─────────────────────────────────────────────────
 
 if [ -d "$VENV_DIR" ]; then
   ok "Existing virtualenv found — reusing"
 else
   info "Creating virtualenv ..."
-  $PYTHON -m venv "$VENV_DIR"
+  as_user "$PYTHON -m venv '$VENV_DIR'"
   ok "Virtualenv created"
 fi
 
-# shellcheck disable=SC1091
-source "$VENV_DIR/bin/activate"
-
-# ── 5. Install litellm fork ──────────────────────────────────────────────
+# ── 7. Install litellm fork ──────────────────────────────────────────────
 
 info "Installing litellm[proxy] (editable) ..."
-pip install --upgrade pip --quiet 2>/dev/null
-pip install -e "$SUBMODULE_DIR[proxy]" --quiet 2>/dev/null
+as_user "'$VENV_DIR/bin/pip' install --upgrade pip --quiet 2>/dev/null"
+as_user "'$VENV_DIR/bin/pip' install -e '$SUBMODULE_DIR[proxy]' --quiet 2>/dev/null"
 ok "litellm installed"
 
-# ── 6. .env setup ─────────────────────────────────────────────────────────
+# ── 8. .env + sqlite-vec + shell completions ─────────────────────────────
 
-if [ ! -f "$INSTALL_DIR/.env" ]; then
-  if [ -f "$INSTALL_DIR/.env.example" ]; then
-    cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
-    # Auto-fill token dirs to the install directory
-    if command -v sed &>/dev/null; then
-      sed -i.bak "s|/path/to/.litellm|$INSTALL_DIR|g" "$INSTALL_DIR/.env" 2>/dev/null || true
-      rm -f "$INSTALL_DIR/.env.bak"
-    fi
-    ok "Created .env from template (edit to add your API keys)"
-  else
-    warn "No .env.example found — create .env manually"
-  fi
-else
-  ok ".env already exists — not modified"
+if [ ! -f "$INSTALL_DIR/.env" ] && [ -f "$INSTALL_DIR/.env.example" ]; then
+  cp "$INSTALL_DIR/.env.example" "$INSTALL_DIR/.env"
+  [ "$(id -u)" -eq 0 ] && chown "$APP_USER:$APP_USER" "$INSTALL_DIR/.env"
+  sed -i.bak "s|/path/to/.litellm|$INSTALL_DIR|g" "$INSTALL_DIR/.env" 2>/dev/null || true
+  rm -f "$INSTALL_DIR/.env.bak"
+  ok "Created .env from template"
 fi
 
-# Ensure LITELLM_LOCAL_MODEL_COST_MAP is set (uses fork's model map instead of upstream)
-if [ -f "$INSTALL_DIR/.env" ]; then
-  if ! grep -q "^LITELLM_LOCAL_MODEL_COST_MAP=" "$INSTALL_DIR/.env" 2>/dev/null; then
-    printf '\nLITELLM_LOCAL_MODEL_COST_MAP=true\n' >> "$INSTALL_DIR/.env"
-    ok "Added LITELLM_LOCAL_MODEL_COST_MAP=true to .env"
-  fi
+if [ -f "$INSTALL_DIR/.env" ] && ! grep -q "^LITELLM_LOCAL_MODEL_COST_MAP=" "$INSTALL_DIR/.env" 2>/dev/null; then
+  printf '\nLITELLM_LOCAL_MODEL_COST_MAP=true\n' >> "$INSTALL_DIR/.env"
+  ok "Added LITELLM_LOCAL_MODEL_COST_MAP=true to .env"
 fi
-
-# ── 7. Sync auth file paths in .env ──────────────────────────────────────
 
 info "Syncing auth file paths ..."
-"$INSTALL_DIR/bin/litellmctl" init-env 2>/dev/null || true
+as_user "'$INSTALL_DIR/bin/litellmctl' init-env 2>/dev/null || true"
 
-# ── 7b. Gateway SQLite DB + sqlite-vec extension ─────────────────────────
-#
-# The gateway stores all auth/session/usage data in a single SQLite file at
-# $INSTALL_DIR/gateway/gateway.db (created on first gateway start). This
-# step prepares the directory and tries to install the sqlite-vec extension
-# for future vector-search features. All failures here are non-fatal —
-# the gateway runs fine without sqlite-vec, it just can't do vec queries.
-
-GATEWAY_DB_DIR="$INSTALL_DIR/gateway"
-if [ -d "$GATEWAY_DB_DIR" ]; then
-  mkdir -p "$GATEWAY_DB_DIR"
-  ok "Gateway SQLite DB directory ready ($GATEWAY_DB_DIR/gateway.db will be created on first start)"
-fi
-
-install_sqlite_vec_macos() {
-  if ! command -v brew &>/dev/null; then
-    warn "Homebrew not found — skipping sqlite-vec install."
-    echo "  Install brew first (https://brew.sh) then rerun this installer,"
-    echo "  or build sqlite-vec from source: https://github.com/asg017/sqlite-vec"
-    return 0
-  fi
-  # Probe for an already-installed vec0 library in the usual brew locations
-  for p in /opt/homebrew/lib/vec0.dylib /usr/local/lib/vec0.dylib; do
-    if [ -f "$p" ]; then
-      ok "sqlite-vec already installed ($p)"
-      return 0
-    fi
-  done
-  info "Installing sqlite-vec via Homebrew (optional, for vector search) ..."
-  if brew install asg017/sqlite-vec/sqlite-vec 2>/dev/null; then
-    ok "sqlite-vec installed"
-  else
-    warn "sqlite-vec install via brew failed — vector features disabled (non-fatal)"
-    echo "  To install manually later: brew install asg017/sqlite-vec/sqlite-vec"
-  fi
-}
-
-install_sqlite_vec_linux() {
-  for p in /usr/lib/sqlite-vec/vec0.so /usr/local/lib/vec0.so; do
-    if [ -f "$p" ]; then
-      ok "sqlite-vec already installed ($p)"
-      return 0
-    fi
-  done
-  warn "sqlite-vec not found — vector search will be disabled (non-fatal)"
-  echo "  To enable vector features, build and install sqlite-vec manually:"
-  echo "    git clone https://github.com/asg017/sqlite-vec && cd sqlite-vec"
-  echo "    make loadable"
-  echo "    sudo cp dist/vec0.so /usr/local/lib/"
-  echo "  Then restart the gateway."
-}
+mkdir -p "$INSTALL_DIR/gateway"
+ok "Gateway SQLite DB dir ready"
 
 case "$PLATFORM" in
-  macOS) install_sqlite_vec_macos ;;
-  Linux) install_sqlite_vec_linux ;;
+  macOS)
+    if command -v brew &>/dev/null; then
+      if ! [ -f /opt/homebrew/lib/vec0.dylib ] && ! [ -f /usr/local/lib/vec0.dylib ]; then
+        brew install asg017/sqlite-vec/sqlite-vec 2>/dev/null && ok "sqlite-vec installed" \
+          || warn "sqlite-vec install via brew failed — non-fatal"
+      fi
+    fi
+    ;;
+  Linux)
+    if ! [ -f /usr/lib/sqlite-vec/vec0.so ] && ! [ -f /usr/local/lib/vec0.so ]; then
+      skip "sqlite-vec not installed (optional — vector features disabled)"
+    fi
+    ;;
 esac
 
-# ── 8. Shell completions ─────────────────────────────────────────────────
-
-SHELL_NAME="$(basename "${SHELL:-/bin/bash}")"
-case "$SHELL_NAME" in
-  zsh)  RC_FILE="$HOME/.zshrc" ;;
-  *)    RC_FILE="$HOME/.bashrc" ;;
-esac
-
-if grep -qF "alias litellmctl=" "$RC_FILE" 2>/dev/null; then
-  ok "Shell alias already configured in $RC_FILE"
-else
-  info "Setting up shell alias + tab completion ..."
-  if [ "$SHELL_NAME" = "zsh" ]; then
-    cat >> "$RC_FILE" <<'SHELL_BLOCK'
+# Shell completions (only when running as the target user, not root)
+if [ "$(id -u)" -ne 0 ]; then
+  SHELL_NAME="$(basename "${SHELL:-/bin/bash}")"
+  RC_FILE="$HOME/.bashrc"; [ "$SHELL_NAME" = "zsh" ] && RC_FILE="$HOME/.zshrc"
+  if ! grep -qF "alias litellmctl=" "$RC_FILE" 2>/dev/null; then
+    if [ "$SHELL_NAME" = "zsh" ]; then
+      cat >> "$RC_FILE" <<'SHELL_BLOCK'
 
 # LiteLLM CLI
 alias litellmctl="~/.litellm/bin/litellmctl"
 eval "$(~/.litellm/bin/litellmctl --zsh-completions)"
 SHELL_BLOCK
-  else
-    cat >> "$RC_FILE" <<'SHELL_BLOCK'
+    else
+      cat >> "$RC_FILE" <<'SHELL_BLOCK'
 
 # LiteLLM CLI
 alias litellmctl="~/.litellm/bin/litellmctl"
 eval "$(~/.litellm/bin/litellmctl --completions)"
 SHELL_BLOCK
+    fi
+    ok "Added litellmctl alias + completions to $RC_FILE"
   fi
-  ok "Added to $RC_FILE"
 fi
+
+# ═════════════════════════════════════════════════════════════════════════
+# PIPELINE EXTENSIONS — only run for flags explicitly passed (or --pipeline)
+# ═════════════════════════════════════════════════════════════════════════
+
+# ── Pipeline: 32 GB swap file (fallocate is instant on ext4/xfs) ──────────
+if [ "$WITH_SWAP" = 1 ] && [ "$PLATFORM" = "Linux" ]; then
+  if [ ! -f /swapfile ]; then
+    info "Creating ${SWAP_SIZE_GB} GB swap file ..."
+    sudo fallocate -l "${SWAP_SIZE_GB}G" /swapfile
+    sudo chmod 600 /swapfile
+    sudo mkswap /swapfile >/dev/null
+    sudo swapon /swapfile
+    grep -q '/swapfile' /etc/fstab || echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab >/dev/null
+    ok "Swap ready ($(free -h | awk '/^Swap:/ {print $2}'))"
+  else
+    skip "/swapfile already exists"
+  fi
+fi
+
+# ── Pipeline: format + mount EBS data volume at $INSTALL_DIR ─────────────
+if [ "$WITH_EBS_MOUNT" = 1 ] && [ "$PLATFORM" = "Linux" ]; then
+  DEV="${EBS_DEVICE:-/dev/nvme1n1}"
+  [ -b "$DEV" ] || DEV=/dev/xvdf
+  if [ -b "$DEV" ]; then
+    if ! sudo blkid "$DEV" >/dev/null 2>&1; then
+      info "Formatting $DEV as ext4 (LABEL=litellm-data) ..."
+      sudo mkfs.ext4 -L litellm-data "$DEV"
+    fi
+    sudo mkdir -p "$INSTALL_DIR"
+    grep -q 'LABEL=litellm-data' /etc/fstab || \
+      echo "LABEL=litellm-data ${INSTALL_DIR} ext4 defaults,nofail 0 2" | sudo tee -a /etc/fstab >/dev/null
+    mountpoint -q "$INSTALL_DIR" || sudo mount -a
+    sudo chown -R "$APP_USER:$APP_USER" "$INSTALL_DIR"
+    ok "EBS mounted at $INSTALL_DIR"
+  else
+    skip "no EBS device found — expected /dev/nvme1n1 or /dev/xvdf"
+  fi
+fi
+
+# ── Pipeline: Bun runtime ─────────────────────────────────────────────────
+if [ "$WITH_BUN" = 1 ]; then
+  if as_user "command -v bun >/dev/null"; then
+    skip "bun already installed"
+  else
+    info "Installing Bun ..."
+    as_user "curl -fsSL https://bun.sh/install | bash"
+    ok "bun installed"
+  fi
+fi
+
+# ── Pipeline: Claude Code CLI ─────────────────────────────────────────────
+if [ "$WITH_CLAUDE" = 1 ]; then
+  if as_user "command -v claude >/dev/null"; then
+    skip "claude already installed"
+  else
+    info "Installing Claude Code ..."
+    as_user "curl -fsSL https://claude.ai/install.sh | bash"
+    ok "claude installed"
+  fi
+fi
+
+# ── Pipeline: node-gyp (for the gateway's node-pty native addon) ─────────
+if [ "$WITH_NODE_GYP" = 1 ] && [ "$PLATFORM" = "Linux" ]; then
+  case "$PM" in
+    dnf) sudo dnf install -y --allowerasing nodejs npm ;;
+    apt) sudo apt-get install -y -qq nodejs npm ;;
+  esac
+  if ! command -v node-gyp >/dev/null 2>&1; then
+    info "Installing node-gyp globally ..."
+    sudo npm install -g node-gyp --silent
+    ok "node-gyp installed"
+  else
+    skip "node-gyp already installed"
+  fi
+fi
+
+# ── Pipeline: Caddy static binary + systemd unit ──────────────────────────
+if [ "$WITH_CADDY" = 1 ] && [ "$PLATFORM" = "Linux" ]; then
+  if ! command -v caddy >/dev/null 2>&1; then
+    info "Installing Caddy ${CADDY_VERSION} ..."
+    case "$(uname -m)" in
+      aarch64|arm64) CADDY_ARCH=arm64 ;;
+      x86_64|amd64)  CADDY_ARCH=amd64 ;;
+      *) error "unsupported arch $(uname -m) for Caddy"; exit 1 ;;
+    esac
+    curl -fsSL "https://github.com/caddyserver/caddy/releases/download/v${CADDY_VERSION}/caddy_${CADDY_VERSION}_linux_${CADDY_ARCH}.tar.gz" \
+      | sudo tar -C /usr/local/bin -xz caddy
+    sudo chmod +x /usr/local/bin/caddy
+    ok "caddy installed"
+  fi
+
+  CADDYFILE="$INSTALL_DIR/Caddyfile"
+  if [ ! -f "$CADDYFILE" ]; then
+    cat | sudo -u "$APP_USER" tee "$CADDYFILE" >/dev/null <<'CADDY'
+# Default Caddyfile — proxies all :80 traffic to the gateway.
+# Replace the `:80` block with `your.domain.com { reverse_proxy localhost:14041 }`
+# for automatic HTTPS, then: sudo systemctl reload caddy
+:80 {
+  reverse_proxy localhost:14041
+}
+CADDY
+  fi
+
+  sudo tee /etc/systemd/system/caddy.service >/dev/null <<UNIT
+[Unit]
+Description=Caddy reverse proxy
+After=network.target
+
+[Service]
+User=$APP_USER
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+ExecStart=/usr/local/bin/caddy run --config $CADDYFILE --adapter caddyfile
+ExecReload=/usr/local/bin/caddy reload --config $CADDYFILE --adapter caddyfile
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  sudo systemctl daemon-reload
+  sudo systemctl enable --now caddy.service
+  sudo systemctl reload caddy.service 2>/dev/null || sudo systemctl restart caddy.service
+  ok "caddy.service up"
+fi
+
+# ── Pipeline: litellmctl install --with-gateway ──────────────────────────
+if [ "$WITH_GATEWAY" = 1 ]; then
+  info "Installing gateway (bun install + frontend build) ..."
+  as_user "cd '$INSTALL_DIR' && ./bin/litellmctl install --with-gateway"
+  # Force node-pty's native build now that node-gyp is available
+  as_user "cd '$INSTALL_DIR/gateway' && bun install"
+fi
+
+# ── Pipeline: litellmctl install --with-protonmail + auto-auth ───────────
+if [ "$WITH_PROTONMAIL" = 1 ]; then
+  info "Installing hydroxide (ProtonMail SMTP bridge) ..."
+  as_user "cd '$INSTALL_DIR' && ./bin/litellmctl install --with-protonmail"
+  # Auto-auth if GATEWAY_PROTON_PASSWORD is in the app user's .env.
+  if as_user "grep -q '^GATEWAY_PROTON_PASSWORD=.' '$INSTALL_DIR/.env' 2>/dev/null"; then
+    info "Auto-authenticating hydroxide from .env creds ..."
+    as_user "cd '$INSTALL_DIR' && ./bin/litellmctl auth protonmail" || warn "hydroxide auto-auth returned non-zero (non-fatal)"
+  fi
+fi
+
+# ── Pipeline: start services ─────────────────────────────────────────────
+if [ "$START_SERVICES" = 1 ]; then
+  for svc in proxy gateway protonmail; do
+    as_user "cd '$INSTALL_DIR' && ./bin/litellmctl restart $svc" 2>/dev/null \
+      || as_user "cd '$INSTALL_DIR' && ./bin/litellmctl start $svc" \
+      || warn "could not start $svc (non-fatal)"
+  done
+  ok "services up"
+fi
+
+# ── Pipeline: write fingerprint + user-data breadcrumb ───────────────────
+if [ "$USE_FINGERPRINT" = 1 ] && [ -d "$INSTALL_DIR/.git" ] && [ -f "$INSTALL_DIR/.env" ]; then
+  sudo mkdir -p "$(dirname "$FINGERPRINT_FILE")" 2>/dev/null || true
+  compute_fingerprint | sudo tee "$FINGERPRINT_FILE" >/dev/null
+fi
+date -u +%FT%TZ | sudo tee /var/log/user-data-done >/dev/null 2>&1 || true
 
 # ── Done ──────────────────────────────────────────────────────────────────
 
 echo ""
-info "Installation complete!"
-echo ""
-echo "  Next steps:"
-echo ""
-echo "    1. Load the CLI into your current shell:"
-echo "       source $RC_FILE"
-echo ""
-echo "    2. Edit ~/.litellm/.env with your API keys:"
-echo "       \$EDITOR ~/.litellm/.env"
-echo ""
-echo "    3. Authenticate OAuth providers (any or all):"
-echo "       litellmctl auth gemini    # Google Gemini CLI"
-echo "       litellmctl auth chatgpt   # ChatGPT / Codex"
-echo "       litellmctl auth qwen      # Qwen Portal"
-echo "       litellmctl auth kimi      # Kimi Code"
-echo ""
-echo "    4. Start the proxy:"
-echo "       litellmctl start"
-echo ""
-echo "    5. (Optional) Set up additional services:"
-echo "       litellmctl install --with-searxng     # Privacy-respecting search server"
-echo "       litellmctl install --with-local       # Local embedding + transcription"
+if [ "$WITH_GATEWAY" = 1 ] || [ "$START_SERVICES" = 1 ]; then
+  info "Pipeline install complete."
+  echo "  Gateway: http://<public-ip>:14041"
+  echo "  Caddy:   http://<public-ip>/"
+  echo "  Logs:    journalctl --user -u litellm-gateway -f  (on the instance)"
+else
+  info "Installation complete!"
+  echo ""
+  echo "  Next steps:"
+  echo "    1. source $HOME/.bashrc   # (or .zshrc)"
+  echo "    2. Edit $INSTALL_DIR/.env with your API keys"
+  echo "    3. litellmctl wizard      # generate config.yaml"
+  echo "    4. litellmctl start       # start the proxy"
+fi
 echo ""
