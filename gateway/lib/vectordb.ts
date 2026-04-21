@@ -32,7 +32,10 @@ export interface RefOverlayEntry {
 }
 
 const COLLECTION_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
-const REF_ID_RE = /^[a-zA-Z0-9_:.\/-]{1,128}$/;
+// refId carries composite keys like `<codebaseId>#<branch>`, so '#' and '@'
+// must be allowed. Length raised to 384 to accommodate a 200-char codebaseId
+// plus a 128-char branch plus separator.
+const REF_ID_RE = /^[a-zA-Z0-9_:.#@\/-]{1,384}$/;
 const vecTableCache = new Set<number>();
 
 export function validateName(name: string): boolean {

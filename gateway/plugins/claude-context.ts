@@ -140,6 +140,9 @@ async function handleUpsertJob(req: Request): Promise<Response> {
   }
 
   const now = Date.now();
+  // Heartbeat-only writes (e.g. `{ total_files }` mid-sync) must not reset
+  // percentage. Distinguish "not sent" from "sent as 0" with a sentinel.
+  const pct = typeof percentage === "number" ? percentage : -1;
   db.prepare(`
     INSERT INTO plugin_indexing_jobs
       (codebase_id, branch, collection, status, percentage, head_commit,
@@ -148,7 +151,9 @@ async function handleUpsertJob(req: Request): Promise<Response> {
     ON CONFLICT(codebase_id, branch) DO UPDATE SET
       collection      = excluded.collection,
       status          = excluded.status,
-      percentage      = excluded.percentage,
+      percentage      = CASE WHEN excluded.percentage < 0
+                              THEN plugin_indexing_jobs.percentage
+                              ELSE excluded.percentage END,
       head_commit     = COALESCE(excluded.head_commit, plugin_indexing_jobs.head_commit),
       error           = excluded.error,
       total_files     = COALESCE(excluded.total_files, plugin_indexing_jobs.total_files),
@@ -160,7 +165,7 @@ async function handleUpsertJob(req: Request): Promise<Response> {
     branch,
     collection,
     status,
-    percentage ?? 0,
+    pct < 0 ? 0 : pct,
     head_commit ?? null,
     error ?? null,
     total_files ?? null,

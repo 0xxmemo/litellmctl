@@ -282,7 +282,7 @@ function listTrackedFiles(absPath: string): string[] {
   return out
     .split("\n")
     .filter((s) => s.length > 0)
-    .filter((f) => SUPPORTED_EXTENSIONS.has(path.extname(f)));
+    .filter((f) => SUPPORTED_EXTENSIONS.has(path.extname(f).toLowerCase()));
 }
 
 export interface Submodule {
@@ -509,8 +509,10 @@ export async function runSync(
   const changedChunks: PendingChunk[] = [];
   let reusedFromHash = 0;
   let indexedFiles = 0;
+  let lastHashHeartbeat = now();
 
-  for (const relPath of relFiles) {
+  for (let i = 0; i < relFiles.length; i++) {
+    const relPath = relFiles[i];
     const filePath = path.join(absPath, relPath);
     const ext = path.extname(relPath);
     let stat: fs.Stats;
@@ -538,24 +540,31 @@ export async function runSync(
       });
       reusedFromHash += priorEntry.chunkIds.length;
       indexedFiles++;
-      continue;
+    } else {
+      let content: string;
+      try {
+        content = fs.readFileSync(filePath, "utf-8");
+      } catch {
+        continue;
+      }
+      const chunks = chunkFile(relPath, content, ext);
+      if (chunks.length === 0) continue;
+      for (const c of chunks) changedChunks.push(c);
+      overlayEntries.push({
+        filePath: relPath,
+        chunkIds: chunks.map((c) => c.id),
+        fileHash,
+      });
+      indexedFiles++;
     }
 
-    let content: string;
-    try {
-      content = fs.readFileSync(filePath, "utf-8");
-    } catch {
-      continue;
+    // Heartbeat so the gateway's 120s staleness reaper doesn't flip this job
+    // to "failed" while we're grinding through a large repo's first sync.
+    const t = now();
+    if (t - lastHashHeartbeat >= PROGRESS_INTERVAL_MS) {
+      await updateJob({ indexed_files: indexedFiles });
+      lastHashHeartbeat = t;
     }
-    const chunks = chunkFile(relPath, content, ext);
-    if (chunks.length === 0) continue;
-    for (const c of chunks) changedChunks.push(c);
-    overlayEntries.push({
-      filePath: relPath,
-      chunkIds: chunks.map((c) => c.id),
-      fileHash,
-    });
-    indexedFiles++;
   }
 
   // Only the chunks from changed files need a dedupe round-trip. Unchanged
