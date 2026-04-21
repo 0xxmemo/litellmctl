@@ -22,7 +22,7 @@ import {
   hasCollection,
   insertDocuments,
   listExistingChunkIds,
-  searchVectors,
+  searchHybrid,
   setRefOverlay,
   type RefOverlayEntry,
   type VectorDocument,
@@ -408,9 +408,13 @@ async function handleSearch(req: Request): Promise<Response> {
   let anyIndexing = false;
   for (const ref of resolved) {
     if (ref.job.status === "indexing") anyIndexing = true;
-    const rows = searchVectors(
+    // Hybrid: vector KNN + BM25, fused via RRF. queryText goes to the
+    // FTS5 side, queryVector to the vec0 side; score is the RRF sum, so
+    // comparing across refs still works — same scale regardless of ref.
+    const rows = searchHybrid(
       ref.job.collection,
       queryVector,
+      query,
       perRefLimit,
       null,
       buildRefId(ref.codebaseId, ref.branch),
@@ -554,37 +558,6 @@ export const claudeContextPlugin: GatewayPlugin = {
     "/usage": { GET: handleUsage },
   },
   migrate: () => {
-    // One-time reset: the old schema keyed jobs on filesystem path and used
-    // path-based chunk IDs. The new schema is incompatible, so drop all
-    // claude-context state when the old table is detected.
-    const legacy = db
-      .prepare(
-        `SELECT 1 FROM sqlite_master
-          WHERE type = 'table' AND name = 'plugin_indexing_jobs'`,
-      )
-      .get() as unknown;
-    if (legacy) {
-      const cols = db
-        .prepare("PRAGMA table_info(plugin_indexing_jobs)")
-        .all() as Array<{ name: string }>;
-      const hasCodebaseId = cols.some((c) => c.name === "codebase_id");
-      if (!hasCodebaseId) {
-        const oldCollections = db
-          .prepare(
-            `SELECT name FROM plugin_collections WHERE name LIKE 'code_chunks_%'`,
-          )
-          .all() as Array<{ name: string }>;
-        for (const { name } of oldCollections) {
-          try {
-            dropCollection(name);
-          } catch (err) {
-            console.error(`[claude-context] failed to drop legacy collection ${name}:`, err);
-          }
-        }
-        db.run("DROP TABLE plugin_indexing_jobs");
-      }
-    }
-
     db.run(`
       CREATE TABLE IF NOT EXISTS plugin_indexing_jobs (
         codebase_id   TEXT NOT NULL,
@@ -606,14 +579,5 @@ export const claudeContextPlugin: GatewayPlugin = {
       `CREATE INDEX IF NOT EXISTS idx_plugin_indexing_jobs_collection
          ON plugin_indexing_jobs(collection)`,
     );
-
-    // Add file_hash column to plugin_ref_chunks so the client can skip
-    // re-reading unchanged files during incremental sync. Idempotent guard.
-    const refCols = db
-      .prepare("PRAGMA table_info(plugin_ref_chunks)")
-      .all() as Array<{ name: string }>;
-    if (refCols.length > 0 && !refCols.some((c) => c.name === "file_hash")) {
-      db.run("ALTER TABLE plugin_ref_chunks ADD COLUMN file_hash TEXT");
-    }
   },
 };

@@ -38,6 +38,67 @@ const COLLECTION_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 const REF_ID_RE = /^[a-zA-Z0-9_:.#@\/-]{1,384}$/;
 const vecTableCache = new Set<number>();
 
+// ── FTS5 lexical index ──────────────────────────────────────────────────────
+//
+// External-content table over plugin_chunks: no duplication of content bytes,
+// triggers keep the inverted index in sync with the base table. Enables the
+// BM25 half of hybrid search (see searchHybrid).
+let ftsInitialized = false;
+
+function ensureFts(): void {
+  if (ftsInitialized) return;
+
+  db.run(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS plugin_chunks_fts USING fts5(
+      content,
+      relative_path,
+      content='plugin_chunks',
+      content_rowid='rowid',
+      tokenize='porter unicode61'
+    )
+  `);
+
+  db.run(`
+    CREATE TRIGGER IF NOT EXISTS plugin_chunks_fts_ai
+    AFTER INSERT ON plugin_chunks BEGIN
+      INSERT INTO plugin_chunks_fts(rowid, content, relative_path)
+      VALUES (new.rowid, new.content, new.relative_path);
+    END
+  `);
+  db.run(`
+    CREATE TRIGGER IF NOT EXISTS plugin_chunks_fts_ad
+    AFTER DELETE ON plugin_chunks BEGIN
+      INSERT INTO plugin_chunks_fts(plugin_chunks_fts, rowid, content, relative_path)
+      VALUES ('delete', old.rowid, old.content, old.relative_path);
+    END
+  `);
+  db.run(`
+    CREATE TRIGGER IF NOT EXISTS plugin_chunks_fts_au
+    AFTER UPDATE ON plugin_chunks BEGIN
+      INSERT INTO plugin_chunks_fts(plugin_chunks_fts, rowid, content, relative_path)
+      VALUES ('delete', old.rowid, old.content, old.relative_path);
+      INSERT INTO plugin_chunks_fts(rowid, content, relative_path)
+      VALUES (new.rowid, new.content, new.relative_path);
+    END
+  `);
+
+  // Backfill once on first boot after this migration lands. The triggers
+  // above only fire on writes made AFTER the table exists, so any rows
+  // already in plugin_chunks are invisible to FTS until we seed them.
+  const ftsCount = db.prepare("SELECT COUNT(*) AS n FROM plugin_chunks_fts").get() as { n: number };
+  if (ftsCount.n === 0) {
+    const baseCount = db.prepare("SELECT COUNT(*) AS n FROM plugin_chunks").get() as { n: number };
+    if (baseCount.n > 0) {
+      db.run(`
+        INSERT INTO plugin_chunks_fts(rowid, content, relative_path)
+        SELECT rowid, content, relative_path FROM plugin_chunks
+      `);
+    }
+  }
+
+  ftsInitialized = true;
+}
+
 export function validateName(name: string): boolean {
   return COLLECTION_NAME_RE.test(name);
 }
@@ -95,6 +156,7 @@ export function createCollection(
   }
 
   ensureVecTable(dimension);
+  ensureFts();
   db.prepare(
     `INSERT INTO plugin_collections (name, dimension, created_at) VALUES (?, ?, ?)`,
   ).run(name, dimension, Date.now());
@@ -179,6 +241,7 @@ export function insertDocuments(
   }
 
   ensureVecTable(coll.dimension);
+  ensureFts();
   const vecTable = vecTableName(coll.dimension);
 
   const upsertChunk = db.prepare(
@@ -517,6 +580,178 @@ export function searchVectors(
     if (results.length >= k) break;
   }
   return results;
+}
+
+// ── Hybrid search (vector + BM25, RRF fusion) ──────────────────────────────
+//
+// Runs the vector KNN and an FTS5 BM25 query in parallel-style (one after the
+// other, SQLite is serial), then fuses the two ranked lists with Reciprocal
+// Rank Fusion: score = sum over lists of 1/(RRF_K + rank_in_list). Docs that
+// appear in both lists win; docs that appear in only one still compete.
+//
+// Recall benefit: literal-keyword misses from the embedding model (e.g. the
+// "heartbeat" / "staleness reaper" class of query) get rescued by BM25, while
+// concept-only queries ("prevent users from seeing each other's data") stay
+// carried by the vector side.
+
+const RRF_K = 60;
+
+function tokenizeForFts(query: string): string {
+  // FTS5's default tokenizer treats spaces as AND, special chars (quotes,
+  // parens, colons, hyphens) trigger its mini-query DSL. Extract bare
+  // alphanum/underscore tokens and OR them together, each quoted, so arbitrary
+  // user input can't break the parse.
+  const tokens = query.match(/[A-Za-z0-9_]+/g) ?? [];
+  if (tokens.length === 0) return "";
+  // Deduplicate and cap — very long queries produce long FTS expressions.
+  const uniq: string[] = [];
+  const seen = new Set<string>();
+  for (const t of tokens) {
+    if (t.length < 2) continue; // ignore single-char tokens — pure noise
+    const lower = t.toLowerCase();
+    if (seen.has(lower)) continue;
+    seen.add(lower);
+    uniq.push(t);
+    if (uniq.length >= 32) break;
+  }
+  return uniq.map((t) => `"${t}"`).join(" OR ");
+}
+
+function ftsSearch(
+  collection: string,
+  query: string,
+  topK: number,
+): Array<{ rowid: number; score: number }> {
+  const expr = tokenizeForFts(query);
+  if (!expr) return [];
+  // bm25() returns more negative for better matches; invert to a positive
+  // similarity so downstream fusion is monotonic with "higher is better".
+  try {
+    const rows = db
+      .prepare(
+        `SELECT pc.rowid AS rowid, bm25(plugin_chunks_fts) AS bm25_score
+           FROM plugin_chunks_fts fts
+           JOIN plugin_chunks pc ON pc.rowid = fts.rowid
+          WHERE fts MATCH ? AND pc.collection = ?
+          ORDER BY bm25(plugin_chunks_fts)
+          LIMIT ?`,
+      )
+      .all(expr, collection, topK) as { rowid: number; bm25_score: number }[];
+    return rows.map((r) => ({ rowid: r.rowid, score: -r.bm25_score }));
+  } catch {
+    // Malformed FTS expression (shouldn't happen after tokenizeForFts but be
+    // defensive — FTS5 can still reject things like stopword-only queries).
+    return [];
+  }
+}
+
+export function searchHybrid(
+  collection: string,
+  queryVector: number[],
+  queryText: string,
+  topK: number,
+  filterExpr: string | null,
+  refId: string | string[] | null = null,
+): VectorSearchResult[] {
+  requireVec();
+  ensureFts();
+  if (!validateName(collection)) throw new Error("Invalid collection name");
+
+  const k = Math.max(1, Math.min(200, Math.floor(topK) || 10));
+  // Overfetch both sides before fusion — RRF needs headroom to bring up
+  // items ranked lower on one list but higher on the other.
+  const perListK = Math.min(200, Math.max(k * 4, 20));
+
+  // Vector side: reuse searchVectors for ref/filter handling. Request more
+  // results than k so fusion has candidates.
+  const vecHits = searchVectors(collection, queryVector, perListK, filterExpr, refId);
+
+  // BM25 side: we have to apply the same filter + ref logic by hand because
+  // searchVectors owns that. Do it in two passes: first get BM25-ranked rowids,
+  // then narrow by filter/ref.
+  const ftsHits = ftsSearch(collection, queryText, perListK);
+
+  const refIds: string[] | null = refId === null
+    ? null
+    : Array.isArray(refId)
+      ? refId
+      : [refId];
+
+  // Materialize BM25 hits into VectorSearchResult shape with filter + ref
+  // gating applied. We skip this altogether when FTS returned nothing.
+  let ftsResults: VectorSearchResult[] = [];
+  if (ftsHits.length > 0) {
+    const rowIds = ftsHits.map((h) => h.rowid);
+    const placeholders = rowIds.map(() => "?").join(",");
+    const parsed = filterExpr ? parseFilterExpr(filterExpr) : null;
+    let sql = `SELECT * FROM plugin_chunks WHERE rowid IN (${placeholders}) AND collection = ?`;
+    const args: (string | number)[] = [...rowIds, collection];
+    if (parsed && parsed.values.length > 0) {
+      sql += ` AND ${parsed.column} IN (${parsed.values.map(() => "?").join(",")})`;
+      args.push(...parsed.values);
+    } else if (parsed && parsed.values.length === 0) {
+      ftsResults = [];
+    }
+    if (!parsed || parsed.values.length > 0) {
+      const chunkRows = db.prepare(sql).all(...args) as Record<string, unknown>[];
+      const byRowId = new Map<number, Record<string, unknown>>();
+      for (const r of chunkRows) byRowId.set(r.rowid as number, r);
+
+      let allowedChunkIds: Set<string> | null = null;
+      if (refIds !== null) {
+        if (refIds.length === 0) {
+          ftsResults = [];
+        } else {
+          const chunkIds = chunkRows.map((r) => r.chunk_id as string).filter(Boolean);
+          if (chunkIds.length > 0) {
+            allowedChunkIds = new Set();
+            const CAP = 800;
+            const refPhs = refIds.map(() => "?").join(",");
+            for (let i = 0; i < chunkIds.length; i += CAP) {
+              const slice = chunkIds.slice(i, i + CAP);
+              const phs = slice.map(() => "?").join(",");
+              const rows = db
+                .prepare(
+                  `SELECT DISTINCT chunk_id FROM plugin_ref_chunks
+                    WHERE collection = ? AND ref_id IN (${refPhs}) AND chunk_id IN (${phs})`,
+                )
+                .all(collection, ...refIds, ...slice) as { chunk_id: string }[];
+              for (const r of rows) allowedChunkIds.add(r.chunk_id);
+            }
+          }
+        }
+      }
+
+      for (const hit of ftsHits) {
+        const chunk = byRowId.get(hit.rowid);
+        if (!chunk) continue;
+        if (allowedChunkIds && !allowedChunkIds.has(chunk.chunk_id as string)) continue;
+        ftsResults.push({ document: rowToDocument(chunk), score: hit.score });
+      }
+    }
+  }
+
+  // ── RRF fusion ────────────────────────────────────────────────────────────
+  // Key each candidate by chunk_id (stable across rowid changes from upserts).
+  const fused = new Map<string, { doc: VectorDocument; rrf: number; vecScore: number; ftsScore: number }>();
+
+  vecHits.forEach((hit, i) => {
+    const id = hit.document.id;
+    const entry = fused.get(id) ?? { doc: hit.document, rrf: 0, vecScore: 0, ftsScore: 0 };
+    entry.rrf += 1 / (RRF_K + i + 1);
+    entry.vecScore = Math.max(entry.vecScore, hit.score);
+    fused.set(id, entry);
+  });
+  ftsResults.forEach((hit, i) => {
+    const id = hit.document.id;
+    const entry = fused.get(id) ?? { doc: hit.document, rrf: 0, vecScore: 0, ftsScore: 0 };
+    entry.rrf += 1 / (RRF_K + i + 1);
+    entry.ftsScore = Math.max(entry.ftsScore, hit.score);
+    fused.set(id, entry);
+  });
+
+  const ordered = [...fused.values()].sort((a, b) => b.rrf - a.rrf).slice(0, k);
+  return ordered.map((e) => ({ document: e.doc, score: e.rrf }));
 }
 
 function rowToDocument(row: Record<string, unknown>): VectorDocument {

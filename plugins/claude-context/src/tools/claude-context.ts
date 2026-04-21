@@ -28,6 +28,14 @@ const EXISTS_BATCH_SIZE = 800;
 const PROGRESS_INTERVAL_MS = 2000;
 const MAX_FILE_BYTES = 512 * 1024; // skip files >512 KB
 
+// Prefix the embedded text with the file path so the embedder picks up
+// location signal ("this lives under gateway/plugins/") even when the chunk
+// body doesn't mention it. The raw content is still what's stored in the DB
+// and returned in search results — only the embedding input is enriched.
+function buildEmbedText(relPath: string, content: string): string {
+  return `// file: ${relPath}\n\n${content}`;
+}
+
 const SUPPORTED_EXTENSIONS = new Set([
   ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
   ".py", ".go", ".rs", ".java", ".cs",
@@ -602,12 +610,17 @@ export async function runSync(
     percentage: computePct(0),
   });
 
-  // Embed + upload only the missing chunks.
+  // Embed + upload only the missing chunks. We feed the embedder a path-
+  // prefixed version of the chunk (see buildEmbedText) but store the raw
+  // content — the server never sees the enriched string.
   let embedded = 0;
   let lastProgress = now();
   for (let i = 0; i < missing.length; i += EMBED_BATCH_SIZE) {
     const batch = missing.slice(i, i + EMBED_BATCH_SIZE);
-    const vectors = await embedBatch(config, batch.map((c) => c.content));
+    const vectors = await embedBatch(
+      config,
+      batch.map((c) => buildEmbedText(c.relativePath, c.content)),
+    );
     const docs = batch.map((c, idx) => ({
       id: c.id,
       vector: vectors[idx],

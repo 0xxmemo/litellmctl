@@ -146,6 +146,7 @@ export async function connectDB(): Promise<void> {
       file_path TEXT NOT NULL,
       chunk_id TEXT NOT NULL,
       updated_at INTEGER NOT NULL,
+      file_hash TEXT,
       PRIMARY KEY (collection, ref_id, file_path, chunk_id)
     );
     CREATE INDEX IF NOT EXISTS idx_ref_chunks_ref
@@ -168,39 +169,6 @@ export async function connectDB(): Promise<void> {
     );
     CREATE INDEX IF NOT EXISTS idx_team_members_email ON team_members(email);
   `;
-
-  // One-shot cleanup of pre-v2 per-tenant rows. Detect via the legacy
-  // `api_key_hash` column; drop both plugin_* tables + all vec partitions so
-  // the fresh schema can take over cleanly. The data was barely used and is
-  // cheaper to re-index than to migrate.
-  const legacy = db
-    .prepare("PRAGMA table_info(plugin_chunks)")
-    .all() as { name: string }[];
-  if (legacy.some((c) => c.name === "api_key_hash")) {
-    console.log("[db] Dropping legacy per-tenant plugin_* tables (pre-v2 schema)");
-    db.run("DROP TABLE IF EXISTS plugin_chunks");
-    db.run("DROP TABLE IF EXISTS plugin_collections");
-    const vecTables = db
-      .prepare(
-        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'plugin_chunks_vec_%'",
-      )
-      .all() as { name: string }[];
-    for (const t of vecTables) {
-      try {
-        db.run(`DROP TABLE IF EXISTS ${t.name}`);
-      } catch (err) {
-        // Machines without sqlite-vec installed can't drop a vec0 virtual
-        // table cleanly. Fall back to deleting the sqlite_master row so the
-        // next boot (with vec0 loaded) or a manual VACUUM reclaims the
-        // storage. This keeps startup resilient instead of crashing the
-        // process with an uncaught SQLiteError.
-        console.warn(`[db] could not DROP ${t.name} (${errorMessage(err)}); removing from sqlite_master`);
-        db.run("PRAGMA writable_schema=ON;");
-        db.run("DELETE FROM sqlite_master WHERE name=?", [t.name]);
-        db.run("PRAGMA writable_schema=OFF;");
-      }
-    }
-  }
 
   for (const stmt of schema.split(";")) {
     const trimmed = stmt.trim();
