@@ -3,11 +3,11 @@ import ReactDOM from 'react-dom'
 import { ChevronDown, Search, Loader2 } from 'lucide-react'
 import {
   NormalizedModel,
-  type ExtendedModel,
   formatProviderName,
   getProviderColor,
   detectIsStub,
 } from '@lib/models'
+import type { ExtendedModel } from '@lib/models'
 import {
   useExtendedModels,
   getStoredModel,

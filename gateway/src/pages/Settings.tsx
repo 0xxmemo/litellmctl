@@ -1,9 +1,10 @@
-import { useAuth } from '@/hooks/useAuth'
+import { useAuth, useLogout } from '@/hooks/useAuth'
 import { useModelOverrides, useSaveModelOverrides, useTierAliases, useSaveProfile } from '@/hooks/useSettings'
 import { SettingsPanel } from '@/components/SettingsPanel'
 
 export function Settings() {
   const auth = useAuth()
+  const logout = useLogout()
   const modelOverrides = useModelOverrides()
   const tierAliases = useTierAliases()
   const saveModelOverrides = useSaveModelOverrides()
@@ -12,6 +13,7 @@ export function Settings() {
   return (
     <SettingsPanel
       auth={auth}
+      logout={logout}
       modelOverrides={modelOverrides}
       tierAliases={tierAliases}
       saveModelOverrides={saveModelOverrides}

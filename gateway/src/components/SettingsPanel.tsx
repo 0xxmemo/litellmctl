@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { cn, errorMessage } from '@/lib/utils'
 import { ModelSelector } from '@/components/ModelSelector'
-import type { UseAuthReturn } from '@/hooks/useAuth'
+import type { UseAuthReturn, UseLogoutReturn } from '@/hooks/useAuth'
 import type { UseModelOverridesReturn, UseTierAliasesReturn, UseSaveModelOverridesReturn, UseSaveProfileReturn } from '@/hooks/useSettings'
 import {
   User,
@@ -24,20 +24,21 @@ const ROLE_BADGE_VARIANT: Record<string, 'destructive' | 'default' | 'secondary'
 
 interface SettingsPanelProps {
   auth: UseAuthReturn
+  logout: UseLogoutReturn
   modelOverrides: UseModelOverridesReturn
   tierAliases: UseTierAliasesReturn
   saveModelOverrides: UseSaveModelOverridesReturn
   saveProfile: UseSaveProfileReturn
 }
 
-export function SettingsPanel({ auth, modelOverrides, tierAliases, saveModelOverrides, saveProfile }: SettingsPanelProps) {
+export function SettingsPanel({ auth, logout, modelOverrides, tierAliases, saveModelOverrides, saveProfile }: SettingsPanelProps) {
   const { user, loading } = auth
   const { data: fetchedOverrides, isLoading: loadingOverrides } = modelOverrides
   const { data: tierAliasMap, isLoading: aliasesLoading } = tierAliases
   const saveOverridesMutation = saveModelOverrides
   const saveProfileMutation = saveProfile
+  const logoutMutation = logout
 
-  const [loggingOut, setLoggingOut] = useState(false)
   const [message, setMessage] = useState<{ type: 'success' | 'error', text: string } | null>(null)
   const [overridesMessage, setOverridesMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
 
@@ -62,15 +63,8 @@ export function SettingsPanel({ auth, modelOverrides, tierAliases, saveModelOver
     }
   }, [user?.email, user?.name, user?.company])
 
-  const handleLogout = async () => {
-    setLoggingOut(true)
-    try {
-      await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
-    } catch {
-      // best-effort
-    } finally {
-      window.location.href = '/'
-    }
+  const handleLogout = () => {
+    logoutMutation.mutate()
   }
 
   // Theme state with localStorage persistence
@@ -191,10 +185,10 @@ export function SettingsPanel({ auth, modelOverrides, tierAliases, saveModelOver
                 variant="outline"
                 size="sm"
                 onClick={handleLogout}
-                disabled={loggingOut}
+                disabled={logoutMutation.isPending}
                 className="flex items-center gap-1.5"
               >
-                {loggingOut ? (
+                {logoutMutation.isPending ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
                   <LogOut className="h-4 w-4" />
