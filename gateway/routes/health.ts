@@ -49,7 +49,7 @@ async function healthHandler() {
   const [search, embedding, transcription, proton] = await Promise.all([
     httpProbe(`${searxngUrl.replace(/\/$/, "")}/`),
     httpProbe(`${embeddingUrl.replace(/\/$/, "")}/api/tags`),
-    httpProbe(`${transcriptionUrl.replace(/\/v1\/?$/, "").replace(/\/$/, "")}/api/health`),
+    httpProbe(`${transcriptionUrl.replace(/\/v1\/?$/, "").replace(/\/$/, "")}/health`),
     tcpProbe(protonHost, protonPort),
   ]);
   const database = dbProbe();
