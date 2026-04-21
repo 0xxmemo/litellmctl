@@ -302,22 +302,6 @@ export function ApiKeys() {
                       <TableRow key={keyId}>
                         <TableCell>
                           <div className="font-medium">{keyName}</div>
-                          <div className="flex items-center gap-1 mt-1">
-                            <code className="text-xs text-muted-foreground font-mono">{keyId}</code>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-5 w-5"
-                              onClick={() => handleCopy(keyId, keyId)}
-                              title="Copy ID"
-                            >
-                              {copiedId === keyId ? (
-                                <Copy className="h-3 w-3 text-ui-success-fg" />
-                              ) : (
-                                <Copy className="h-3 w-3 text-muted-foreground" />
-                              )}
-                            </Button>
-                          </div>
                         </TableCell>
                         <TableCell>
                           {createdDate ? <PrettyDate date={createdDate} format="relative" size="sm" /> : '—'}
