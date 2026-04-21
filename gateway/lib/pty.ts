@@ -51,18 +51,39 @@ export function consoleEnabled(): boolean {
   return loadPty() !== null;
 }
 
+/**
+ * Project root — the repo directory that contains `bin/`, `install.sh`,
+ * `.env`, etc. The gateway process runs with cwd=<root>/gateway, so the
+ * parent dir is the right place to drop the admin.
+ *   Docker: /app
+ *   EC2:    /home/ec2-user/.litellm
+ *   Laptop: ~/.litellm
+ * All of them satisfy new URL("../..", import.meta.url).
+ */
+const PROJECT_ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
+
 export function spawnConsole(cols = 80, rows = 24): PtyHandle {
   const pty = loadPty();
   if (!pty) throw new Error("node-pty not available");
 
   const shell = process.env.SHELL || "/bin/bash";
-  const cwd = process.env.GATEWAY_DATA_DIR || "/app";
+  // Prefer GATEWAY_DATA_DIR if the operator pointed us somewhere; else
+  // the resolved project root; absolute last resort is $HOME then /tmp.
+  const cwd = process.env.GATEWAY_DATA_DIR
+    || PROJECT_ROOT
+    || process.env.HOME
+    || "/tmp";
   const env = {
     ...process.env,
     TERM: "xterm-256color",
     PATH: [
       "/opt/venv/bin",
+      `${PROJECT_ROOT}/venv/bin`,
+      `${PROJECT_ROOT}/bin`,
+      process.env.HOME ? `${process.env.HOME}/.local/bin` : "",
+      process.env.HOME ? `${process.env.HOME}/.bun/bin` : "",
       "/root/.bun/bin",
+      "/root/.local/bin",
       "/usr/local/bin",
       "/usr/bin",
       "/bin",
