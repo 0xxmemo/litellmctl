@@ -115,10 +115,13 @@ export function spawnConsole(cols = 80, rows = 24): PtyHandle {
     ].filter(Boolean).join(":"),
   };
 
-  // `-i -l` = interactive login shell. Without `-i`, bash that detects a
-  // pipe-like stdin (some systemd/containerd configurations) runs the
-  // profile and exits — which is exactly the "[process exited: 0]" bug.
-  const proc = pty.spawn(shell, ["-i", "-l"], {
+  // Under Bun+node-pty on Linux, the kernel delivers a spurious SIGHUP to
+  // the pty child immediately after spawn — bash exits with code=0 signal=1
+  // before ever showing a prompt. Workaround: spawn a thin wrapper bash
+  // that sets `trap '' HUP` to inherit SIG_IGN across `exec`, then exec
+  // into the real interactive login shell. The exec'd bash inherits the
+  // ignore-HUP disposition and survives the bogus signal.
+  const proc = pty.spawn(shell, ["-c", "trap '' HUP; exec /bin/bash -il"], {
     name: "xterm-256color",
     cols,
     rows,
