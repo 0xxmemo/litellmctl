@@ -48,6 +48,20 @@ Parameters:
     MinValue: 0
     MaxValue: 128
 
+  RootVolumeSizeGb:
+    Type: Number
+    Default: 80
+    MinValue: 40
+    MaxValue: 500
+    Description: >
+      Intended root EBS volume size (GB). Holds OS + /swapfile + docker
+      images + ollama/whisper models. 40 GB is NOT enough once --pipeline
+      pulls embedding/transcription models (ollama nomic ≈ 1.2 GB, whisper
+      large-v3-turbo ≈ 1.5 GB) on top of a 32 GB /swapfile — first run
+      fills root to 100% and wedges the SSM agent. Currently not wired to
+      the Instance resource (see BlockDeviceMappings comment below) — grow
+      the live volume with `aws ec2 modify-volume --size 80` then reboot.
+
   AdminEmails:
     Type: String
     Default: ""
@@ -196,9 +210,23 @@ Resources:
       IamInstanceProfile: !Ref InstanceProfile
       KeyName: !If [HasSshKey, !Ref SshKeyName, !Ref "AWS::NoValue"]
       SecurityGroupIds: [!Ref Sg]
+      # NOTE: the root volume size is deliberately hardcoded at 40 GB here
+      # even though RootVolumeSizeGb defaults to 80. Reason: the data volume
+      # below is declared in the same BlockDeviceMappings block, and CFN
+      # treats any BDM change as Immutable — bumping VolumeSize would force
+      # the Instance to be replaced, which would spin up a *fresh* 120 GB
+      # data volume and orphan the old one (with all .env + sqlite state).
+      # Until the data volume is refactored into a separate AWS::EC2::Volume
+      # + AWS::EC2::VolumeAttachment (so it survives instance replacement),
+      # the root is grown out-of-band via `aws ec2 modify-volume` + reboot.
+      # Fresh stacks start at 40 GB and should be bumped manually after
+      # creation until the refactor lands.
       BlockDeviceMappings:
         - DeviceName: /dev/xvda
-          Ebs: { VolumeType: gp3, VolumeSize: 40, DeleteOnTermination: true }   # room for apt + swap
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 40
+            DeleteOnTermination: true
         - DeviceName: /dev/xvdf
           Ebs:
             VolumeType: gp3
