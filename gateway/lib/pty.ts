@@ -116,12 +116,22 @@ export function spawnConsole(cols = 80, rows = 24): PtyHandle {
   };
 
   // Under Bun+node-pty on Linux, the kernel delivers a spurious SIGHUP to
-  // the pty child immediately after spawn — bash exits with code=0 signal=1
-  // before ever showing a prompt. Workaround: spawn a thin wrapper bash
-  // that sets `trap '' HUP` to inherit SIG_IGN across `exec`, then exec
-  // into the real interactive login shell. The exec'd bash inherits the
-  // ignore-HUP disposition and survives the bogus signal.
-  const proc = pty.spawn(shell, ["-c", "trap '' HUP; exec /bin/bash -il"], {
+  // the pty child before bash can install its own signal handlers — the
+  // shell dies with exitCode=0 signal=1 before ever printing a prompt.
+  //
+  // A `bash -c "trap '' HUP; exec bash -il"` wrapper is NOT sufficient:
+  // the HUP can arrive before the `trap` builtin executes. Python's
+  // signal.signal(SIGHUP, SIG_IGN) runs as a direct syscall at startup,
+  // and SIG_IGN is inherited across exec at the kernel level, so the
+  // follow-up interactive bash starts with HUP already ignored.
+  const proc = pty.spawn("/usr/bin/python3", [
+    "-c",
+    [
+      "import os, signal",
+      "signal.signal(signal.SIGHUP, signal.SIG_IGN)",
+      "os.execvp('/bin/bash', ['/bin/bash', '-il'])",
+    ].join("; "),
+  ], {
     name: "xterm-256color",
     cols,
     rows,
