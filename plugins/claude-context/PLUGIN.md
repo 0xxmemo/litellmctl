@@ -24,7 +24,7 @@ API_KEY=__API_KEY__
 
 Embedding model and dimensions are fixed by the plugin (`local/nomic-embed-text` @ 512-d Matryoshka) — not configurable per install.
 
-The MCP server is registered in `~/.claude/settings.json` under `mcpServers.claude-context` and runs via `bun run /Users/anon/.litellm/plugins/claude-context/src/index.ts`.
+The MCP server is registered in `~/.claude.json` under top-level `mcpServers.claude-context` (user scope) via `claude mcp add-json -s user`, and runs via `bun run <plugin-src>/src/index.ts`. The `SessionStart` + `UserPromptSubmit` hooks are registered in `~/.claude/settings.json` — they shell out to the plugin's CLI subcommands because Claude Code's hook runner can't speak MCP stdio.
 
 ## Environment
 
@@ -43,4 +43,4 @@ The MCP server is registered in `~/.claude/settings.json` under `mcpServers.clau
 litellmctl plugins uninstall claude-context
 ```
 
-Removes the `mcpServers.claude-context` entry and the plugin directory under `~/.claude/plugins/`. Local vector data in the gateway DB can be removed with `clear_index` before uninstalling, or left intact.
+Removes the `mcpServers.claude-context` entry from `~/.claude.json`, the SessionStart/UserPromptSubmit hooks from `~/.claude/settings.json`, and the plugin directory under `~/.claude/plugins/`. Local vector data in the gateway DB can be removed with `clear_index` before uninstalling, or left intact.

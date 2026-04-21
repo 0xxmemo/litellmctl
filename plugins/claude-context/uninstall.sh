@@ -1,14 +1,31 @@
 #!/usr/bin/env bash
-# claude-context plugin uninstall — removes the MCP entry from settings.json.
+# claude-context plugin uninstall.
+#   1. MCP server   → removed from ~/.claude.json via `claude mcp remove`
+#   2. Hooks        → stripped from ~/.claude/settings.json
+#   3. Plugin dir   → deleted
 set -euo pipefail
 
 SETTINGS_DIR="${SETTINGS_DIR:-$HOME/.claude}"
 PLUGIN_DIR="${PLUGIN_DIR:-$SETTINGS_DIR/plugins/claude-context}"
 SETTINGS_FILE="${SETTINGS_DIR}/settings.json"
 
+for bin in claude python3; do
+    if ! command -v "$bin" >/dev/null 2>&1; then
+        echo "Error: '$bin' is required but not found on PATH." >&2
+        exit 1
+    fi
+done
+
+# --- Remove MCP server registration ---
+if claude mcp remove -s user claude-context >/dev/null 2>&1; then
+    echo "  Removed MCP server via \`claude mcp remove\`"
+else
+    echo "  MCP server not registered (nothing to remove)"
+fi
+
+# --- Strip hooks from settings.json ---
 if [ -f "$SETTINGS_FILE" ]; then
-    if command -v python3 >/dev/null 2>&1; then
-        python3 - "$SETTINGS_FILE" << 'PYEOF'
+    python3 - "$SETTINGS_FILE" << 'PYEOF'
 import json, sys
 settings_file = sys.argv[1]
 try:
@@ -16,10 +33,6 @@ try:
         settings = json.load(f)
 except Exception:
     settings = {}
-removed_mcp = False
-if "mcpServers" in settings and "claude-context" in settings["mcpServers"]:
-    del settings["mcpServers"]["claude-context"]
-    removed_mcp = True
 
 removed_hooks = []
 def _strip(group_key, marker_substr):
@@ -43,26 +56,9 @@ _strip("UserPromptSubmit", "claude-context/hooks/prompt-search.sh")
 
 with open(settings_file, "w") as f:
     json.dump(settings, f, indent=2)
-print("  Removed mcpServers.claude-context" if removed_mcp else "  mcpServers.claude-context not registered")
 if removed_hooks:
     print(f"  Removed claude-context hooks from: {', '.join(sorted(set(removed_hooks)))}")
 PYEOF
-    elif command -v jq >/dev/null 2>&1; then
-        local tmp
-        tmp=$(mktemp)
-        jq '
-            if .mcpServers then (.mcpServers |= del(.["claude-context"])) else . end |
-            if .hooks.SessionStart then
-                .hooks.SessionStart |= [.[] | (.hooks //= []) | .hooks |= [.[] | select((.command // "") | test("claude-context/hooks/session-start.sh") | not)] | select((.hooks | length) > 0)]
-            else . end |
-            if .hooks.UserPromptSubmit then
-                .hooks.UserPromptSubmit |= [.[] | (.hooks //= []) | .hooks |= [.[] | select((.command // "") | test("claude-context/hooks/prompt-search.sh") | not)] | select((.hooks | length) > 0)]
-            else . end
-        ' "$SETTINGS_FILE" > "$tmp" && mv "$tmp" "$SETTINGS_FILE"
-        echo "  Removed mcpServers.claude-context + hooks (via jq)"
-    else
-        echo "  Warning: neither python3 nor jq available; skipping settings.json edit" >&2
-    fi
 fi
 
 if [ -d "$PLUGIN_DIR" ]; then
