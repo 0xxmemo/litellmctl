@@ -274,9 +274,11 @@ def run_wizard() -> bool:
     fallbacks = build_fallbacks(chain_sets)
     embedding_models = collect_task_models(all_selected, providers, "embedding_models")
     transcription_models = collect_task_models(all_selected, providers, "transcription_models")
+    image_models = collect_task_models(all_selected, providers, "image_models")
     yaml_content = generate_yaml(models, aliases, fallbacks, defaults,
                                  embedding_models=embedding_models or None,
                                  transcription_models=transcription_models or None,
+                                 image_models=image_models or None,
                                  search_models=search_models or None)
 
     # Summary
@@ -293,6 +295,8 @@ def run_wizard() -> bool:
         console.print(f"  {dim(f'Local embedding deployments: {len(embedding_models)}')}")
     if transcription_models:
         console.print(f"  {dim(f'Local transcription deployments: {len(transcription_models)}')}")
+    if image_models:
+        console.print(f"  {dim(f'Image generation models: {len(image_models)}')}")
     if search_models:
         console.print(f"  {TICK} Web search: SearXNG (websearch interception enabled)")
 

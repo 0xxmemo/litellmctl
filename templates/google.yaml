@@ -1,0 +1,22 @@
+name: Google AI
+desc: API key — Nano Banana / Nano Banana Pro (image generation only)
+auth: api_key
+env_vars:
+  - GOOGLE_AI_API_KEY
+role: supplemental
+
+models: []
+
+# Image generation via Gemini's generateContent endpoint (LiteLLM handles
+# response_modalities internally). Exposed on /v1/images/generations.
+image_models:
+  - model_name: google/nano-banana-pro
+    model: gemini/gemini-3-pro-image-preview
+    api_key: os.environ/GOOGLE_AI_API_KEY
+    model_info:
+      mode: image_generation
+  - model_name: google/nano-banana
+    model: gemini/gemini-2.5-flash-image
+    api_key: os.environ/GOOGLE_AI_API_KEY
+    model_info:
+      mode: image_generation

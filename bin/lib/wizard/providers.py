@@ -60,6 +60,7 @@ def _normalize_provider(data: dict) -> None:
     data.setdefault("auth", "none")
     data.setdefault("embedding_models", [])
     data.setdefault("transcription_models", [])
+    data.setdefault("image_models", [])
     data.setdefault("search_models", [])
     # Sort models by model_name
     data["models"].sort(key=lambda m: m["model_name"])

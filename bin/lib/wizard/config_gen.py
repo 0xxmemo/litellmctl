@@ -31,9 +31,16 @@ def generate_yaml(models: list[dict], aliases: dict[str, str],
                   fallbacks: list[dict], defaults: dict,
                   embedding_models: list[dict] | None = None,
                   transcription_models: list[dict] | None = None,
+                  image_models: list[dict] | None = None,
                   search_models: list[dict] | None = None) -> str:
     lines: list[str] = ["model_list:"]
     write_model_entries(lines, models)
+
+    if image_models:
+        lines.append("")
+        lines.append("  # ── Image generation models ─────────────────────────────────────────────")
+        lines.append("  # Exposed on /v1/images/generations.")
+        write_model_entries(lines, image_models)
 
     if embedding_models:
         lines.append("")
