@@ -177,6 +177,14 @@ async function main() {
         process.exit(0);
     }
 
+    // Subcommand dispatch — first non-flag arg switches to one-shot CLI mode.
+    const sub = args[0];
+    if (sub && !sub.startsWith('-')) {
+        const { runCli } = await import('./cli');
+        await runCli(args);
+        return; // runCli calls process.exit
+    }
+
     const config = createMcpConfig();
     logConfigurationSummary(config);
 

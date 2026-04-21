@@ -68,9 +68,42 @@ settings["mcpServers"][entry_name] = {
     },
 }
 
+# Hooks: SessionStart auto-indexes the cwd's git repo; UserPromptSubmit injects
+# top-K relevant chunks into the prompt. Both shell out to the same plugin CLI.
+hook_env = {
+    "LLM_GATEWAY_URL": gateway_url,
+    "LLM_GATEWAY_API_KEY": api_key,
+    "CLAUDE_CONTEXT_STATE_DIR": state_dir,
+    "CLAUDE_PLUGIN_ROOT": plugin_src,
+}
+session_start_cmd = os.path.join(plugin_src, "hooks", "session-start.sh")
+prompt_submit_cmd = os.path.join(plugin_src, "hooks", "prompt-search.sh")
+
+settings.setdefault("hooks", {})
+
+def _replace_or_append(group_key, marker_substr, hook_obj):
+    group = settings["hooks"].setdefault(group_key, [])
+    for entry in group:
+        for h in entry.get("hooks", []):
+            if marker_substr in (h.get("command") or ""):
+                h.update(hook_obj)
+                return
+    group.append({"hooks": [hook_obj]})
+
+env_prefix = " ".join(f"{k}={json.dumps(v)}" for k, v in hook_env.items())
+_replace_or_append(
+    "SessionStart", "claude-context/hooks/session-start.sh",
+    {"type": "command", "command": f"env {env_prefix} {session_start_cmd}", "timeout": 30},
+)
+_replace_or_append(
+    "UserPromptSubmit", "claude-context/hooks/prompt-search.sh",
+    {"type": "command", "command": f"env {env_prefix} {prompt_submit_cmd}", "timeout": 5},
+)
+
 with open(settings_file, "w") as f:
     json.dump(settings, f, indent=2)
 print(f"  Registered mcpServers.{entry_name}")
+print(f"  Registered hooks.SessionStart and hooks.UserPromptSubmit (claude-context)")
 PYEOF
     elif command -v jq >/dev/null 2>&1; then
         local tmp
@@ -88,9 +121,36 @@ PYEOF
                     "LLM_GATEWAY_API_KEY": $key,
                     "CLAUDE_CONTEXT_STATE_DIR": $state
                 }
-            }
+            } |
+            (.hooks //= {}) |
+            (.hooks.SessionStart //= []) |
+            (.hooks.UserPromptSubmit //= []) |
+            (.hooks.SessionStart |= ([.[] | select((.hooks // [])[]?.command | test("claude-context/hooks/session-start.sh") | not)])) |
+            (.hooks.UserPromptSubmit |= ([.[] | select((.hooks // [])[]?.command | test("claude-context/hooks/prompt-search.sh") | not)])) |
+            (.hooks.SessionStart += [{
+                "hooks": [{
+                    "type": "command",
+                    "command": ("env LLM_GATEWAY_URL=" + ($gateway|@sh) +
+                        " LLM_GATEWAY_API_KEY=" + ($key|@sh) +
+                        " CLAUDE_CONTEXT_STATE_DIR=" + ($state|@sh) +
+                        " CLAUDE_PLUGIN_ROOT=" + ($plugin_src|@sh) +
+                        " " + $plugin_src + "/hooks/session-start.sh"),
+                    "timeout": 30
+                }]
+            }]) |
+            (.hooks.UserPromptSubmit += [{
+                "hooks": [{
+                    "type": "command",
+                    "command": ("env LLM_GATEWAY_URL=" + ($gateway|@sh) +
+                        " LLM_GATEWAY_API_KEY=" + ($key|@sh) +
+                        " CLAUDE_CONTEXT_STATE_DIR=" + ($state|@sh) +
+                        " CLAUDE_PLUGIN_ROOT=" + ($plugin_src|@sh) +
+                        " " + $plugin_src + "/hooks/prompt-search.sh"),
+                    "timeout": 5
+                }]
+            }])
         ' "$settings_file" > "$tmp" && mv "$tmp" "$settings_file"
-        echo "  Registered mcpServers.claude-context"
+        echo "  Registered mcpServers.claude-context + SessionStart/UserPromptSubmit hooks"
     else
         echo "  Error: need python3 or jq to mutate settings.json" >&2
         exit 1
@@ -98,6 +158,11 @@ PYEOF
 }
 
 configure_settings "$SETTINGS_FILE"
+
+# --- Ensure hook scripts are executable ---
+for hook in "${PLUGIN_SRC_DIR}/hooks/session-start.sh" "${PLUGIN_SRC_DIR}/hooks/prompt-search.sh"; do
+    [ -f "$hook" ] && chmod +x "$hook"
+done
 
 # --- Hydrate plugin node_modules (one-time) ---
 if [ -f "${PLUGIN_SRC_DIR}/package.json" ] && [ ! -d "${PLUGIN_SRC_DIR}/node_modules" ]; then
