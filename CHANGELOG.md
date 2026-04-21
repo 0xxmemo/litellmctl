@@ -2,6 +2,27 @@
 
 All notable changes to litellmctl are documented here.
 
+## [1.6.0] - 2026-04-21
+
+### Features
+
+- **Request list: proximity grouping.** `/api/stats/requests` now merges rows with the same `(provider|model|endpoint)` key that fall within a time window *even when rows of other models appeared in between* — so an "opus session" with a stray gpt-5-mini call inside it shows as one opus group instead of being sliced into three. Default window is **60 min**, tunable per request via `?proximity=30m|2h|90m|45s` (min 1 min, max 24 h). Previously the handler only merged immediately-consecutive rows, producing dozens of tiny stacks whenever a workflow hopped between models. Open-group state is held in a `Map<groupKey, OpenGroup>`; groups seal automatically when the next DESC row is more than the window older than the group's oldest item. Scan capped at 5 000 rows as a runaway safety.
+- **`image-generation` skill.** New Claude-Code skill installed from `http://<gateway>/api/skills/install.sh?slug=image-generation`. Hits `/v1/images/generations` with the pre-baked gateway API key, auto-discovers the first configured `image_generation` model, decodes the base64 response to a local file, prints the path. Replaces the `/mcp` endpoint (deleted) — no separate credential for the agent.
+- **Skill installer: tarball bundles.** Skills now ship as a single gzipped tarball (`/api/skills/bundle.tar.gz?slug=…`) extracted into the target skill dir — same pattern plugins already used. Adding a new file to a skill (e.g. `run.sh`) no longer requires a new gateway route. `/api/skills/hook.sh` and `/api/skills/run.sh` removed.
+- **App version in header.** `use-app-version.ts` pulls the latest GitHub release tag and renders it in the dashboard layout so users can tell at a glance which version is running vs available.
+
+### Changes
+
+- **Hook files renamed** from `useFoo.ts` to `use-foo.ts` to match the repo's kebab-case convention; CLAUDE.md updated. Component imports migrated in one pass.
+- **UI polish.** Shared `provider-badge-class` utility for consistent styling across pages, standardized role-badge variants, color-consistency pass, glassmorphism pane tweaks, overview/admin/settings/user-stats page cleanups.
+- **API keys table:** removed the key-ID column + copy-ID button (internal detail, not actionable — the key itself is still creatable/revokable).
+
+### Removed
+
+- **`web-search` skill.** Redundant — search is handled directly by the gateway's `/api/search` endpoint; the skill was a thin curl wrapper around it.
+- **`/mcp` endpoint.** Superseded by the `image-generation` skill. The MCP route required its own `Authorization: Bearer` header which duplicated the LLM API key and confused agents; the skill uses the existing gateway-baked key with no extra config.
+- **Per-file skill routes.** `/api/skills/hook.sh` and `/api/skills/run.sh` collapsed into the tarball bundle endpoint.
+
 ## [1.5.8] - 2026-04-21
 
 ### Fixes
