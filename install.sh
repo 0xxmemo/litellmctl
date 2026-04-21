@@ -18,6 +18,10 @@
 #    --with-node-gyp        nodejs + npm + node-gyp (for native addons)
 #    --with-gateway         `litellmctl install --with-gateway`
 #    --with-protonmail      `litellmctl install --with-protonmail` + auto-auth
+#    --with-embedding       Ollama + nomic-embed-text-v2-moe model
+#    --with-transcription   uv + speaches (faster-whisper OpenAI-compat server)
+#    --with-searxng         Docker + SearXNG container (implies --with-docker)
+#    --with-docker          dnf install docker + enable service + add APP_USER to group
 #    --start-services       systemd start proxy + gateway + protonmail
 #    --fingerprint          Skip ALL steps on re-run if HEAD + .env + this
 #                           script are unchanged and services are healthy
@@ -46,6 +50,10 @@ WITH_CLAUDE=0
 WITH_NODE_GYP=0
 WITH_GATEWAY=0
 WITH_PROTONMAIL=0
+WITH_EMBEDDING=0
+WITH_TRANSCRIPTION=0
+WITH_SEARXNG=0
+WITH_DOCKER=0
 START_SERVICES=0
 USE_FINGERPRINT=0
 APP_USER=""
@@ -70,6 +78,7 @@ while [ $# -gt 0 ]; do
       WITH_SWAP=1; WITH_EBS_MOUNT=1; WITH_CADDY=1
       WITH_BUN=1; WITH_CLAUDE=1; WITH_NODE_GYP=1
       WITH_GATEWAY=1; WITH_PROTONMAIL=1
+      WITH_EMBEDDING=1; WITH_TRANSCRIPTION=1; WITH_SEARXNG=1; WITH_DOCKER=1
       START_SERVICES=1; USE_FINGERPRINT=1
       APP_USER="${APP_USER:-ec2-user}"
       ;;
@@ -78,11 +87,15 @@ while [ $# -gt 0 ]; do
     --with-ebs-mount)     WITH_EBS_MOUNT=1 ;;
     --with-ebs-mount=*)   WITH_EBS_MOUNT=1; EBS_DEVICE="${1#*=}" ;;
     --with-caddy)         WITH_CADDY=1 ;;
-    --with-bun)           WITH_BUN=1 ;;
-    --with-claude)        WITH_CLAUDE=1 ;;
-    --with-node-gyp)      WITH_NODE_GYP=1 ;;
-    --with-gateway)       WITH_GATEWAY=1 ;;
-    --with-protonmail)    WITH_PROTONMAIL=1 ;;
+    --with-bun)            WITH_BUN=1 ;;
+    --with-claude)         WITH_CLAUDE=1 ;;
+    --with-node-gyp)       WITH_NODE_GYP=1 ;;
+    --with-gateway)        WITH_GATEWAY=1 ;;
+    --with-protonmail)     WITH_PROTONMAIL=1 ;;
+    --with-embedding)      WITH_EMBEDDING=1 ;;
+    --with-transcription)  WITH_TRANSCRIPTION=1 ;;
+    --with-searxng)        WITH_SEARXNG=1; WITH_DOCKER=1 ;;
+    --with-docker)         WITH_DOCKER=1 ;;
     --start-services)     START_SERVICES=1 ;;
     --fingerprint)        USE_FINGERPRINT=1 ;;
     --app-user=*)         APP_USER="${1#*=}" ;;
@@ -575,17 +588,60 @@ UNIT
   ok "caddy.service up"
 fi
 
-# ── Pipeline: litellmctl install --with-gateway ──────────────────────────
-if [ "$WITH_GATEWAY" = 1 ]; then
-  info "Installing gateway (bun install + frontend build) ..."
-  as_user "cd '$INSTALL_DIR' && ./bin/litellmctl install --with-gateway"
+# ── Pipeline: Docker (prereq for SearXNG) ────────────────────────────────
+if [ "$WITH_DOCKER" = 1 ] && [ "$PLATFORM" = "Linux" ]; then
+  if ! command -v docker >/dev/null 2>&1; then
+    info "Installing Docker ..."
+    case "$PM" in
+      dnf) sudo dnf install -y --allowerasing docker ;;
+      apt) sudo apt-get install -y -qq docker.io ;;
+      *)   warn "unknown package manager — install Docker manually" ;;
+    esac
+  else
+    skip "docker already installed"
+  fi
+
+  if command -v systemctl >/dev/null 2>&1 && command -v docker >/dev/null 2>&1; then
+    sudo systemctl enable --now docker 2>/dev/null || warn "could not start docker.service (non-fatal)"
+  fi
+
+  # Put APP_USER in the docker group so `docker ps`/`docker run` work without sudo
+  # (matches what install_searxng() expects — it shells out to `docker` directly).
+  if [ "$APP_USER" != "root" ] && getent group docker >/dev/null 2>&1; then
+    if ! id -nG "$APP_USER" 2>/dev/null | tr ' ' '\n' | grep -qx docker; then
+      sudo usermod -aG docker "$APP_USER" && ok "added $APP_USER to docker group"
+    fi
+  fi
 fi
 
-# ── Pipeline: litellmctl install --with-protonmail + auto-auth ───────────
+# ── Pipeline: litellmctl install (gateway + optional embedding/transcription/searxng) ──
+# Bundle every --with-* the Python installer understands into a single call so
+# _resolve_install_mode() can sequence them and hit its non-interactive path
+# exactly once. Separate calls each re-activate the venv and re-load .env —
+# wasted work, and the protonmail call used to clobber the gateway call's
+# interactive prompts.
+if [ "$WITH_GATEWAY" = 1 ] || [ "$WITH_EMBEDDING" = 1 ] || [ "$WITH_TRANSCRIPTION" = 1 ] || [ "$WITH_SEARXNG" = 1 ] || [ "$WITH_PROTONMAIL" = 1 ]; then
+  LLMCTL_FLAGS=""
+  [ "$WITH_GATEWAY" = 1 ]       && LLMCTL_FLAGS="$LLMCTL_FLAGS --with-gateway"
+  [ "$WITH_EMBEDDING" = 1 ]     && LLMCTL_FLAGS="$LLMCTL_FLAGS --with-embedding"
+  [ "$WITH_TRANSCRIPTION" = 1 ] && LLMCTL_FLAGS="$LLMCTL_FLAGS --with-transcription"
+  [ "$WITH_SEARXNG" = 1 ]       && LLMCTL_FLAGS="$LLMCTL_FLAGS --with-searxng"
+  [ "$WITH_PROTONMAIL" = 1 ]    && LLMCTL_FLAGS="$LLMCTL_FLAGS --with-protonmail"
+  info "Running litellmctl install$LLMCTL_FLAGS ..."
+  # `sg docker -c` gives the install step an active docker-group membership
+  # without a relogin, so install_searxng()'s `docker ps` call succeeds on
+  # the first pipeline run. Skipped when docker isn't in play.
+  if [ "$WITH_SEARXNG" = 1 ] && getent group docker >/dev/null 2>&1; then
+    as_user "cd '$INSTALL_DIR' && sg docker -c './bin/litellmctl install$LLMCTL_FLAGS'"
+  else
+    as_user "cd '$INSTALL_DIR' && ./bin/litellmctl install$LLMCTL_FLAGS"
+  fi
+fi
+
+# ── Pipeline: hydroxide (ProtonMail) auto-auth ───────────────────────────
+# Install itself happens above via the bundled `litellmctl install` call.
+# Auto-auth runs separately because it needs .env creds already written.
 if [ "$WITH_PROTONMAIL" = 1 ]; then
-  info "Installing hydroxide (ProtonMail SMTP bridge) ..."
-  as_user "cd '$INSTALL_DIR' && ./bin/litellmctl install --with-protonmail"
-  # Auto-auth if GATEWAY_PROTON_PASSWORD is in the app user's .env.
   if as_user "grep -q '^GATEWAY_PROTON_PASSWORD=.' '$INSTALL_DIR/.env' 2>/dev/null"; then
     info "Auto-authenticating hydroxide from .env creds ..."
     as_user "cd '$INSTALL_DIR' && ./bin/litellmctl auth protonmail" || warn "hydroxide auto-auth returned non-zero (non-fatal)"
