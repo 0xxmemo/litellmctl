@@ -335,10 +335,6 @@ export function SettingsPanel({ auth, modelOverrides, tierAliases, saveModelOver
                       }))
                     }
                     placeholder={alias}
-                    triggerClassName="flex items-center gap-2 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-left hover:border-slate-500 focus:outline-none focus:ring-1 focus:ring-ring transition-colors"
-                    dropdownClassName="rounded-md border border-slate-700 bg-slate-950 shadow-lg"
-                    searchInputClassName="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
-                    optionTextClassName="font-mono text-slate-200 flex-1 truncate"
                     defaultOption={{ value: '', badge: 'default', label: alias }}
                   />
                   {overrides[alias] && (

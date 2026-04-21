@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import ReactDOM from 'react-dom'
 import { ChevronDown, Search, Loader2 } from 'lucide-react'
 import {
@@ -14,9 +14,25 @@ import {
   storeModel,
   toNormalizedModels,
 } from '@/lib/models-hooks'
+import { cn } from '@/lib/utils'
 
 export { getStoredModel, storeModel }
 export type { NormalizedModel }
+
+const triggerStyles = cn(
+  'glass glass--outline flex min-h-9 w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors',
+  'focus:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+)
+
+const dropdownShellStyles = cn(
+  'glass glass--muted fixed z-[9999] flex max-h-[min(90dvh,420px)] min-w-[280px] max-w-[480px] flex-col overflow-hidden rounded-lg shadow-none',
+)
+
+const searchInputStyles = cn(
+  'min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground',
+)
+
+const optionLabelStyles = 'font-mono flex-1 truncate text-foreground'
 
 interface ModelSelectorProps {
   value?: string | null
@@ -25,10 +41,6 @@ interface ModelSelectorProps {
   extendedModels?: ExtendedModel[]
   placeholder?: string
   className?: string
-  triggerClassName?: string
-  dropdownClassName?: string
-  searchInputClassName?: string
-  optionTextClassName?: string
   label?: string
   providerFilter?: string
   clearable?: boolean
@@ -83,10 +95,6 @@ export function ModelSelector({
   extendedModels: extendedModelsProp,
   placeholder = 'Select model…',
   className = '',
-  triggerClassName = 'flex items-center gap-2 w-full rounded-md border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-left hover:border-slate-500 focus:outline-none focus:ring-1 focus:ring-ring transition-colors',
-  dropdownClassName = 'fixed z-[9999] min-w-[280px] max-w-[480px] rounded-md border border-slate-700 bg-slate-950 shadow-lg',
-  searchInputClassName = 'flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground',
-  optionTextClassName = 'font-mono truncate text-slate-200 flex-1',
   label,
   providerFilter,
   clearable = false,
@@ -157,14 +165,34 @@ export function ModelSelector({
     }
   }, [open])
 
-  useEffect(() => {
-    if (open && buttonRef.current) {
-      const rect = buttonRef.current.getBoundingClientRect()
+  useLayoutEffect(() => {
+    if (!open) {
+      setDropdownPos(null)
+      return
+    }
+    const updatePos = () => {
+      const el = buttonRef.current
+      if (!el) return
+      const rect = el.getBoundingClientRect()
+      // Portaled dropdown uses `position: fixed` — use viewport coords only (no scrollX/Y).
+      const pad = 8
+      const width = Math.max(rect.width, 280)
+      let left = rect.left
+      if (left + width > window.innerWidth - pad) {
+        left = Math.max(pad, window.innerWidth - width - pad)
+      }
       setDropdownPos({
-        top: rect.bottom + window.scrollY + 4,
-        left: rect.left + window.scrollX,
-        width: rect.width,
+        top: rect.bottom + 4,
+        left,
+        width,
       })
+    }
+    updatePos()
+    window.addEventListener('resize', updatePos)
+    window.addEventListener('scroll', updatePos, true)
+    return () => {
+      window.removeEventListener('resize', updatePos)
+      window.removeEventListener('scroll', updatePos, true)
     }
   }, [open])
 
@@ -205,22 +233,22 @@ export function ModelSelector({
   const dropdownContent = (
     <div
       ref={dropdownRef}
-      className={dropdownClassName}
+      className={dropdownShellStyles}
       style={dropdownPos ? {
         top: dropdownPos.top,
         left: dropdownPos.left,
         width: Math.max(dropdownPos.width, 280),
       } : undefined}
     >
-      <div className="flex items-center gap-2 px-3 py-2 border-b border-slate-700">
-        <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+      <div className="flex shrink-0 items-center gap-2 border-b border-border px-3 py-2">
+        <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <input
           ref={searchRef}
           type="text"
           placeholder="Search models…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className={searchInputClassName}
+          className={searchInputStyles}
         />
         {clearable && selectedValue && !search && !defaultOption && (
           <button
@@ -234,20 +262,20 @@ export function ModelSelector({
         )}
       </div>
 
-      <div className="overflow-y-auto" style={{ maxHeight: '280px' }}>
+      <div className="min-h-0 flex-1 overflow-y-auto" style={{ maxHeight: '280px' }}>
         {defaultOption && !search && (
           <button
             type="button"
             onClick={() => handleSelect(defaultOption.value)}
-            className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-800 transition-colors border-b border-slate-800 ${
-              isDefaultSelected ? 'bg-slate-800/60' : ''
+            className={`flex w-full items-center gap-2 border-b border-border px-3 py-2 text-left text-sm transition-colors hover:bg-accent/60 ${
+              isDefaultSelected ? 'bg-muted/50' : ''
             }`}
           >
-            <span className="text-xs px-1.5 py-0.5 rounded border font-mono shrink-0 bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+            <span className="shrink-0 rounded border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 font-mono text-xs text-emerald-400">
               {defaultOption.badge}
             </span>
-            <span className={optionTextClassName}>{defaultOption.label}</span>
-            {isDefaultSelected && <span className="ml-auto text-green-400 text-xs shrink-0">✓</span>}
+            <span className={optionLabelStyles}>{defaultOption.label}</span>
+            {isDefaultSelected && <span className="ml-auto shrink-0 text-xs text-green-500">✓</span>}
           </button>
         )}
 
@@ -258,7 +286,7 @@ export function ModelSelector({
         ) : (
           groupEntries.map(([provGroup, provModels]) => (
             <div key={provGroup}>
-              <div className="px-3 py-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-slate-900/60 border-b border-slate-800">
+              <div className="border-b border-border bg-muted/40 px-3 py-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 {provGroup}
               </div>
               {provModels.map((m) => {
@@ -269,24 +297,24 @@ export function ModelSelector({
                     key={m.id}
                     type="button"
                     onClick={() => handleSelect(m.id)}
-                    className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-800 transition-colors ${
-                      isSelected ? 'bg-slate-800/60' : ''
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-accent/60 ${
+                      isSelected ? 'bg-muted/50' : ''
                     }`}
                   >
                     {stub ? (
-                      <span className="text-xs px-1.5 py-0.5 rounded border font-mono shrink-0 bg-slate-500/15 text-slate-400 border-slate-500/30">
+                      <span className="shrink-0 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
                         Stub
                       </span>
                     ) : (
                       <span
-                        className={`text-xs px-1.5 py-0.5 rounded border font-mono shrink-0 ${getProviderColor(m.provider)}`}
+                        className={`shrink-0 rounded border px-1.5 py-0.5 font-mono text-xs ${getProviderColor(m.provider)}`}
                       >
                         {formatProviderName(m.provider)}
                       </span>
                     )}
-                    <span className={optionTextClassName}>{m.displayName}</span>
+                    <span className={optionLabelStyles}>{m.displayName}</span>
                     {isSelected && (
-                      <span className="ml-auto text-green-400 text-xs shrink-0">✓</span>
+                      <span className="ml-auto shrink-0 text-xs text-green-500">✓</span>
                     )}
                   </button>
                 )
@@ -299,10 +327,10 @@ export function ModelSelector({
           <button
             type="button"
             onClick={() => setShowAll(true)}
-            className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-slate-800/60 transition-colors border-t border-slate-800"
+            className="flex w-full items-center justify-center gap-1.5 border-t border-border px-3 py-2 text-xs text-muted-foreground transition-colors hover:bg-accent/60 hover:text-foreground"
           >
             <span>Show all providers</span>
-            <span className="text-slate-500">({filteredOutCount} more models)</span>
+            <span className="text-muted-foreground/80">({filteredOutCount} more models)</span>
           </button>
         )}
       </div>
@@ -310,7 +338,7 @@ export function ModelSelector({
   )
 
   return (
-    <div className={`relative ${className}`} ref={containerRef}>
+    <div className={cn('relative', className)} ref={containerRef}>
       {label && (
         <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5 block">
           {label}
@@ -321,7 +349,7 @@ export function ModelSelector({
         ref={buttonRef}
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className={triggerClassName}
+        className={triggerStyles}
         aria-haspopup="listbox"
         aria-expanded={open}
       >
@@ -336,12 +364,12 @@ export function ModelSelector({
             <span className="text-xs px-1.5 py-0.5 rounded border font-mono shrink-0 bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
               {defaultOption.badge}
             </span>
-            <span className={optionTextClassName}>{defaultOption.label}</span>
+            <span className={optionLabelStyles}>{defaultOption.label}</span>
           </>
         ) : selectedValue ? (
           <>
             {selectedModel && detectIsStub(selectedModel.id) ? (
-              <span className="text-xs px-1.5 py-0.5 rounded border font-mono shrink-0 bg-slate-500/15 text-slate-400 border-slate-500/30">
+              <span className="shrink-0 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-xs text-muted-foreground">
                 Stub
               </span>
             ) : (
@@ -349,7 +377,7 @@ export function ModelSelector({
                 {selectedModel ? formatProviderName(selectedModel.provider) : '—'}
               </span>
             )}
-            <span className={optionTextClassName}>{selectedModel ? selectedModel.displayName : selectedValue}</span>
+            <span className={optionLabelStyles}>{selectedModel ? selectedModel.displayName : selectedValue}</span>
           </>
         ) : (
           <span className="text-muted-foreground flex-1 truncate">{placeholder}</span>
