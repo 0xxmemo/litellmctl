@@ -151,8 +151,13 @@ async function cmdIndex(args: ParsedArgs): Promise<number> {
     }
 
     const { context, snapshot } = buildContext();
+    const collectionId = context.resolveCollectionId(absPath);
     const collectionName = context.getCollectionName(absPath);
-    const lockPath = path.join(resolveStateDir(), `index-${collectionName}.lock`);
+    const ref = context.resolveRefId(absPath);
+    log(`collection: ${collectionName} ref=${ref.display} identity=${collectionId.identity}`);
+    // Lock per (collection, ref) so two branches on the same machine can index in parallel.
+    const refSafe = ref.refId.replace(/[^a-zA-Z0-9._-]/g, '_');
+    const lockPath = path.join(resolveStateDir(), `index-${collectionName}-${refSafe}.lock`);
     const release = acquireIndexLock(lockPath);
     if (release === null) {
         const holder = (() => {
@@ -254,6 +259,9 @@ async function cmdSearch(args: ParsedArgs): Promise<number> {
     }
 
     const { context, snapshot } = buildContext();
+    const collectionId = context.resolveCollectionId(absPath);
+    const ref = context.resolveRefId(absPath);
+    log(`search: ref=${ref.display} identity=${collectionId.identity}`);
     const isIndexed = snapshot.getIndexedCodebases().includes(absPath);
     const vectorHasIndex = await context.hasIndex(absPath);
     if (!isIndexed && !vectorHasIndex) {
@@ -285,7 +293,9 @@ async function cmdStatus(args: ParsedArgs): Promise<number> {
     const progress = snapshot.getIndexingProgress(absPath);
     const info = snapshot.getCodebaseInfo(absPath);
 
+    const collectionId = context.resolveCollectionId(absPath);
     const collectionName = context.getCollectionName(absPath);
+    const ref = context.resolveRefId(absPath);
     let collectionPresent = false;
     let collectionRowCount = -1;
     try {
@@ -302,6 +312,9 @@ async function cmdStatus(args: ParsedArgs): Promise<number> {
             progress,
             info,
             collectionName,
+            collectionIdentity: collectionId.identity,
+            refId: ref.refId,
+            refDisplay: ref.display,
             collectionPresent,
             collectionRowCount,
         }) + '\n',

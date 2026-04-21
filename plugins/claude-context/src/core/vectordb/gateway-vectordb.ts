@@ -13,10 +13,19 @@ export interface GatewayVectorDatabaseConfig {
     apiKey: string;
 }
 
+export interface RefOverlayEntry {
+    filePath: string;
+    chunkIds: string[];
+}
+
 /**
  * VectorDatabase implementation that proxies all operations to the LiteLLM
  * gateway's /api/vectordb/* REST surface. State is persisted in the gateway's
- * sqlite-vec DB, scoped by api_key_hash (derived from apiKey).
+ * sqlite-vec DB and shared globally across all authenticated clients — there
+ * is no per-tenant isolation any more. Branch-level isolation is expressed
+ * via ref overlays: setRefOverlay declares which chunks a given ref (typically
+ * `branch:<name>`) considers live; search(..., refId) filters results to
+ * chunks in that overlay.
  *
  * Hybrid-mode methods throw — this plugin runs dense-only.
  */
@@ -29,6 +38,11 @@ export class GatewayVectorDatabase implements VectorDatabase {
         if (!config.apiKey) throw new Error('GatewayVectorDatabase: apiKey required');
         this.baseUrl = config.baseUrl.replace(/\/$/, '');
         this.apiKey = config.apiKey;
+    }
+
+    private collectionUrl(collectionName: string, suffix = ''): string {
+        const tail = suffix ? `/${suffix}` : '';
+        return `/api/vectordb/collections/${encodeURIComponent(collectionName)}${tail}`;
     }
 
     private async request<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -62,15 +76,12 @@ export class GatewayVectorDatabase implements VectorDatabase {
     }
 
     async dropCollection(collectionName: string): Promise<void> {
-        await this.request<void>('DELETE', `/api/vectordb/collections/${encodeURIComponent(collectionName)}`);
+        await this.request<void>('DELETE', this.collectionUrl(collectionName));
     }
 
     async hasCollection(collectionName: string): Promise<boolean> {
         try {
-            const info = await this.request<{ exists: boolean }>(
-                'GET',
-                `/api/vectordb/collections/${encodeURIComponent(collectionName)}`,
-            );
+            const info = await this.request<{ exists: boolean }>('GET', this.collectionUrl(collectionName));
             return !!info?.exists;
         } catch {
             return false;
@@ -90,7 +101,7 @@ export class GatewayVectorDatabase implements VectorDatabase {
             const slice = documents.slice(i, i + BATCH);
             await this.request<{ inserted: number }>(
                 'POST',
-                `/api/vectordb/collections/${encodeURIComponent(collectionName)}/insert`,
+                this.collectionUrl(collectionName, 'insert'),
                 { documents: slice },
             );
         }
@@ -105,9 +116,10 @@ export class GatewayVectorDatabase implements VectorDatabase {
         queryVector: number[],
         options?: SearchOptions,
     ): Promise<VectorSearchResult[]> {
+        const refQ = options?.refId ? `?ref=${encodeURIComponent(options.refId)}` : '';
         const res = await this.request<{ results: VectorSearchResult[] }>(
             'POST',
-            `/api/vectordb/collections/${encodeURIComponent(collectionName)}/search`,
+            this.collectionUrl(collectionName, 'search') + refQ,
             {
                 queryVector,
                 topK: options?.topK ?? 10,
@@ -115,6 +127,59 @@ export class GatewayVectorDatabase implements VectorDatabase {
             },
         );
         return res?.results ?? [];
+    }
+
+    /**
+     * Probe which chunk_ids are already persisted server-side — lets the
+     * client embed + upload only the missing ones on (re-)index.
+     */
+    async listExistingChunkIds(collectionName: string, chunkIds: string[]): Promise<Set<string>> {
+        if (!chunkIds.length) return new Set();
+        const existing = new Set<string>();
+        const BATCH = 500;
+        for (let i = 0; i < chunkIds.length; i += BATCH) {
+            const slice = chunkIds.slice(i, i + BATCH);
+            const res = await this.request<{ existing: string[] }>(
+                'POST',
+                this.collectionUrl(collectionName, 'chunks/existing'),
+                { chunkIds: slice },
+            );
+            for (const id of res?.existing ?? []) existing.add(id);
+        }
+        return existing;
+    }
+
+    /**
+     * Atomically replace the overlay for `refId` in this collection.
+     * `entries` is the full list of (filePath, chunkIds) this ref considers
+     * live — the server deletes any rows for this ref not present here.
+     */
+    async setRefOverlay(
+        collectionName: string,
+        refId: string,
+        entries: RefOverlayEntry[],
+    ): Promise<{ inserted: number }> {
+        const res = await this.request<{ inserted: number }>(
+            'POST',
+            this.collectionUrl(collectionName, `refs/${encodeURIComponent(refId)}/overlay`),
+            { entries },
+        );
+        return res ?? { inserted: 0 };
+    }
+
+    async getRefOverlay(
+        collectionName: string,
+        refId: string,
+    ): Promise<RefOverlayEntry[]> {
+        try {
+            const res = await this.request<{ entries: RefOverlayEntry[] }>(
+                'GET',
+                this.collectionUrl(collectionName, `refs/${encodeURIComponent(refId)}`),
+            );
+            return res?.entries ?? [];
+        } catch {
+            return [];
+        }
     }
 
     async hybridSearch(
@@ -129,7 +194,7 @@ export class GatewayVectorDatabase implements VectorDatabase {
         if (!ids.length) return;
         await this.request<{ deleted: number }>(
             'POST',
-            `/api/vectordb/collections/${encodeURIComponent(collectionName)}/delete`,
+            this.collectionUrl(collectionName, 'delete'),
             { ids },
         );
     }
@@ -142,7 +207,7 @@ export class GatewayVectorDatabase implements VectorDatabase {
     ): Promise<Record<string, any>[]> {
         const res = await this.request<{ rows: Record<string, any>[] }>(
             'POST',
-            `/api/vectordb/collections/${encodeURIComponent(collectionName)}/query`,
+            this.collectionUrl(collectionName, 'query'),
             {
                 filterExpr: filter,
                 outputFields,
@@ -164,7 +229,7 @@ export class GatewayVectorDatabase implements VectorDatabase {
         try {
             const info = await this.request<{ exists: boolean; rowCount: number }>(
                 'GET',
-                `/api/vectordb/collections/${encodeURIComponent(collectionName)}`,
+                this.collectionUrl(collectionName),
             );
             if (!info?.exists) return -1;
             return info.rowCount;

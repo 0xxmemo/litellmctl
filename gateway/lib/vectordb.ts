@@ -1,9 +1,10 @@
 /**
- * Tenant-scoped vector DB backed by sqlite-vec (vec0 virtual tables).
+ * Shared vector DB backed by sqlite-vec (vec0 virtual tables).
  *
- * One vec0 table per unique dimension (plugin_chunks_vec_<DIM>) — lazily
- * created on first createCollection. All rows carry api_key_hash + collection
- * so a single pair of physical tables serves every tenant.
+ * All collections are globally shared across authenticated clients; per-
+ * branch / per-user isolation is expressed via ref overlays (plugin_ref_chunks)
+ * rather than by tenant-scoped rows. One vec0 table per unique dimension
+ * (plugin_chunks_vec_<DIM>) is lazily created on first createCollection.
  */
 
 import { db, isVecLoaded } from "./db";
@@ -24,11 +25,21 @@ export interface VectorSearchResult {
   score: number;
 }
 
+export interface RefOverlayEntry {
+  filePath: string;
+  chunkIds: string[];
+}
+
 const COLLECTION_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
+const REF_ID_RE = /^[a-zA-Z0-9_:.\/-]{1,128}$/;
 const vecTableCache = new Set<number>();
 
 export function validateName(name: string): boolean {
   return COLLECTION_NAME_RE.test(name);
+}
+
+export function validateRefId(refId: string): boolean {
+  return REF_ID_RE.test(refId);
 }
 
 function vecTableName(dim: number): string {
@@ -41,26 +52,13 @@ function ensureVecTable(dim: number): void {
     throw new Error(`Invalid vector dimension: ${dim}`);
   }
   const name = vecTableName(dim);
-  // vec0 partition-key syntax; if unsupported, fall back to an aux column.
-  try {
-    db.run(
-      `CREATE VIRTUAL TABLE IF NOT EXISTS ${name} USING vec0(
-        rowid INTEGER PRIMARY KEY,
-        api_key_hash TEXT PARTITION KEY,
-        collection TEXT,
-        vector FLOAT[${dim}]
-      )`,
-    );
-  } catch {
-    db.run(
-      `CREATE VIRTUAL TABLE IF NOT EXISTS ${name} USING vec0(
-        rowid INTEGER PRIMARY KEY,
-        +api_key_hash TEXT,
-        +collection TEXT,
-        vector FLOAT[${dim}]
-      )`,
-    );
-  }
+  db.run(
+    `CREATE VIRTUAL TABLE IF NOT EXISTS ${name} USING vec0(
+      rowid INTEGER PRIMARY KEY,
+      +collection TEXT,
+      vector FLOAT[${dim}]
+    )`,
+  );
   vecTableCache.add(dim);
 }
 
@@ -73,7 +71,6 @@ function requireVec() {
 // ── Collection lifecycle ────────────────────────────────────────────────────
 
 export function createCollection(
-  apiKeyHash: string,
   name: string,
   dimension: number,
 ): { created: boolean } {
@@ -81,10 +78,8 @@ export function createCollection(
   if (!validateName(name)) throw new Error("Invalid collection name");
 
   const existing = db
-    .prepare(
-      "SELECT dimension FROM plugin_collections WHERE api_key_hash = ? AND name = ?",
-    )
-    .get(apiKeyHash, name) as { dimension: number } | undefined;
+    .prepare("SELECT dimension FROM plugin_collections WHERE name = ?")
+    .get(name) as { dimension: number } | undefined;
 
   if (existing) {
     if (existing.dimension !== dimension) {
@@ -97,27 +92,22 @@ export function createCollection(
 
   ensureVecTable(dimension);
   db.prepare(
-    `INSERT INTO plugin_collections (api_key_hash, name, dimension, created_at)
-     VALUES (?, ?, ?, ?)`,
-  ).run(apiKeyHash, name, dimension, Date.now());
+    `INSERT INTO plugin_collections (name, dimension, created_at) VALUES (?, ?, ?)`,
+  ).run(name, dimension, Date.now());
   return { created: true };
 }
 
-export function dropCollection(apiKeyHash: string, name: string): void {
+export function dropCollection(name: string): void {
   if (!validateName(name)) throw new Error("Invalid collection name");
   const row = db
-    .prepare(
-      "SELECT dimension FROM plugin_collections WHERE api_key_hash = ? AND name = ?",
-    )
-    .get(apiKeyHash, name) as { dimension: number } | undefined;
+    .prepare("SELECT dimension FROM plugin_collections WHERE name = ?")
+    .get(name) as { dimension: number } | undefined;
   if (!row) return;
 
   const tx = db.transaction(() => {
     const rowIds = db
-      .prepare(
-        "SELECT rowid FROM plugin_chunks WHERE api_key_hash = ? AND collection = ?",
-      )
-      .all(apiKeyHash, name) as { rowid: number }[];
+      .prepare("SELECT rowid FROM plugin_chunks WHERE collection = ?")
+      .all(name) as { rowid: number }[];
 
     if (rowIds.length > 0 && isVecLoaded()) {
       const vecTable = vecTableName(row.dimension);
@@ -125,59 +115,45 @@ export function dropCollection(apiKeyHash: string, name: string): void {
       for (const { rowid } of rowIds) delVec.run(rowid);
     }
 
-    db.prepare(
-      "DELETE FROM plugin_chunks WHERE api_key_hash = ? AND collection = ?",
-    ).run(apiKeyHash, name);
-
-    db.prepare(
-      "DELETE FROM plugin_collections WHERE api_key_hash = ? AND name = ?",
-    ).run(apiKeyHash, name);
+    db.prepare("DELETE FROM plugin_ref_chunks WHERE collection = ?").run(name);
+    db.prepare("DELETE FROM plugin_chunks WHERE collection = ?").run(name);
+    db.prepare("DELETE FROM plugin_collections WHERE name = ?").run(name);
   });
   tx();
 }
 
-export function hasCollection(apiKeyHash: string, name: string): boolean {
+export function hasCollection(name: string): boolean {
   if (!validateName(name)) return false;
   const row = db
-    .prepare(
-      "SELECT 1 FROM plugin_collections WHERE api_key_hash = ? AND name = ?",
-    )
-    .get(apiKeyHash, name);
+    .prepare("SELECT 1 FROM plugin_collections WHERE name = ?")
+    .get(name);
   return !!row;
 }
 
 export function getCollection(
-  apiKeyHash: string,
   name: string,
 ): { name: string; dimension: number; rowCount: number } | null {
   if (!validateName(name)) return null;
   const row = db
-    .prepare(
-      "SELECT dimension FROM plugin_collections WHERE api_key_hash = ? AND name = ?",
-    )
-    .get(apiKeyHash, name) as { dimension: number } | undefined;
+    .prepare("SELECT dimension FROM plugin_collections WHERE name = ?")
+    .get(name) as { dimension: number } | undefined;
   if (!row) return null;
   const count = db
-    .prepare(
-      "SELECT COUNT(*) AS n FROM plugin_chunks WHERE api_key_hash = ? AND collection = ?",
-    )
-    .get(apiKeyHash, name) as { n: number };
+    .prepare("SELECT COUNT(*) AS n FROM plugin_chunks WHERE collection = ?")
+    .get(name) as { n: number };
   return { name, dimension: row.dimension, rowCount: count.n };
 }
 
-export function listCollections(apiKeyHash: string): string[] {
+export function listCollections(): string[] {
   const rows = db
-    .prepare(
-      "SELECT name FROM plugin_collections WHERE api_key_hash = ? ORDER BY name",
-    )
-    .all(apiKeyHash) as { name: string }[];
+    .prepare("SELECT name FROM plugin_collections ORDER BY name")
+    .all() as { name: string }[];
   return rows.map((r) => r.name);
 }
 
 // ── Document CRUD ───────────────────────────────────────────────────────────
 
 export function insertDocuments(
-  apiKeyHash: string,
   collection: string,
   documents: VectorDocument[],
 ): { inserted: number } {
@@ -186,10 +162,8 @@ export function insertDocuments(
   if (!documents.length) return { inserted: 0 };
 
   const coll = db
-    .prepare(
-      "SELECT dimension FROM plugin_collections WHERE api_key_hash = ? AND name = ?",
-    )
-    .get(apiKeyHash, collection) as { dimension: number } | undefined;
+    .prepare("SELECT dimension FROM plugin_collections WHERE name = ?")
+    .get(collection) as { dimension: number } | undefined;
   if (!coll) throw new Error(`Collection '${collection}' does not exist`);
 
   for (const doc of documents) {
@@ -205,10 +179,10 @@ export function insertDocuments(
 
   const upsertChunk = db.prepare(
     `INSERT INTO plugin_chunks
-       (api_key_hash, collection, chunk_id, content, relative_path,
+       (collection, chunk_id, content, relative_path,
         start_line, end_line, file_extension, metadata)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT(api_key_hash, collection, chunk_id) DO UPDATE SET
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(collection, chunk_id) DO UPDATE SET
        content = excluded.content,
        relative_path = excluded.relative_path,
        start_line = excluded.start_line,
@@ -219,15 +193,13 @@ export function insertDocuments(
   );
   const delVec = db.prepare(`DELETE FROM ${vecTable} WHERE rowid = ?`);
   const insertVec = db.prepare(
-    `INSERT INTO ${vecTable} (rowid, api_key_hash, collection, vector)
-     VALUES (?, ?, ?, ?)`,
+    `INSERT INTO ${vecTable} (rowid, collection, vector) VALUES (?, ?, ?)`,
   );
 
   let inserted = 0;
   const tx = db.transaction(() => {
     for (const doc of documents) {
       const row = upsertChunk.get(
-        apiKeyHash,
         collection,
         doc.id,
         doc.content,
@@ -238,12 +210,102 @@ export function insertDocuments(
         JSON.stringify(doc.metadata ?? {}),
       ) as { rowid: number };
       delVec.run(row.rowid);
-      insertVec.run(row.rowid, apiKeyHash, collection, JSON.stringify(doc.vector));
+      insertVec.run(row.rowid, collection, JSON.stringify(doc.vector));
       inserted++;
     }
   });
   tx();
   return { inserted };
+}
+
+/** Return the subset of chunkIds that are already stored in this collection. */
+export function listExistingChunkIds(
+  collection: string,
+  chunkIds: string[],
+): string[] {
+  if (!validateName(collection)) throw new Error("Invalid collection name");
+  if (!chunkIds.length) return [];
+  // SQLite host-parameter limit is 999 by default — batch defensively.
+  const CAP = 800;
+  const existing: string[] = [];
+  for (let i = 0; i < chunkIds.length; i += CAP) {
+    const slice = chunkIds.slice(i, i + CAP);
+    const placeholders = slice.map(() => "?").join(",");
+    const rows = db
+      .prepare(
+        `SELECT chunk_id FROM plugin_chunks
+          WHERE collection = ? AND chunk_id IN (${placeholders})`,
+      )
+      .all(collection, ...slice) as { chunk_id: string }[];
+    for (const r of rows) existing.push(r.chunk_id);
+  }
+  return existing;
+}
+
+// ── Ref overlay ─────────────────────────────────────────────────────────────
+
+/**
+ * Atomically replace the overlay for (collection, refId). Any existing rows
+ * for this ref that aren't in `entries` are deleted — callers always send
+ * the full set of live (file, chunks) pairs for the ref.
+ */
+export function setRefOverlay(
+  collection: string,
+  refId: string,
+  entries: RefOverlayEntry[],
+): { inserted: number } {
+  if (!validateName(collection)) throw new Error("Invalid collection name");
+  if (!validateRefId(refId)) throw new Error("Invalid ref id");
+  if (!hasCollection(collection)) throw new Error(`Collection '${collection}' does not exist`);
+
+  const now = Date.now();
+  const del = db.prepare(
+    "DELETE FROM plugin_ref_chunks WHERE collection = ? AND ref_id = ?",
+  );
+  const ins = db.prepare(
+    `INSERT OR IGNORE INTO plugin_ref_chunks
+       (collection, ref_id, file_path, chunk_id, updated_at)
+     VALUES (?, ?, ?, ?, ?)`,
+  );
+
+  let inserted = 0;
+  const tx = db.transaction(() => {
+    del.run(collection, refId);
+    for (const entry of entries) {
+      if (typeof entry.filePath !== "string" || !entry.filePath) continue;
+      if (!Array.isArray(entry.chunkIds)) continue;
+      for (const chunkId of entry.chunkIds) {
+        if (typeof chunkId !== "string" || !chunkId) continue;
+        const res = ins.run(collection, refId, entry.filePath, chunkId, now);
+        if ((res as { changes?: number }).changes) inserted++;
+      }
+    }
+  });
+  tx();
+  return { inserted };
+}
+
+export function getRefOverlay(
+  collection: string,
+  refId: string,
+): RefOverlayEntry[] {
+  if (!validateName(collection)) throw new Error("Invalid collection name");
+  if (!validateRefId(refId)) throw new Error("Invalid ref id");
+  const rows = db
+    .prepare(
+      `SELECT file_path, chunk_id
+         FROM plugin_ref_chunks
+        WHERE collection = ? AND ref_id = ?
+        ORDER BY file_path, chunk_id`,
+    )
+    .all(collection, refId) as { file_path: string; chunk_id: string }[];
+
+  const byFile = new Map<string, string[]>();
+  for (const r of rows) {
+    if (!byFile.has(r.file_path)) byFile.set(r.file_path, []);
+    byFile.get(r.file_path)!.push(r.chunk_id);
+  }
+  return Array.from(byFile.entries()).map(([filePath, chunkIds]) => ({ filePath, chunkIds }));
 }
 
 // ── Filter expression parser (minimal: `<field> in ["a", "b"]`) ─────────────
@@ -298,19 +360,18 @@ export function parseFilterExpr(expr: string): ParsedFilter | null {
 // ── Search ──────────────────────────────────────────────────────────────────
 
 export function searchVectors(
-  apiKeyHash: string,
   collection: string,
   queryVector: number[],
   topK: number,
   filterExpr: string | null,
+  refId: string | null = null,
 ): VectorSearchResult[] {
   requireVec();
   if (!validateName(collection)) throw new Error("Invalid collection name");
+  if (refId !== null && !validateRefId(refId)) throw new Error("Invalid ref id");
   const coll = db
-    .prepare(
-      "SELECT dimension FROM plugin_collections WHERE api_key_hash = ? AND name = ?",
-    )
-    .get(apiKeyHash, collection) as { dimension: number } | undefined;
+    .prepare("SELECT dimension FROM plugin_collections WHERE name = ?")
+    .get(collection) as { dimension: number } | undefined;
   if (!coll) throw new Error(`Collection '${collection}' does not exist`);
   if (queryVector.length !== coll.dimension) {
     throw new Error(
@@ -322,18 +383,18 @@ export function searchVectors(
   const parsed = filterExpr ? parseFilterExpr(filterExpr) : null;
   const k = Math.max(1, Math.min(200, Math.floor(topK) || 10));
 
-  // Overfetch when filter applied; apply filter after KNN.
-  const knnLimit = parsed ? k * 4 : k;
+  // Overfetch when post-KNN filtering is active (filter expr or ref overlay).
+  const postFilter = parsed !== null || refId !== null;
+  const knnLimit = postFilter ? k * 4 : k;
   const nearest = db
     .prepare(
       `SELECT rowid, distance
          FROM ${vecTable}
         WHERE vector MATCH ?
           AND k = ?
-          AND api_key_hash = ?
           AND collection = ?`,
     )
-    .all(JSON.stringify(queryVector), knnLimit, apiKeyHash, collection) as {
+    .all(JSON.stringify(queryVector), knnLimit, collection) as {
     rowid: number;
     distance: number;
   }[];
@@ -354,10 +415,31 @@ export function searchVectors(
   const chunkByRowId = new Map<number, Record<string, unknown>>();
   for (const r of chunkRows) chunkByRowId.set(r.rowid as number, r);
 
+  // Ref-overlay filter: only keep chunk_ids that the overlay currently owns.
+  let allowedChunkIds: Set<string> | null = null;
+  if (refId !== null) {
+    const chunkIds = chunkRows.map((r) => r.chunk_id as string).filter(Boolean);
+    if (chunkIds.length === 0) return [];
+    const CAP = 800;
+    allowedChunkIds = new Set();
+    for (let i = 0; i < chunkIds.length; i += CAP) {
+      const slice = chunkIds.slice(i, i + CAP);
+      const phs = slice.map(() => "?").join(",");
+      const rows = db
+        .prepare(
+          `SELECT DISTINCT chunk_id FROM plugin_ref_chunks
+            WHERE collection = ? AND ref_id = ? AND chunk_id IN (${phs})`,
+        )
+        .all(collection, refId, ...slice) as { chunk_id: string }[];
+      for (const r of rows) allowedChunkIds.add(r.chunk_id);
+    }
+  }
+
   const results: VectorSearchResult[] = [];
   for (const n of nearest) {
     const chunk = chunkByRowId.get(n.rowid);
     if (!chunk) continue;
+    if (allowedChunkIds && !allowedChunkIds.has(chunk.chunk_id as string)) continue;
     results.push({
       document: rowToDocument(chunk),
       score: 1 - n.distance, // convert cosine distance to similarity
@@ -394,7 +476,6 @@ function safeJsonParse(s: string): Record<string, unknown> {
 // ── Delete ──────────────────────────────────────────────────────────────────
 
 export function deleteByIds(
-  apiKeyHash: string,
   collection: string,
   ids: string[],
 ): { deleted: number } {
@@ -403,10 +484,8 @@ export function deleteByIds(
   if (!ids.length) return { deleted: 0 };
 
   const coll = db
-    .prepare(
-      "SELECT dimension FROM plugin_collections WHERE api_key_hash = ? AND name = ?",
-    )
-    .get(apiKeyHash, collection) as { dimension: number } | undefined;
+    .prepare("SELECT dimension FROM plugin_collections WHERE name = ?")
+    .get(collection) as { dimension: number } | undefined;
   if (!coll) return { deleted: 0 };
 
   const vecTable = vecTableName(coll.dimension);
@@ -414,9 +493,9 @@ export function deleteByIds(
   const rows = db
     .prepare(
       `SELECT rowid FROM plugin_chunks
-        WHERE api_key_hash = ? AND collection = ? AND chunk_id IN (${placeholders})`,
+        WHERE collection = ? AND chunk_id IN (${placeholders})`,
     )
-    .all(apiKeyHash, collection, ...ids) as { rowid: number }[];
+    .all(collection, ...ids) as { rowid: number }[];
 
   if (!rows.length) return { deleted: 0 };
   const rowIds = rows.map((r) => r.rowid);
@@ -429,6 +508,12 @@ export function deleteByIds(
     db.prepare(
       `DELETE FROM plugin_chunks WHERE rowid IN (${rowPlaceholders})`,
     ).run(...rowIds);
+    // Best effort: also strip these chunk_ids from any ref overlays.
+    const idPhs = ids.map(() => "?").join(",");
+    db.prepare(
+      `DELETE FROM plugin_ref_chunks
+        WHERE collection = ? AND chunk_id IN (${idPhs})`,
+    ).run(collection, ...ids);
   });
   tx();
   return { deleted: rows.length };
@@ -437,7 +522,6 @@ export function deleteByIds(
 // ── Query by filter (no vector search) ──────────────────────────────────────
 
 export function queryByFilter(
-  apiKeyHash: string,
   collection: string,
   filterExpr: string,
   outputFields: string[] | null,
@@ -454,11 +538,11 @@ export function queryByFilter(
   const rows = db
     .prepare(
       `SELECT * FROM plugin_chunks
-        WHERE api_key_hash = ? AND collection = ?
+        WHERE collection = ?
           AND ${parsed.column} IN (${placeholders})
         LIMIT ?`,
     )
-    .all(apiKeyHash, collection, ...parsed.values, cap) as Record<string, unknown>[];
+    .all(collection, ...parsed.values, cap) as Record<string, unknown>[];
 
   return rows.map((r) => projectRow(r, outputFields));
 }
@@ -480,4 +564,61 @@ function projectRow(
   const projected: Record<string, unknown> = {};
   for (const f of outputFields) if (f in full) projected[f] = full[f];
   return projected;
+}
+
+// ── GC ──────────────────────────────────────────────────────────────────────
+
+/**
+ * Drop chunks (and their vectors) not referenced by any ref overlay. Safe
+ * to run concurrently with writes — upserts always run inside a transaction
+ * that writes both plugin_chunks and the vec row atomically, and overlay
+ * updates happen in their own transaction that completes before this GC
+ * observes the chunk as orphan.
+ */
+export function gcOrphanedChunks(): { chunksRemoved: number; vecRemoved: number } {
+  requireVec();
+
+  // Group orphan chunks by dimension so we can hit the right vec table.
+  const orphans = db
+    .prepare(
+      `SELECT pc.rowid AS rowid, pc.collection AS collection, c.dimension AS dimension
+         FROM plugin_chunks pc
+         JOIN plugin_collections c ON c.name = pc.collection
+        WHERE NOT EXISTS (
+          SELECT 1 FROM plugin_ref_chunks rc
+           WHERE rc.collection = pc.collection AND rc.chunk_id = pc.chunk_id
+        )`,
+    )
+    .all() as { rowid: number; collection: string; dimension: number }[];
+
+  if (orphans.length === 0) return { chunksRemoved: 0, vecRemoved: 0 };
+
+  const byDim = new Map<number, number[]>();
+  for (const o of orphans) {
+    if (!byDim.has(o.dimension)) byDim.set(o.dimension, []);
+    byDim.get(o.dimension)!.push(o.rowid);
+  }
+
+  let chunksRemoved = 0;
+  let vecRemoved = 0;
+  const tx = db.transaction(() => {
+    for (const [dim, rowids] of byDim) {
+      const vecTable = vecTableName(dim);
+      const CAP = 500;
+      for (let i = 0; i < rowids.length; i += CAP) {
+        const slice = rowids.slice(i, i + CAP);
+        const phs = slice.map(() => "?").join(",");
+        const vecRes = db
+          .prepare(`DELETE FROM ${vecTable} WHERE rowid IN (${phs})`)
+          .run(...slice);
+        vecRemoved += (vecRes as { changes?: number }).changes ?? 0;
+        const chunkRes = db
+          .prepare(`DELETE FROM plugin_chunks WHERE rowid IN (${phs})`)
+          .run(...slice);
+        chunksRemoved += (chunkRes as { changes?: number }).changes ?? 0;
+      }
+    }
+  });
+  tx();
+  return { chunksRemoved, vecRemoved };
 }

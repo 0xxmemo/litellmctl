@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { spawnSync } from 'child_process';
 import { Splitter, CodeChunk, LangChainCodeSplitter } from './splitter';
 import { Embedding, EmbeddingVector } from './embedding/base-embedding';
 import {
@@ -8,9 +9,98 @@ import {
     VectorDocument,
     VectorSearchResult,
 } from './vectordb/types';
+import { GatewayVectorDatabase, RefOverlayEntry } from './vectordb/gateway-vectordb';
 import { SemanticSearchResult } from './types';
 import { envManager } from './utils/env-manager';
 import { FileSynchronizer } from './sync/synchronizer';
+
+export interface CollectionId {
+    name: string;
+    /** Human-readable identity used to derive the name (git URL or abs path). */
+    identity: string;
+}
+
+export interface RefId {
+    /** Wire value passed as ?ref=… e.g. `branch:main` or `user:ab12cd34`. */
+    refId: string;
+    /** Short display label for logs/status, e.g. `main` or `user-ab12cd34`. */
+    display: string;
+}
+
+/**
+ * Normalize a git remote URL so two clones with differently-shaped remotes
+ * (ssh vs https, trailing `.git`, case-mixed host) produce the same key.
+ *
+ *   git@github.com:Foo/Bar.git → github.com/foo/bar
+ *   https://github.com/foo/bar → github.com/foo/bar
+ *   ssh://git@gitlab.com:22/a/b.git → gitlab.com/a/b
+ */
+function normalizeGitUrl(raw: string): string {
+    let u = raw.trim();
+    if (!u) return u;
+    // Strip scheme
+    u = u.replace(/^(?:git\+)?(?:ssh|https?|git):\/\//i, '');
+    // git@host:path → host/path
+    u = u.replace(/^[^@\s]+@([^:\s]+):/, '$1/');
+    // drop user@ prefix if still present
+    u = u.replace(/^[^@\s]+@/, '');
+    // drop port specifiers like host:22/
+    u = u.replace(/^([^/]+):\d+\//, '$1/');
+    // trim trailing whitespace / slashes / .git
+    u = u.replace(/\.git$/i, '').replace(/\/+$/, '');
+    // lowercase the host portion only; keep path case so gitlab.com/Foo/Bar
+    // is distinct from /foo/bar only if the provider is case-sensitive.
+    const slash = u.indexOf('/');
+    if (slash > 0) {
+        u = u.slice(0, slash).toLowerCase() + u.slice(slash);
+    } else {
+        u = u.toLowerCase();
+    }
+    return u;
+}
+
+function readGitRemote(codebasePath: string): string | null {
+    try {
+        const res = spawnSync('git', ['-C', codebasePath, 'remote', 'get-url', 'origin'], {
+            encoding: 'utf8',
+            timeout: 1500,
+        });
+        if (res.status !== 0) return null;
+        const out = (res.stdout || '').trim();
+        return out || null;
+    } catch {
+        return null;
+    }
+}
+
+function readGitBranch(codebasePath: string): string | null {
+    try {
+        const res = spawnSync('git', ['-C', codebasePath, 'rev-parse', '--abbrev-ref', 'HEAD'], {
+            encoding: 'utf8',
+            timeout: 1500,
+        });
+        if (res.status !== 0) return null;
+        const out = (res.stdout || '').trim();
+        if (!out || out === 'HEAD') return null; // detached HEAD
+        return out;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Resolve the ref_id for a codebase — the overlay key that distinguishes
+ * one branch's view from another's. Falls back to a per-api-key sentinel
+ * for detached HEADs / non-git repos so distinct users don't collide on
+ * a shared "unknown" ref.
+ */
+export function resolveRefId(codebasePath: string, apiKeyForFallback = ''): RefId {
+    const branch = readGitBranch(codebasePath);
+    if (branch) return { refId: `branch:${branch}`, display: branch };
+    const fallbackSource = apiKeyForFallback || process.env.LLM_GATEWAY_API_KEY || 'anonymous';
+    const hash = crypto.createHash('sha256').update(fallbackSource).digest('hex').slice(0, 12);
+    return { refId: `user:${hash}`, display: `user-${hash}` };
+}
 
 const DEFAULT_SUPPORTED_EXTENSIONS = [
     '.ts', '.tsx', '.js', '.jsx', '.py', '.java', '.cpp', '.c', '.h', '.hpp',
@@ -102,67 +192,195 @@ export class Context {
     }
 
     /**
-     * Collection name — dense-only, tenant scoping comes from the gateway
-     * via api_key_hash, so we can use the plain `code_chunks_<md5-8>` form.
+     * Resolve the collection id for a codebase. The gateway hosts one global
+     * shared pool; collection identity is derived from the normalized git
+     * origin URL when available (so two clones of the same repo see the same
+     * vectors) and falls back to the absolute path otherwise.
      */
-    public getCollectionName(codebasePath: string): string {
-        const normalizedPath = path.resolve(codebasePath);
-        const hash = crypto.createHash('md5').update(normalizedPath).digest('hex');
-        return `code_chunks_${hash.substring(0, 8)}`;
+    public resolveCollectionId(codebasePath: string): CollectionId {
+        const absPath = path.resolve(codebasePath);
+        const remote = readGitRemote(absPath);
+        if (remote) {
+            const identity = normalizeGitUrl(remote);
+            if (identity) {
+                const hash = crypto.createHash('md5').update(identity).digest('hex');
+                return { name: `code_shared_${hash.substring(0, 8)}`, identity };
+            }
+        }
+        const hash = crypto.createHash('md5').update(absPath).digest('hex');
+        return { name: `code_shared_${hash.substring(0, 8)}`, identity: absPath };
     }
 
+    public getCollectionName(codebasePath: string): string {
+        return this.resolveCollectionId(codebasePath).name;
+    }
+
+    public resolveRefId(codebasePath: string): RefId {
+        return resolveRefId(codebasePath);
+    }
+
+    /**
+     * Chunk the working tree, upload only chunks the gateway doesn't already
+     * have, then replace this ref's overlay with the fresh file → chunk_ids
+     * map. Idempotent: calling this twice in a row without local changes
+     * re-uploads nothing (all chunk_ids hit the existing-chunks probe) and
+     * just re-writes the same overlay.
+     */
     async indexCodebase(
         codebasePath: string,
         progressCallback?: (progress: { phase: string; current: number; total: number; percentage: number }) => void,
         forceReindex: boolean = false,
-    ): Promise<{ indexedFiles: number; totalChunks: number; status: 'completed' | 'limit_reached' }> {
+    ): Promise<{
+        indexedFiles: number;
+        totalChunks: number;
+        uploadedChunks: number;
+        existingChunks: number;
+        status: 'completed' | 'limit_reached';
+    }> {
         console.log(`[Context] Indexing codebase: ${codebasePath}`);
         await this.loadIgnorePatterns(codebasePath);
 
         progressCallback?.({ phase: 'Preparing collection...', current: 0, total: 100, percentage: 0 });
         await this.prepareCollection(codebasePath, forceReindex);
+        const collectionName = this.getCollectionName(codebasePath);
+        const { refId } = this.resolveRefId(codebasePath);
 
         progressCallback?.({ phase: 'Scanning files...', current: 5, total: 100, percentage: 5 });
         const codeFiles = await this.getCodeFiles(codebasePath);
-        console.log(`[Context] Found ${codeFiles.length} code files`);
+        console.log(`[Context] Found ${codeFiles.length} code files (ref=${refId})`);
 
+        const gateway = this.vectorDatabase as GatewayVectorDatabase;
         if (codeFiles.length === 0) {
+            // Empty tree on this ref → empty overlay (gateway deletes stale rows).
+            if (typeof gateway.setRefOverlay === 'function') {
+                await gateway.setRefOverlay(collectionName, refId, []);
+            }
             progressCallback?.({ phase: 'No files to index', current: 100, total: 100, percentage: 100 });
-            return { indexedFiles: 0, totalChunks: 0, status: 'completed' };
+            return { indexedFiles: 0, totalChunks: 0, uploadedChunks: 0, existingChunks: 0, status: 'completed' };
         }
 
-        const indexingStart = 10;
-        const indexingEnd = 100;
-        const range = indexingEnd - indexingStart;
+        // Phase 1 — chunk every file, build the full overlay and an embed queue.
+        const CHUNK_LIMIT = 450000;
+        const chunkPhaseStart = 10;
+        const chunkPhaseEnd = 50;
+        const chunkRange = chunkPhaseEnd - chunkPhaseStart;
 
-        const result = await this.processFileList(
-            codeFiles,
-            codebasePath,
-            (_filePath, fileIndex, totalFiles) => {
-                const pct = indexingStart + (fileIndex / totalFiles) * range;
-                progressCallback?.({
-                    phase: `Processing files (${fileIndex}/${totalFiles})...`,
-                    current: fileIndex,
-                    total: totalFiles,
-                    percentage: Math.round(pct),
-                });
-            },
+        interface PendingChunk {
+            chunk: CodeChunk;
+            chunkId: string;
+            relativePath: string;
+        }
+        const overlayEntries: RefOverlayEntry[] = [];
+        const pendingByChunkId = new Map<string, PendingChunk>();
+        let processedFiles = 0;
+        let limitReached = false;
+
+        for (let i = 0; i < codeFiles.length; i++) {
+            const filePath = codeFiles[i];
+            try {
+                const content = await fs.promises.readFile(filePath, 'utf-8');
+                const language = this.getLanguageFromExtension(path.extname(filePath));
+                const chunks = await this.codeSplitter.split(content, language, filePath);
+                const relativePath = path.relative(codebasePath, filePath);
+                const chunkIds: string[] = [];
+                for (const chunk of chunks) {
+                    const chunkId = this.generateId(
+                        relativePath,
+                        chunk.metadata.startLine || 0,
+                        chunk.metadata.endLine || 0,
+                        chunk.content,
+                    );
+                    chunkIds.push(chunkId);
+                    if (!pendingByChunkId.has(chunkId)) {
+                        pendingByChunkId.set(chunkId, { chunk, chunkId, relativePath });
+                        if (pendingByChunkId.size >= CHUNK_LIMIT) {
+                            limitReached = true;
+                            break;
+                        }
+                    }
+                }
+                overlayEntries.push({ filePath: relativePath, chunkIds });
+                processedFiles++;
+            } catch (err) {
+                console.warn(`[Context] Skipping file ${filePath}: ${err}`);
+                continue;
+            }
+            const pct = chunkPhaseStart + ((i + 1) / codeFiles.length) * chunkRange;
+            progressCallback?.({
+                phase: `Chunking files (${i + 1}/${codeFiles.length})...`,
+                current: i + 1,
+                total: codeFiles.length,
+                percentage: Math.round(pct),
+            });
+            if (limitReached) break;
+        }
+
+        const allChunkIds = [...pendingByChunkId.keys()];
+
+        // Phase 2 — ask the gateway which chunks it already has.
+        progressCallback?.({ phase: 'Checking existing chunks...', current: 0, total: 100, percentage: 55 });
+        const existing =
+            typeof gateway.listExistingChunkIds === 'function'
+                ? await gateway.listExistingChunkIds(collectionName, allChunkIds)
+                : new Set<string>();
+        const missingIds = allChunkIds.filter((id) => !existing.has(id));
+        console.log(
+            `[Context] chunks: ${allChunkIds.length} total, ${existing.size} already stored, ${missingIds.length} to embed`,
         );
 
+        // Phase 3 — embed + insert only the missing chunks, in batches.
+        const embedPhaseStart = 55;
+        const embedPhaseEnd = 95;
+        const embedRange = embedPhaseEnd - embedPhaseStart;
+        const BATCH = Math.max(1, parseInt(envManager.get('EMBEDDING_BATCH_SIZE') || '64', 10));
+        let uploaded = 0;
+        for (let i = 0; i < missingIds.length; i += BATCH) {
+            const slice = missingIds.slice(i, i + BATCH);
+            try {
+                await this.embedAndInsertChunks(collectionName, codebasePath, slice, pendingByChunkId);
+            } catch (err) {
+                console.error('[Context] Failed to embed/insert batch:', err);
+            }
+            uploaded += slice.length;
+            const pct =
+                missingIds.length === 0
+                    ? embedPhaseEnd
+                    : embedPhaseStart + (uploaded / missingIds.length) * embedRange;
+            progressCallback?.({
+                phase: `Embedding chunks (${uploaded}/${missingIds.length})...`,
+                current: uploaded,
+                total: missingIds.length,
+                percentage: Math.round(pct),
+            });
+        }
+
+        // Phase 4 — replace the ref overlay so the new file → chunks map is live.
+        progressCallback?.({ phase: 'Updating ref overlay...', current: 0, total: 100, percentage: 97 });
+        if (typeof gateway.setRefOverlay === 'function') {
+            await gateway.setRefOverlay(collectionName, refId, overlayEntries);
+        }
         progressCallback?.({
             phase: 'Indexing complete',
-            current: result.processedFiles,
+            current: processedFiles,
             total: codeFiles.length,
             percentage: 100,
         });
 
         return {
-            indexedFiles: result.processedFiles,
-            totalChunks: result.totalChunks,
-            status: result.status,
+            indexedFiles: processedFiles,
+            totalChunks: allChunkIds.length,
+            uploadedChunks: uploaded,
+            existingChunks: existing.size,
+            status: limitReached ? 'limit_reached' : 'completed',
         };
     }
 
+    /**
+     * Report file-level changes since the synchronizer's last known state.
+     * Still calls indexCodebase (which rebuilds the entire overlay for this
+     * ref) — the overlay model makes partial reindex equivalent to a full
+     * reindex, so we just surface the file-delta counts for logging.
+     */
     async reindexByChange(
         codebasePath: string,
         progressCallback?: (progress: { phase: string; current: number; total: number; percentage: number }) => void,
@@ -175,59 +393,53 @@ export class Context {
             this.synchronizers.set(collectionName, newSync);
         }
         const sync = this.synchronizers.get(collectionName)!;
-        progressCallback?.({ phase: 'Checking for file changes...', current: 0, total: 100, percentage: 0 });
         const { added, removed, modified } = await sync.checkForChanges();
-        const totalChanges = added.length + removed.length + modified.length;
 
-        if (totalChanges === 0) {
+        if (added.length + removed.length + modified.length === 0) {
             progressCallback?.({ phase: 'No changes detected', current: 100, total: 100, percentage: 100 });
             return { added: 0, removed: 0, modified: 0 };
         }
 
-        let processed = 0;
-        const update = (phase: string) => {
-            processed++;
-            const pct = Math.round((processed / totalChanges) * 100);
-            progressCallback?.({ phase, current: processed, total: totalChanges, percentage: pct });
-        };
-
-        for (const file of removed) {
-            await this.deleteFileChunks(collectionName, file);
-            update(`Removed ${file}`);
-        }
-        for (const file of modified) {
-            await this.deleteFileChunks(collectionName, file);
-            update(`Deleted old chunks for ${file}`);
-        }
-
-        const filesToIndex = [...added, ...modified].map((f) => path.join(codebasePath, f));
-        if (filesToIndex.length > 0) {
-            await this.processFileList(
-                filesToIndex,
-                codebasePath,
-                (filePath, fileIndex, totalFiles) => update(`Indexed ${filePath} (${fileIndex}/${totalFiles})`),
-            );
-        }
-
-        progressCallback?.({ phase: 'Re-indexing complete', current: totalChanges, total: totalChanges, percentage: 100 });
+        await this.indexCodebase(codebasePath, progressCallback, false);
         return { added: added.length, removed: removed.length, modified: modified.length };
     }
 
-    private async deleteFileChunks(collectionName: string, relativePath: string): Promise<void> {
-        // Gateway query parser accepts `<field> in [...]` only.
-        const escaped = relativePath.replace(/"/g, '\\"');
-        const results = await this.vectorDatabase.query(
-            collectionName,
-            `relativePath in ["${escaped}"]`,
-            ['id'],
-        );
-        if (results.length > 0) {
-            const ids = results.map((r) => r.id as string).filter(Boolean);
-            if (ids.length > 0) {
-                await this.vectorDatabase.delete(collectionName, ids);
-                console.log(`[Context] Deleted ${ids.length} chunks for file ${relativePath}`);
-            }
-        }
+    /**
+     * Embed `chunkIds` (slice of the overall batch) and insert with those
+     * exact IDs so the gateway's dedupe matches what listExistingChunkIds
+     * reported.
+     */
+    private async embedAndInsertChunks(
+        collectionName: string,
+        codebasePath: string,
+        chunkIds: string[],
+        pendingByChunkId: Map<string, { chunk: CodeChunk; chunkId: string; relativePath: string }>,
+    ): Promise<void> {
+        if (chunkIds.length === 0) return;
+        const pending = chunkIds.map((id) => pendingByChunkId.get(id)!).filter(Boolean);
+        const contents = pending.map((p) => p.chunk.content);
+        const embeddings = await this.embedding.embedBatch(contents);
+
+        const documents: VectorDocument[] = pending.map((p, index) => {
+            const { chunk, chunkId, relativePath } = p;
+            const fileExtension = path.extname(chunk.metadata.filePath || '');
+            const { filePath: _omit, startLine, endLine, ...restMetadata } = chunk.metadata;
+            return {
+                id: chunkId,
+                vector: embeddings[index].vector,
+                content: chunk.content,
+                relativePath,
+                startLine: chunk.metadata.startLine || 0,
+                endLine: chunk.metadata.endLine || 0,
+                fileExtension,
+                metadata: {
+                    ...restMetadata,
+                    codebasePath,
+                    language: chunk.metadata.language || 'unknown',
+                },
+            };
+        });
+        await this.vectorDatabase.insert(collectionName, documents);
     }
 
     async semanticSearch(
@@ -237,8 +449,9 @@ export class Context {
         threshold: number = 0.5,
         filterExpr?: string,
     ): Promise<SemanticSearchResult[]> {
-        console.log(`[Context] Searching "${query}" in ${codebasePath}`);
         const collectionName = this.getCollectionName(codebasePath);
+        const { refId } = this.resolveRefId(codebasePath);
+        console.log(`[Context] Searching "${query}" in ${codebasePath} (ref=${refId})`);
         if (!(await this.vectorDatabase.hasCollection(collectionName))) {
             console.log(`[Context] Collection '${collectionName}' not found. Index the codebase first.`);
             return [];
@@ -248,7 +461,7 @@ export class Context {
         const searchResults: VectorSearchResult[] = await this.vectorDatabase.search(
             collectionName,
             queryEmbedding.vector,
-            { topK, threshold, filterExpr },
+            { topK, threshold, filterExpr, refId },
         );
 
         return searchResults.map((r) => ({
@@ -331,98 +544,6 @@ export class Context {
         };
         await traverse(codebasePath);
         return files;
-    }
-
-    private async processFileList(
-        filePaths: string[],
-        codebasePath: string,
-        onFileProcessed?: (filePath: string, fileIndex: number, totalFiles: number) => void,
-    ): Promise<{ processedFiles: number; totalChunks: number; status: 'completed' | 'limit_reached' }> {
-        const BATCH = Math.max(1, parseInt(envManager.get('EMBEDDING_BATCH_SIZE') || '64', 10));
-        const CHUNK_LIMIT = 450000;
-
-        let chunkBuffer: Array<{ chunk: CodeChunk; codebasePath: string }> = [];
-        let processedFiles = 0;
-        let totalChunks = 0;
-        let limitReached = false;
-
-        for (let i = 0; i < filePaths.length; i++) {
-            const filePath = filePaths[i];
-            try {
-                const content = await fs.promises.readFile(filePath, 'utf-8');
-                const language = this.getLanguageFromExtension(path.extname(filePath));
-                const chunks = await this.codeSplitter.split(content, language, filePath);
-                for (const chunk of chunks) {
-                    chunkBuffer.push({ chunk, codebasePath });
-                    totalChunks++;
-                    if (chunkBuffer.length >= BATCH) {
-                        try {
-                            await this.processChunkBuffer(chunkBuffer);
-                        } catch (error) {
-                            console.error('[Context] Failed to process chunk batch:', error);
-                        } finally {
-                            chunkBuffer = [];
-                        }
-                    }
-                    if (totalChunks >= CHUNK_LIMIT) {
-                        limitReached = true;
-                        break;
-                    }
-                }
-                processedFiles++;
-                onFileProcessed?.(filePath, i + 1, filePaths.length);
-                if (limitReached) break;
-            } catch (error) {
-                console.warn(`[Context] Skipping file ${filePath}: ${error}`);
-            }
-        }
-
-        if (chunkBuffer.length > 0) {
-            try {
-                await this.processChunkBuffer(chunkBuffer);
-            } catch (error) {
-                console.error('[Context] Failed to process final chunk batch:', error);
-            }
-        }
-
-        return { processedFiles, totalChunks, status: limitReached ? 'limit_reached' : 'completed' };
-    }
-
-    private async processChunkBuffer(chunkBuffer: Array<{ chunk: CodeChunk; codebasePath: string }>): Promise<void> {
-        if (!chunkBuffer.length) return;
-        const chunks = chunkBuffer.map((c) => c.chunk);
-        const codebasePath = chunkBuffer[0].codebasePath;
-        await this.processChunkBatch(chunks, codebasePath);
-    }
-
-    private async processChunkBatch(chunks: CodeChunk[], codebasePath: string): Promise<void> {
-        const contents = chunks.map((c) => c.content);
-        const embeddings = await this.embedding.embedBatch(contents);
-
-        const documents: VectorDocument[] = chunks.map((chunk, index) => {
-            if (!chunk.metadata.filePath) {
-                throw new Error(`Missing filePath in chunk metadata at index ${index}`);
-            }
-            const relativePath = path.relative(codebasePath, chunk.metadata.filePath);
-            const fileExtension = path.extname(chunk.metadata.filePath);
-            const { filePath, startLine, endLine, ...restMetadata } = chunk.metadata;
-            return {
-                id: this.generateId(relativePath, chunk.metadata.startLine || 0, chunk.metadata.endLine || 0, chunk.content),
-                vector: embeddings[index].vector,
-                content: chunk.content,
-                relativePath,
-                startLine: chunk.metadata.startLine || 0,
-                endLine: chunk.metadata.endLine || 0,
-                fileExtension,
-                metadata: {
-                    ...restMetadata,
-                    codebasePath,
-                    language: chunk.metadata.language || 'unknown',
-                    chunkIndex: index,
-                },
-            };
-        });
-        await this.vectorDatabase.insert(this.getCollectionName(codebasePath), documents);
     }
 
     private getLanguageFromExtension(ext: string): string {

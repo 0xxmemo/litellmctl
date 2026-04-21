@@ -1,16 +1,16 @@
 /**
- * Vector DB API — tenant-scoped REST surface consumed by plugins
- * (e.g. claude-context) that need per-user vector storage backed by sqlite-vec.
+ * Vector DB API — REST surface consumed by plugins (e.g. claude-context).
  *
- * All routes require a valid API key; data is scoped by api_key_hash.
+ * Collections are globally shared across all authenticated clients. Branch /
+ * user isolation is expressed via ref overlays (`plugin_ref_chunks`): the
+ * indexer declares which chunks a ref considers live, and search filters
+ * KNN results to that set via `?ref=<id>`.
+ *
+ * All routes require a valid API key for auth, but the caller's key is no
+ * longer used to partition data.
  */
 
-import {
-  requireUser,
-  validateApiKey,
-  isVecLoaded,
-} from "../lib/db";
-import { extractApiKey } from "../lib/auth";
+import { requireUser, requireAdmin } from "../lib/db";
 import {
   createCollection,
   dropCollection,
@@ -22,31 +22,23 @@ import {
   deleteByIds,
   queryByFilter,
   validateName,
+  validateRefId,
+  listExistingChunkIds,
+  setRefOverlay,
+  getRefOverlay,
+  gcOrphanedChunks,
   type VectorDocument,
+  type RefOverlayEntry,
 } from "../lib/vectordb";
+import { isVecLoaded } from "../lib/db";
 
 function errJson(message: string, status = 400): Response {
   return Response.json({ error: message }, { status });
 }
 
-async function resolveKeyHash(
-  req: Request,
-): Promise<string | Response> {
-  const auth = await requireUser(req);
-  if (auth instanceof Response) return auth;
-  const apiKey = extractApiKey(req);
-  if (!apiKey) return errJson("API key required (Bearer token)", 401);
-  const record = validateApiKey(apiKey);
-  if (!record) return errJson("Invalid API key", 401);
-  return record.keyHash;
-}
-
 function checkVecReady(): Response | null {
   if (!isVecLoaded()) {
-    return errJson(
-      "sqlite-vec extension is not loaded on this gateway",
-      503,
-    );
+    return errJson("sqlite-vec extension is not loaded on this gateway", 503);
   }
   return null;
 }
@@ -66,11 +58,34 @@ function parseCollectionNameFromPath(
   return validateName(tail) ? tail : null;
 }
 
+/** Parse `/api/vectordb/collections/<name>/refs/<ref>[/<suffix>]` URLs. */
+function parseCollectionAndRef(
+  pathname: string,
+  suffix = "",
+): { name: string; refId: string } | null {
+  const prefix = "/api/vectordb/collections/";
+  if (!pathname.startsWith(prefix)) return null;
+  let tail = pathname.slice(prefix.length);
+  const refsIdx = tail.indexOf("/refs/");
+  if (refsIdx < 0) return null;
+  const name = tail.slice(0, refsIdx);
+  if (!validateName(name)) return null;
+  let refPart = tail.slice(refsIdx + "/refs/".length);
+  if (suffix) {
+    if (!refPart.endsWith(suffix)) return null;
+    refPart = refPart.slice(0, -suffix.length);
+  }
+  if (!refPart) return null;
+  const refId = decodeURIComponent(refPart);
+  if (!validateRefId(refId)) return null;
+  return { name, refId };
+}
+
 // ── Handlers ────────────────────────────────────────────────────────────────
 
 async function createCollectionHandler(req: Request): Promise<Response> {
-  const keyHash = await resolveKeyHash(req);
-  if (keyHash instanceof Response) return keyHash;
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
   const vec = checkVecReady();
   if (vec) return vec;
 
@@ -85,17 +100,20 @@ async function createCollectionHandler(req: Request): Promise<Response> {
     return errJson("Invalid dimension");
   }
   try {
-    const res = createCollection(keyHash, body.name, body.dimension as number);
-    return Response.json({ name: body.name, dimension: body.dimension, created: res.created }, { status: res.created ? 201 : 200 });
+    const res = createCollection(body.name, body.dimension as number);
+    return Response.json(
+      { name: body.name, dimension: body.dimension, created: res.created },
+      { status: res.created ? 201 : 200 },
+    );
   } catch (err) {
     return errJson(err instanceof Error ? err.message : String(err));
   }
 }
 
 async function listCollectionsHandler(req: Request): Promise<Response> {
-  const keyHash = await resolveKeyHash(req);
-  if (keyHash instanceof Response) return keyHash;
-  return Response.json({ names: listCollections(keyHash) });
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
+  return Response.json({ names: listCollections() });
 }
 
 async function handleCollectionByName(req: Request): Promise<Response | null> {
@@ -103,11 +121,11 @@ async function handleCollectionByName(req: Request): Promise<Response | null> {
   const name = parseCollectionNameFromPath(url.pathname, "/api/vectordb/collections/");
   if (!name) return null;
 
-  const keyHash = await resolveKeyHash(req);
-  if (keyHash instanceof Response) return keyHash;
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
 
   if (req.method === "GET") {
-    const info = getCollection(keyHash, name);
+    const info = getCollection(name);
     if (!info) {
       return Response.json({ exists: false, name, rowCount: 0, dimension: 0 });
     }
@@ -116,7 +134,7 @@ async function handleCollectionByName(req: Request): Promise<Response | null> {
 
   if (req.method === "DELETE") {
     try {
-      dropCollection(keyHash, name);
+      dropCollection(name);
       return new Response(null, { status: 204 });
     } catch (err) {
       return errJson(err instanceof Error ? err.message : String(err));
@@ -135,8 +153,8 @@ async function handleInsert(req: Request): Promise<Response | null> {
   );
   if (!name) return null;
 
-  const keyHash = await resolveKeyHash(req);
-  if (keyHash instanceof Response) return keyHash;
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
   const vec = checkVecReady();
   if (vec) return vec;
 
@@ -147,10 +165,10 @@ async function handleInsert(req: Request): Promise<Response | null> {
     return errJson("Invalid JSON body");
   }
   if (!Array.isArray(body.documents)) return errJson("documents must be an array");
-  if (!hasCollection(keyHash, name)) return errJson("Collection not found", 404);
+  if (!hasCollection(name)) return errJson("Collection not found", 404);
 
   try {
-    const res = insertDocuments(keyHash, name, body.documents);
+    const res = insertDocuments(name, body.documents);
     return Response.json(res);
   } catch (err) {
     return errJson(err instanceof Error ? err.message : String(err));
@@ -166,8 +184,8 @@ async function handleSearch(req: Request): Promise<Response | null> {
   );
   if (!name) return null;
 
-  const keyHash = await resolveKeyHash(req);
-  if (keyHash instanceof Response) return keyHash;
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
   const vec = checkVecReady();
   if (vec) return vec;
 
@@ -182,15 +200,18 @@ async function handleSearch(req: Request): Promise<Response | null> {
     return errJson("Invalid JSON body");
   }
   if (!Array.isArray(body.queryVector)) return errJson("queryVector required");
-  if (!hasCollection(keyHash, name)) return errJson("Collection not found", 404);
+  if (!hasCollection(name)) return errJson("Collection not found", 404);
+
+  const refId = url.searchParams.get("ref");
+  if (refId !== null && !validateRefId(refId)) return errJson("Invalid ref id");
 
   try {
     const results = searchVectors(
-      keyHash,
       name,
       body.queryVector,
       body.topK ?? 10,
       body.filterExpr ?? null,
+      refId,
     );
     return Response.json({ results });
   } catch (err) {
@@ -207,8 +228,8 @@ async function handleDelete(req: Request): Promise<Response | null> {
   );
   if (!name) return null;
 
-  const keyHash = await resolveKeyHash(req);
-  if (keyHash instanceof Response) return keyHash;
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
   const vec = checkVecReady();
   if (vec) return vec;
 
@@ -221,7 +242,7 @@ async function handleDelete(req: Request): Promise<Response | null> {
   if (!Array.isArray(body.ids)) return errJson("ids must be an array");
 
   try {
-    const res = deleteByIds(keyHash, name, body.ids);
+    const res = deleteByIds(name, body.ids);
     return Response.json(res);
   } catch (err) {
     return errJson(err instanceof Error ? err.message : String(err));
@@ -237,8 +258,8 @@ async function handleQuery(req: Request): Promise<Response | null> {
   );
   if (!name) return null;
 
-  const keyHash = await resolveKeyHash(req);
-  if (keyHash instanceof Response) return keyHash;
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
 
   let body: {
     filterExpr?: string;
@@ -251,17 +272,113 @@ async function handleQuery(req: Request): Promise<Response | null> {
     return errJson("Invalid JSON body");
   }
   if (!body.filterExpr) return errJson("filterExpr required");
-  if (!hasCollection(keyHash, name)) return errJson("Collection not found", 404);
+  if (!hasCollection(name)) return errJson("Collection not found", 404);
 
   try {
     const rows = queryByFilter(
-      keyHash,
       name,
       body.filterExpr,
       body.outputFields ?? null,
       body.limit ?? 1000,
     );
     return Response.json({ rows });
+  } catch (err) {
+    return errJson(err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function handleExistingChunks(req: Request): Promise<Response | null> {
+  const url = new URL(req.url);
+  const name = parseCollectionNameFromPath(
+    url.pathname,
+    "/api/vectordb/collections/",
+    "/chunks/existing",
+  );
+  if (!name) return null;
+
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
+
+  let body: { chunkIds?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return errJson("Invalid JSON body");
+  }
+  if (!Array.isArray(body.chunkIds)) return errJson("chunkIds must be an array");
+  const ids = (body.chunkIds as unknown[]).filter(
+    (x): x is string => typeof x === "string" && x.length > 0,
+  );
+  if (!hasCollection(name)) return errJson("Collection not found", 404);
+
+  try {
+    return Response.json({ existing: listExistingChunkIds(name, ids) });
+  } catch (err) {
+    return errJson(err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function handleOverlayPost(req: Request): Promise<Response | null> {
+  const url = new URL(req.url);
+  const parsed = parseCollectionAndRef(url.pathname, "/overlay");
+  if (!parsed) return null;
+
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
+
+  let body: { entries?: unknown };
+  try {
+    body = await req.json();
+  } catch {
+    return errJson("Invalid JSON body");
+  }
+  if (!Array.isArray(body.entries)) return errJson("entries must be an array");
+  if (!hasCollection(parsed.name)) return errJson("Collection not found", 404);
+
+  const entries: RefOverlayEntry[] = (body.entries as unknown[])
+    .filter((e): e is { filePath: unknown; chunkIds: unknown } => typeof e === "object" && e !== null)
+    .map((e) => ({
+      filePath: typeof e.filePath === "string" ? e.filePath : "",
+      chunkIds: Array.isArray(e.chunkIds)
+        ? (e.chunkIds as unknown[]).filter(
+            (x): x is string => typeof x === "string" && x.length > 0,
+          )
+        : [],
+    }))
+    .filter((e) => e.filePath.length > 0);
+
+  try {
+    const res = setRefOverlay(parsed.name, parsed.refId, entries);
+    return Response.json(res);
+  } catch (err) {
+    return errJson(err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function handleOverlayGet(req: Request): Promise<Response | null> {
+  const url = new URL(req.url);
+  const parsed = parseCollectionAndRef(url.pathname);
+  if (!parsed) return null;
+
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
+  if (!hasCollection(parsed.name)) return errJson("Collection not found", 404);
+
+  try {
+    return Response.json({ entries: getRefOverlay(parsed.name, parsed.refId) });
+  } catch (err) {
+    return errJson(err instanceof Error ? err.message : String(err));
+  }
+}
+
+async function handleAdminGc(req: Request): Promise<Response> {
+  const auth = await requireAdmin(req);
+  if (auth instanceof Response) return auth;
+  const vec = checkVecReady();
+  if (vec) return vec;
+  try {
+    const res = gcOrphanedChunks();
+    return Response.json(res);
   } catch (err) {
     return errJson(err instanceof Error ? err.message : String(err));
   }
@@ -275,8 +392,18 @@ export async function handleVectorDbByName(
   req: Request,
 ): Promise<Response | null> {
   const url = new URL(req.url);
+  if (!url.pathname.startsWith("/api/vectordb/")) return null;
+
+  if (url.pathname === "/api/vectordb/gc" && req.method === "POST") {
+    return handleAdminGc(req);
+  }
   if (!url.pathname.startsWith("/api/vectordb/collections/")) return null;
 
+  // Order matters: longer suffixes first so /chunks/existing isn't swallowed
+  // by a name parser that treats "chunks" as a collection path segment.
+  if (url.pathname.endsWith("/chunks/existing") && req.method === "POST") {
+    return handleExistingChunks(req);
+  }
   if (url.pathname.endsWith("/insert") && req.method === "POST") {
     return handleInsert(req);
   }
@@ -288,6 +415,12 @@ export async function handleVectorDbByName(
   }
   if (url.pathname.endsWith("/query") && req.method === "POST") {
     return handleQuery(req);
+  }
+  if (url.pathname.endsWith("/overlay") && req.method === "POST") {
+    return handleOverlayPost(req);
+  }
+  if (url.pathname.includes("/refs/") && req.method === "GET") {
+    return handleOverlayGet(req);
   }
   return handleCollectionByName(req);
 }

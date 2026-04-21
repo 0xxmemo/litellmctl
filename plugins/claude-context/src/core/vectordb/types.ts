@@ -15,6 +15,12 @@ export interface SearchOptions {
     filter?: Record<string, any>;
     threshold?: number;
     filterExpr?: string;
+    /**
+     * When set, the backend filters KNN results to chunks that belong to this
+     * ref's overlay. Typical value: `branch:<name>`. Ignored by backends that
+     * don't support ref overlays.
+     */
+    refId?: string;
 }
 
 // New interfaces for hybrid search

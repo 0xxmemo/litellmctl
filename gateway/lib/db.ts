@@ -110,17 +110,17 @@ export async function connectDB(): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_usage_email_actual_ts
       ON usage_logs(email, actual_model, timestamp DESC);
 
+    -- plugin_* tables: shared across all authenticated clients. Branch-
+    -- level isolation is expressed via plugin_ref_chunks overlays, not per-
+    -- tenant row scoping. See docs/claude-context.md for the data model.
     CREATE TABLE IF NOT EXISTS plugin_collections (
-      api_key_hash TEXT NOT NULL,
-      name TEXT NOT NULL,
+      name TEXT PRIMARY KEY,
       dimension INTEGER NOT NULL,
-      created_at INTEGER NOT NULL,
-      PRIMARY KEY (api_key_hash, name)
+      created_at INTEGER NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS plugin_chunks (
       rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-      api_key_hash TEXT NOT NULL,
       collection TEXT NOT NULL,
       chunk_id TEXT NOT NULL,
       content TEXT NOT NULL,
@@ -129,13 +129,44 @@ export async function connectDB(): Promise<void> {
       end_line INTEGER NOT NULL,
       file_extension TEXT,
       metadata TEXT,
-      UNIQUE(api_key_hash, collection, chunk_id)
+      UNIQUE(collection, chunk_id)
     );
-    CREATE INDEX IF NOT EXISTS idx_plugin_chunks_scope
-      ON plugin_chunks(api_key_hash, collection);
-    CREATE INDEX IF NOT EXISTS idx_plugin_chunks_rel
-      ON plugin_chunks(api_key_hash, collection, relative_path);
+    CREATE INDEX IF NOT EXISTS idx_plugin_chunks_collection
+      ON plugin_chunks(collection);
+
+    CREATE TABLE IF NOT EXISTS plugin_ref_chunks (
+      collection TEXT NOT NULL,
+      ref_id TEXT NOT NULL,
+      file_path TEXT NOT NULL,
+      chunk_id TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (collection, ref_id, file_path, chunk_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_ref_chunks_ref
+      ON plugin_ref_chunks(collection, ref_id);
+    CREATE INDEX IF NOT EXISTS idx_ref_chunks_chunk
+      ON plugin_ref_chunks(collection, chunk_id);
   `;
+
+  // One-shot cleanup of pre-v2 per-tenant rows. Detect via the legacy
+  // `api_key_hash` column; drop both plugin_* tables + all vec partitions so
+  // the fresh schema can take over cleanly. The data was barely used and is
+  // cheaper to re-index than to migrate.
+  const legacy = db
+    .prepare("PRAGMA table_info(plugin_chunks)")
+    .all() as { name: string }[];
+  if (legacy.some((c) => c.name === "api_key_hash")) {
+    console.log("[db] Dropping legacy per-tenant plugin_* tables (pre-v2 schema)");
+    db.run("DROP TABLE IF EXISTS plugin_chunks");
+    db.run("DROP TABLE IF EXISTS plugin_collections");
+    const vecTables = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'plugin_chunks_vec_%'",
+      )
+      .all() as { name: string }[];
+    for (const t of vecTables) db.run(`DROP TABLE IF EXISTS ${t.name}`);
+  }
+
   for (const stmt of schema.split(";")) {
     const trimmed = stmt.trim();
     if (trimmed) db.run(trimmed);
@@ -149,6 +180,36 @@ export async function connectDB(): Promise<void> {
   // brand-new admins get seeded with approved_at set. Lets a deploy
   // rotate the admin list via .env without anyone having to re-login.
   promoteConfiguredAdmins();
+
+  scheduleVectorGc();
+}
+
+/**
+ * Periodically drop chunks that no ref overlay references any more. Cheap
+ * when the collection is fresh (delete returns 0 rows); bounds disk growth
+ * when teams churn through branches. Runs every 6h after a short initial
+ * delay so it doesn't fight startup I/O.
+ */
+function scheduleVectorGc(): void {
+  const SIX_HOURS_MS = 6 * 60 * 60 * 1000;
+  const INITIAL_DELAY_MS = 5 * 60 * 1000;
+  const run = async () => {
+    try {
+      const { gcOrphanedChunks } = await import("./vectordb");
+      const res = gcOrphanedChunks();
+      if (res.chunksRemoved > 0 || res.vecRemoved > 0) {
+        console.log(
+          `[vectordb-gc] removed ${res.chunksRemoved} chunks, ${res.vecRemoved} vectors`,
+        );
+      }
+    } catch (err) {
+      console.warn("[vectordb-gc] skipped:", err instanceof Error ? err.message : err);
+    }
+  };
+  setTimeout(() => {
+    run();
+    setInterval(run, SIX_HOURS_MS);
+  }, INITIAL_DELAY_MS);
 }
 
 export function dbHealthy(): boolean {
