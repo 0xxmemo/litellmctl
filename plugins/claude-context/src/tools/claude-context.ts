@@ -487,7 +487,9 @@ export async function runSync(
     }
   }
 
-  await updateJob({ percentage: 0 });
+  // Mark the job live but don't reset percentage/counts — the prior run's
+  // numbers stay visible until this run has definitive replacements.
+  await updateJob({});
 
   // Fetch the prior overlay so we can carry unchanged files forward without
   // reading them. Missing overlay (first index) just leaves the map empty.
@@ -560,9 +562,11 @@ export async function runSync(
 
     // Heartbeat so the gateway's 120s staleness reaper doesn't flip this job
     // to "failed" while we're grinding through a large repo's first sync.
+    // Empty payload on purpose — prior run's indexed_files/total_chunks stay
+    // visible until we have definitive new values after chunksExists.
     const t = now();
     if (t - lastHashHeartbeat >= PROGRESS_INTERVAL_MS) {
-      await updateJob({ indexed_files: indexedFiles });
+      await updateJob({});
       lastHashHeartbeat = t;
     }
   }
@@ -578,10 +582,24 @@ export async function runSync(
   const reusedFromCollection = changedChunks.length - missing.length;
   const totalChunks = reusedFromHash + changedChunks.length;
 
+  // Progress tracks chunk-level work: reused-from-hash + reused-from-collection
+  // count as already-done, missing chunks are the remaining work. This means
+  // a resumed sync (where a prior run already embedded most chunks and crashed
+  // before writing the overlay) will jump to a high starting percentage
+  // instead of falling back to 10%.
+  const workDoneBefore = reusedFromHash + reusedFromCollection;
+  const computePct = (embeddedSoFar: number): number => {
+    if (totalChunks === 0) return 100;
+    return Math.min(
+      99,
+      Math.round(((workDoneBefore + embeddedSoFar) / totalChunks) * 100),
+    );
+  };
+
   await updateJob({
     indexed_files: indexedFiles,
     total_chunks: totalChunks,
-    percentage: missing.length === 0 ? 90 : 10,
+    percentage: computePct(0),
   });
 
   // Embed + upload only the missing chunks.
@@ -605,8 +623,7 @@ export async function runSync(
 
     const t = now();
     if (t - lastProgress >= PROGRESS_INTERVAL_MS) {
-      const pct = Math.round(10 + (embedded / Math.max(missing.length, 1)) * 80);
-      await updateJob({ percentage: pct });
+      await updateJob({ percentage: computePct(embedded) });
       lastProgress = t;
     }
   }
