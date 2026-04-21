@@ -137,7 +137,7 @@ Resources:
       ToPort: 22
       CidrIp: !Ref AllowSshFromCidr
 
-  # ── IAM: instance profile for SSM Session Manager ─────────────────────────
+  # ── IAM: instance profile for SSM Session Manager + Parameter Store ─────
   InstanceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -149,6 +149,26 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: read-app-secrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Read `/${AppName}/*` SecureString parameters — the deploy
+              # workflow writes secrets (master key, Proton creds, etc.)
+              # there so they don't need to be embedded in CloudTrail-
+              # logged SSM command bodies.
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                  - ssm:GetParameters
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AppName}/*"
+              - Effect: Allow
+                Action: kms:Decrypt
+                Resource: "*"   # the default SSM-managed key
+                Condition:
+                  StringLike:
+                    "kms:EncryptionContext:PARAMETER_ARN": !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/${AppName}/*"
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile

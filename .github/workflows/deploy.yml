@@ -116,13 +116,40 @@ jobs:
           echo "instance_id=$(echo "$out" | jq -r '.[] | select(.OutputKey=="InstanceId") | .OutputValue')" >> "$GITHUB_OUTPUT"
           echo "public_ip=$(echo "$out"   | jq -r '.[] | select(.OutputKey=="PublicIp")   | .OutputValue')" >> "$GITHUB_OUTPUT"
 
+      # Push all deploy-time secrets into AWS Systems Manager Parameter
+      # Store as SecureStrings. The bootstrap script reads them via the
+      # instance's IAM role — this keeps plaintext secrets out of
+      # CloudTrail's SendCommand log (which would contain the full script
+      # body if we embedded them there).
+      - name: Sync deploy secrets to SSM Parameter Store
+        run: |
+          put() {
+            local name="$1" value="$2"
+            [ -z "$value" ] && return
+            aws ssm put-parameter \
+              --name "/${APP_NAME}/${name}" \
+              --type SecureString \
+              --value "$value" \
+              --overwrite >/dev/null
+            echo "  ✓ /${APP_NAME}/${name}"
+          }
+          put LITELLM_MASTER_KEY        "${{ secrets.LITELLM_MASTER_KEY }}"
+          put GATEWAY_ADMIN_EMAILS      "${{ secrets.GATEWAY_ADMIN_EMAILS }}"
+          put GATEWAY_PROTON_EMAIL      "${{ secrets.GATEWAY_PROTON_EMAIL }}"
+          put GATEWAY_PROTON_USERNAME   "${{ secrets.GATEWAY_PROTON_USERNAME }}"
+          put GATEWAY_PROTON_PASSWORD   "${{ secrets.GATEWAY_PROTON_PASSWORD }}"
+          put GATEWAY_PROTON_2FA_SECRET "${{ secrets.GATEWAY_PROTON_2FA_SECRET }}"
+
       # In-place update. The instance already has the repo + venv + systemd
-      # services — just fetch the new commit and restart.
-      - name: SSM — git pull && litellmctl restart
+      # services — just fetch the new commit, sync .env from SSM, and run
+      # bootstrap-instance.sh (which is idempotent + fast-skips when nothing
+      # changed since the last successful run).
+      - name: SSM — git pull && bootstrap
         id: ssm
         run: |
           INSTANCE="${{ steps.stack.outputs.instance_id }}"
           REF="${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}"
+          APP_NAME="${{ secrets.APP_NAME }}"
 
           # Build a shell script and submit it as a SendCommand parameter.
           # (Top-level `commands` is not accepted by --cli-input-json; the API
@@ -130,10 +157,8 @@ jobs:
           cat > /tmp/runme.sh <<SCRIPT
           set -eux
 
-          # Wait for the repo to exist on the data volume — user-data
-          # clones it early, so this usually resolves in seconds. On a
-          # cold first boot it takes up to ~60s for the EBS to mount +
-          # git clone to finish.
+          # Wait for the repo to exist. On first boot, user-data clones
+          # it; later deploys: this is a no-op and returns immediately.
           for attempt in \$(seq 1 30); do
             [ -d /home/ec2-user/.litellm/.git ] && break
             echo "[ssm] waiting for repo to exist (attempt \$attempt/30)..."
@@ -145,17 +170,51 @@ jobs:
             exit 1
           fi
 
-          # Pull the branch/tag we're deploying.
+          # Pull the ref we're deploying.
           cd /home/ec2-user/.litellm
           sudo -u ec2-user -H git fetch --tags --prune origin
           sudo -u ec2-user -H git checkout "${REF}"
           sudo -u ec2-user -H git pull --ff-only origin "${REF}" || true   # tags can't pull
           sudo -u ec2-user -H git submodule update --init --recursive
 
-          # Full idempotent bootstrap. This is the SAME script user-data
-          # ran; re-running it heals any half-finished install, picks up
-          # new apt deps / systemd units / caddy config, and restarts
-          # services. Fail-forward: no stack teardown, ever.
+          # Sync .env from SSM Parameter Store so every deploy propagates
+          # secret rotations (master key, Proton creds, admin emails)
+          # without overwriting local-only keys the admin may have added
+          # via the console.
+          ENV_FILE=/home/ec2-user/.litellm/.env
+          touch "\$ENV_FILE"
+          chown ec2-user:ec2-user "\$ENV_FILE"
+          chmod 600 "\$ENV_FILE"
+
+          upsert() {
+            local k="\$1" v="\$2"
+            [ -z "\$v" ] && return
+            if grep -q "^\${k}=" "\$ENV_FILE"; then
+              sed -i "s|^\${k}=.*|\${k}=\${v}|" "\$ENV_FILE"
+            else
+              echo "\${k}=\${v}" >> "\$ENV_FILE"
+            fi
+          }
+
+          fetch_param() {
+            aws ssm get-parameter --region ${{ env.AWS_REGION }} \\
+              --name "/${APP_NAME}/\$1" --with-decryption \\
+              --query Parameter.Value --output text 2>/dev/null || echo ""
+          }
+
+          for key in LITELLM_MASTER_KEY GATEWAY_ADMIN_EMAILS \\
+                     GATEWAY_PROTON_EMAIL GATEWAY_PROTON_USERNAME \\
+                     GATEWAY_PROTON_PASSWORD GATEWAY_PROTON_2FA_SECRET; do
+            upsert "\$key" "\$(fetch_param \$key)"
+          done
+          # Non-secret flag — always set by every deploy.
+          upsert GATEWAY_CONSOLE_ENABLED true
+          grep -q '^GATEWAY_SESSION_SECRET=' "\$ENV_FILE" || \\
+            echo "GATEWAY_SESSION_SECRET=\$(head -c 48 /dev/urandom | base64 | tr -d '=+/' | head -c 48)" >> "\$ENV_FILE"
+
+          # Idempotent bootstrap. Has its own fast-exit: if nothing since
+          # the last successful run has changed (HEAD, .env, script),
+          # it skips the expensive steps and just ensures services are up.
           bash /home/ec2-user/.litellm/bin/bootstrap-instance.sh
           SCRIPT
 

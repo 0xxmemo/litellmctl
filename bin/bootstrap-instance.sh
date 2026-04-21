@@ -41,6 +41,31 @@ set -a; . "$ENV_FILE"; set +a
 readonly SWAP_SIZE_GB=${SWAP_SIZE_GB:-32}
 readonly CADDY_VERSION=${CADDY_VERSION:-2.8.4}
 
+# ── Fast-exit when nothing has changed since the last successful run ───
+# Fingerprint = HEAD commit + env-file hash + bootstrap-script hash.
+# If all three match AND core services are healthy, skip everything.
+# A .env edit, a new commit, OR a bootstrap-script change invalidates
+# the fingerprint and forces a full run.
+readonly FINGERPRINT=/var/lib/litellm-bootstrap.fingerprint
+CURRENT_SHA="$(sudo -u ${APP_USER} git -C "${LITELLM_DIR}" rev-parse HEAD 2>/dev/null || echo none)"
+CURRENT_ENV_HASH="$(md5sum "${ENV_FILE}" | awk '{print $1}')"
+CURRENT_SCRIPT_HASH="$(md5sum "$0" | awk '{print $1}')"
+CURRENT_PRINT="${CURRENT_SHA}:${CURRENT_ENV_HASH}:${CURRENT_SCRIPT_HASH}"
+
+services_healthy() {
+  sudo -u ${APP_USER} -H bash -lc "cd ${LITELLM_DIR} && ./bin/litellmctl status proxy"   2>/dev/null | grep -q 'running' || return 1
+  sudo -u ${APP_USER} -H bash -lc "cd ${LITELLM_DIR} && ./bin/litellmctl status gateway" 2>/dev/null | grep -q 'running' || return 1
+  systemctl is-active caddy.service >/dev/null 2>&1 || return 1
+  return 0
+}
+
+if [ -f "$FINGERPRINT" ] && [ "$(cat "$FINGERPRINT")" = "$CURRENT_PRINT" ] && services_healthy; then
+  echo "[bootstrap] fingerprint unchanged (${CURRENT_SHA}), services healthy — skipping all steps"
+  date -u +%FT%TZ > /var/log/user-data-done
+  exit 0
+fi
+echo "[bootstrap] fingerprint changed or services unhealthy — running full bootstrap"
+
 # ── 1. System packages ──────────────────────────────────────────────────
 # --allowerasing handles AL2023's pre-installed curl-minimal vs curl
 # conflict that blocks install.sh's `curl | bash` sub-installers.
@@ -159,6 +184,9 @@ UNIT
 systemctl daemon-reload
 systemctl enable --now caddy.service
 systemctl reload caddy.service || systemctl restart caddy.service
+
+# Record the fingerprint so the next run can fast-exit if nothing changed.
+echo "${CURRENT_PRINT}" > "$FINGERPRINT"
 
 # Breadcrumb — SSM wait loop in the deploy workflow keys off this file.
 date -u +%FT%TZ > /var/log/user-data-done
