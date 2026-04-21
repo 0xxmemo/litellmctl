@@ -9,6 +9,46 @@ import {
 } from "../lib/db";
 
 /**
+ * Accept JSON `{file: "data:audio/mp3;base64,..." | "<base64>", model, ...}`
+ * and convert to a multipart FormData that LiteLLM's /v1/audio/* endpoints
+ * expect (they use FastAPI's `UploadFile = File(...)`). Returns null if the
+ * body doesn't carry a usable `file` string — caller should then pass the
+ * original bytes through untouched (multipart upload path).
+ */
+function jsonAudioToFormData(json: Record<string, unknown>): FormData | null {
+  const fileRaw = json.file;
+  if (typeof fileRaw !== "string" || fileRaw.length === 0) return null;
+
+  let b64 = fileRaw;
+  let mime = "audio/mpeg";
+  let filename = "audio.mp3";
+  const dataUrlMatch = fileRaw.match(/^data:([^;,]+)(?:;[^,]*)?,(.*)$/);
+  if (dataUrlMatch) {
+    mime = dataUrlMatch[1];
+    b64 = dataUrlMatch[2];
+    const ext = (mime.split("/")[1] || "mp3").replace(/[^a-z0-9]/gi, "").slice(0, 8) || "mp3";
+    filename = `audio.${ext}`;
+  }
+
+  let bytes: Uint8Array;
+  try {
+    const bin = atob(b64);
+    bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  } catch {
+    return null;
+  }
+
+  const form = new FormData();
+  form.append("file", new Blob([bytes as unknown as BlobPart], { type: mime }), filename);
+  for (const [k, v] of Object.entries(json)) {
+    if (k === "file" || v === null || v === undefined) continue;
+    form.append(k, typeof v === "string" ? v : String(v));
+  }
+  return form;
+}
+
+/**
  * In-memory cache for user model overrides.
  * Key: email, Value: { overrides, timestamp }
  * TTL: 5 minutes
@@ -183,6 +223,9 @@ async function proxyHandler(req: Request) {
     // Read body once to extract requested model and apply overrides
     let body: ArrayBuffer = await req.arrayBuffer();
     let requestedModel: string | null = null;
+    let forwardForm: FormData | null = null;
+    const audioFormEndpoint =
+      endpoint === "/audio/transcriptions" || endpoint === "/audio/translations";
     try {
       const text = new TextDecoder().decode(body);
       const json = JSON.parse(text);
@@ -196,18 +239,32 @@ async function proxyHandler(req: Request) {
             body = new TextEncoder().encode(JSON.stringify(json)).buffer;
           }
         }
+
+        // /audio/transcriptions and /audio/translations accept multipart
+        // uploads only. Translate a JSON `{file: "<data-url|base64>", ...}`
+        // into FormData so the UI Try tab and non-multipart clients work.
+        if (audioFormEndpoint && typeof json.file === "string") {
+          forwardForm = jsonAudioToFormData(json as Record<string, unknown>);
+        }
       }
-    } catch {}
+    } catch {
+      // Not JSON — already-multipart requests land here; pass through as-is.
+    }
 
     // Forward to LiteLLM — let Bun handle the proxy pipeline natively
     const headers = new Headers(req.headers);
     headers.set("Authorization", LITELLM_AUTH);
     headers.delete("x-api-key");
+    if (forwardForm) {
+      // FormData needs fetch to set the multipart boundary; nuke stale headers.
+      headers.delete("content-type");
+      headers.delete("content-length");
+    }
 
     const proxyRes = await fetch(targetUrl, {
       method: req.method,
       headers,
-      body: body.byteLength > 0 ? body : undefined,
+      body: forwardForm ?? (body.byteLength > 0 ? body : undefined),
     });
 
     // Usage tracking via Response.clone() — Bun streams the original to the
