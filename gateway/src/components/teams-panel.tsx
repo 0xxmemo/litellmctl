@@ -86,12 +86,12 @@ export function TeamsPanel() {
           {isLoading ? (
             <p className="text-muted-foreground py-4">Loading teams...</p>
           ) : error ? (
-            <div className="p-4 border border-red-500/30 rounded-lg bg-red-500/10">
+            <div className="glass glass--ui-danger p-4">
               <div className="flex items-start gap-3">
-                <XCircle className="w-5 h-5 text-red-500 mt-0.5" />
+                <XCircle className="w-5 h-5 mt-0.5 shrink-0" />
                 <div>
-                  <p className="font-medium text-red-500">Failed to load teams</p>
-                  <p className="text-sm text-red-400 mt-1">{errorMessage(error)}</p>
+                  <p className="font-medium">Failed to load teams</p>
+                  <p className="text-sm mt-1 opacity-80">{errorMessage(error)}</p>
                   <Button variant="outline" size="sm" className="mt-3" onClick={() => refetch()}>Retry</Button>
                 </div>
               </div>
@@ -130,7 +130,7 @@ export function TeamsPanel() {
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="text-red-500 hover:text-red-400 hover:bg-red-500/10"
+                            className="text-ui-danger-fg hover:bg-ui-danger-soft-bg"
                             onClick={() => setDeleteTarget(team)}
                             title="Delete team"
                           >
@@ -174,7 +174,7 @@ export function TeamsPanel() {
                   />
                 </div>
                 {createError && (
-                  <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                  <div className="glass glass--ui-danger flex items-start gap-2 p-3 text-sm">
                     <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                     <span>{createError}</span>
                   </div>
@@ -195,17 +195,17 @@ export function TeamsPanel() {
 
       {deleteTarget && (
         <div className="glass-overlay fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4">
-          <div className="glass glass--muted w-full max-w-md rounded-xl text-card-foreground shadow-none ring-1 ring-red-500/40">
+          <div className="glass glass--muted w-full max-w-md rounded-xl text-card-foreground shadow-none ring-1 ring-ui-danger-border">
             <div className="p-6">
               <div className="flex items-center gap-2 mb-4">
-                <AlertTriangle className="h-6 w-6 text-red-500" />
+                <AlertTriangle className="h-6 w-6 text-ui-danger-fg" />
                 <h3 className="text-lg font-bold">Delete team "{deleteTarget.name}"?</h3>
               </div>
               <p className="text-muted-foreground mb-4">
                 All {deleteTarget.memberCount} members lose access to this team's shared memories.
                 Team memories ({deleteTarget.name}) will be permanently removed.
               </p>
-              <p className="text-sm text-red-500 mb-6">This cannot be undone.</p>
+              <p className="text-sm text-ui-danger-fg mb-6">This cannot be undone.</p>
               <div className="flex gap-3">
                 <Button variant="outline" onClick={() => setDeleteTarget(null)} className="flex-1">Cancel</Button>
                 <Button
@@ -295,13 +295,13 @@ function TeamMembersEditor({ teamId, teamName }: { teamId: string; teamName: str
           {members.map((email) => (
             <li key={email} className="flex items-center justify-between gap-3 rounded-md border border-border/50 bg-background/50 px-3 py-2 text-sm backdrop-blur-md dark:border-white/5 dark:bg-background/35">
               <span className="flex items-center gap-2">
-                <CheckCircle className="w-4 h-4 text-green-500" />
+                <CheckCircle className="w-4 h-4 text-ui-success-fg" />
                 {email}
               </span>
               <Button
                 size="sm"
                 variant="ghost"
-                className="text-red-500 hover:text-red-400 hover:bg-red-500/10"
+                className="text-ui-danger-fg hover:bg-ui-danger-soft-bg"
                 onClick={() => handleRemove(email)}
                 disabled={removeMutation.isPending}
                 title="Remove from team"

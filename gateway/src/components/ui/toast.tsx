@@ -19,7 +19,7 @@ const Toast = React.forwardRef<
   const variantStyles = {
     default: "glass glass--muted border-0 text-foreground shadow-none",
     destructive: "destructive group border-destructive bg-destructive text-destructive-foreground",
-    success: "border-green-500/50 bg-green-500/10 text-green-500",
+    success: "glass glass--success",
   }
 
   return (

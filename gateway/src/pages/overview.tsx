@@ -63,7 +63,7 @@ function UsageChart({ data, loading }: { data: Array<{ date: string; requests: n
               <Line
                 type="monotone"
                 dataKey="requests"
-                stroke="#3b82f6"
+                stroke="var(--color-primary)"
                 strokeWidth={2}
                 dot={{ r: 3 }}
                 name="Requests"
@@ -132,7 +132,7 @@ export function Overview() {
       </div>
 
       {rateLimited && (
-        <div className="flex items-center gap-2 rounded-md border border-yellow-400/40 bg-yellow-400/10 px-4 py-3 text-sm text-yellow-700 dark:text-yellow-300">
+        <div className="glass glass--warning flex items-center gap-2 px-4 py-3 text-sm">
           <RefreshCw className="w-4 h-4 shrink-0" />
           <span>Too many requests — stats will refresh automatically in ~5 minutes.</span>
         </div>

@@ -116,9 +116,39 @@ async function userStatsHandler(req: Request) {
   }
 }
 
+// Temporal-proximity grouping: two rows with the same (provider|model|endpoint)
+// key merge into one group as long as the gap between them is within
+// PROXIMITY_MS — even if rows with *different* keys appeared in between. This
+// matches the UX intent that the request list should show one row per "session
+// of activity" per model rather than reshuffling the stack every time the
+// caller briefly hops to a different model.
+const GROUP_PROXIMITY_MS = 10 * 60 * 1000; // 10 minutes
+
+// Upper bound on how far back we'll scan when the top-N groups are still
+// absorbing rows. Prevents a user with millions of closely-spaced rows from
+// pinning the event loop. In practice the break-when-done condition fires
+// well before this.
+const GROUP_SCAN_BUDGET = 5000;
+
+interface OpenGroup {
+  id: string;
+  _gk: string;
+  _lastMs: number; // timestamp (ms) of this group's oldest absorbed row
+  provider: string;
+  model: string;
+  endpoint: string | null;
+  count: number;
+  totalTokens: number;
+  firstTimestamp: string;
+  lastTimestamp: string;
+  items: null;
+}
+
 // GET /api/stats/requests — requireAuth (any authenticated user incl. guests)
-// Streams rows in timestamp-desc order and collects consecutive same-provider/model/endpoint
-// runs into groups. Stops as soon as we have (offset + pageSize + 1) groups.
+// Streams rows in timestamp-desc order and groups same-(provider|model|endpoint)
+// rows that fall within GROUP_PROXIMITY_MS of the group's oldest item so far.
+// Stops once (offset + pageSize + 1) groups are known AND no still-open group
+// could absorb further rows.
 async function groupedRequestsHandler(req: Request) {
   const auth = await requireAuth(req);
   if (auth instanceof Response) return auth;
@@ -147,42 +177,73 @@ async function groupedRequestsHandler(req: Request) {
       )
       .iterate(...m.params) as IterableIterator<any>;
 
-    const groups: any[] = [];
+    const groups: OpenGroup[] = [];
+    // Groups currently eligible to absorb further (older) rows. Keyed by
+    // groupKey so same-key rows merge regardless of intervening different-key
+    // rows. Entries are evicted when the next row is older than
+    // g._lastMs - GROUP_PROXIMITY_MS (i.e. the gap exceeds proximity).
+    const active = new Map<string, OpenGroup>();
     let groupCounter = 0;
     let docsRead = 0;
 
     for (const r of iter) {
       docsRead++;
+      if (docsRead > GROUP_SCAN_BUDGET) break;
+
+      const ts: number = r.timestamp;
       const model: string = r.m || "unknown";
       const ep: string | null = r.endpoint || null;
       const provider = extractProvider(model) || model;
       const groupKey = `${provider}|${model}|${ep}`;
       const tokens = r.tokens || 0;
-      const last = groups.length > 0 ? groups[groups.length - 1] : null;
 
-      if (last && last._gk === groupKey) {
-        last.count++;
-        last.totalTokens += tokens;
-        last.lastTimestamp = new Date(r.timestamp).toISOString();
-      } else {
-        if (groups.length >= targetGroups) break;
-        const ts = new Date(r.timestamp).toISOString();
-        groups.push({
-          id: `group-${++groupCounter}`,
-          _gk: groupKey,
-          provider, model, endpoint: ep,
-          count: 1,
-          totalTokens: tokens,
-          firstTimestamp: ts,
-          lastTimestamp: ts,
-          items: null,
-        });
+      // Seal any open group whose oldest item is now too far from `ts` to
+      // possibly absorb it — or any further (older) row.
+      for (const [k, g] of active) {
+        if (g._lastMs - ts > GROUP_PROXIMITY_MS) {
+          active.delete(k);
+        }
       }
+
+      const existing = active.get(groupKey);
+      if (existing) {
+        existing.count++;
+        existing.totalTokens += tokens;
+        existing._lastMs = ts;
+        existing.lastTimestamp = new Date(ts).toISOString();
+        continue;
+      }
+
+      // Row didn't land in an open group of the same key.
+      if (groups.length >= targetGroups) {
+        // We already have enough groups for the requested page (+1 for
+        // hasMore). Don't start new ones. If no open group remains, we're
+        // done — further rows can't extend anything we care about.
+        if (active.size === 0) break;
+        continue;
+      }
+
+      const iso = new Date(ts).toISOString();
+      const g: OpenGroup = {
+        id: `group-${++groupCounter}`,
+        _gk: groupKey,
+        _lastMs: ts,
+        provider, model, endpoint: ep,
+        count: 1,
+        totalTokens: tokens,
+        firstTimestamp: iso,
+        lastTimestamp: iso,
+        items: null,
+      };
+      groups.push(g);
+      active.set(groupKey, g);
     }
 
     const hasMore = groups.length > (page - 1) * pageSize + pageSize;
     const offset = (page - 1) * pageSize;
-    const pageGroups = groups.slice(offset, offset + pageSize).map(({ _gk, ...g }) => g);
+    const pageGroups = groups
+      .slice(offset, offset + pageSize)
+      .map(({ _gk, _lastMs, ...g }) => g);
     const knownGroups = groups.length - (hasMore ? 1 : 0);
 
     return Response.json({

@@ -22,11 +22,11 @@ export function StatCard({ title, value, icon: Icon, trend = 'up', change }: Sta
         {change && (
           <div className="flex items-center text-xs text-muted-foreground">
             {trend === 'up' ? (
-              <ArrowUpRight className="mr-1 h-3 w-3 text-green-500" />
+              <ArrowUpRight className="mr-1 h-3 w-3 text-ui-success-fg" />
             ) : (
-              <ArrowDownRight className="mr-1 h-3 w-3 text-red-500" />
+              <ArrowDownRight className="mr-1 h-3 w-3 text-ui-danger-fg" />
             )}
-            <span className={trend === 'up' ? 'text-green-500' : 'text-red-500'}>
+            <span className={trend === 'up' ? 'text-ui-success-fg' : 'text-ui-danger-fg'}>
               {change}
             </span>
             <span className="ml-1">from last month</span>

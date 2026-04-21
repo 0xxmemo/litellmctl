@@ -201,10 +201,10 @@ export function SettingsPanel({ auth, logout, modelOverrides, tierAliases, saveM
         </CardHeader>
         <CardContent className="space-y-4">
           {message && (
-            <div className={`p-3 rounded-md text-sm ${
+            <div className={`p-3 text-sm ${
               message.type === 'success'
-                ? 'bg-green-500/10 text-green-500 border border-green-500/20'
-                : 'bg-red-500/10 text-red-500 border border-red-500/20'
+                ? 'glass glass--success'
+                : 'glass glass--ui-danger'
             }`}>
               {message.text}
             </div>
@@ -286,10 +286,10 @@ export function SettingsPanel({ auth, logout, modelOverrides, tierAliases, saveM
         </CardHeader>
         <CardContent className="space-y-4">
           {overridesMessage && (
-            <div className={`p-3 rounded-md text-sm ${
+            <div className={`p-3 text-sm ${
               overridesMessage.type === 'success'
-                ? 'bg-green-500/10 text-green-500 border border-green-500/20'
-                : 'bg-red-500/10 text-red-500 border border-red-500/20'
+                ? 'glass glass--success'
+                : 'glass glass--ui-danger'
             }`}>
               {overridesMessage.text}
             </div>
@@ -332,8 +332,8 @@ export function SettingsPanel({ auth, logout, modelOverrides, tierAliases, saveM
                     defaultOption={{ value: '', badge: 'default', label: alias }}
                   />
                   {overrides[alias] && (
-                    <p className="text-xs text-blue-400 flex items-center gap-1">
-                      <span className="w-1.5 h-1.5 rounded-full bg-blue-400 inline-block" />
+                    <p className="text-xs text-ui-info-fg flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-ui-info-fg inline-block" />
                       Override active: <span className="font-mono">{overrides[alias]}</span>
                     </p>
                   )}
@@ -378,33 +378,33 @@ export function SettingsPanel({ auth, logout, modelOverrides, tierAliases, saveM
             <button
               className={cn(
                 "group relative rounded-lg border p-4 hover:bg-accent transition-colors",
-                selectedTheme === 'light' && 'ring-2 ring-blue-500 border-blue-500'
+                selectedTheme === 'light' && 'ring-2 ring-primary border-primary'
               )}
               onClick={() => applyTheme('light')}
             >
-              <div className="mb-2 h-20 w-full rounded bg-gradient-to-br from-blue-50 to-indigo-100 dark:from-blue-950 dark:to-indigo-950" />
+              <div className="mb-2 h-20 w-full rounded bg-gradient-to-br from-background to-card border border-border/40" />
               <p className="text-sm font-medium">Light</p>
               <p className="text-xs text-muted-foreground">Always light mode</p>
             </button>
             <button
               className={cn(
                 "group relative rounded-lg border p-4 hover:bg-accent transition-colors",
-                selectedTheme === 'dark' && 'ring-2 ring-blue-500 border-blue-500'
+                selectedTheme === 'dark' && 'ring-2 ring-primary border-primary'
               )}
               onClick={() => applyTheme('dark')}
             >
-              <div className="mb-2 h-20 w-full rounded bg-gradient-to-br from-gray-900 to-gray-950" />
+              <div className="mb-2 h-20 w-full rounded bg-gradient-to-br from-muted to-card border border-border/40" />
               <p className="text-sm font-medium">Dark</p>
               <p className="text-xs text-muted-foreground">Always dark mode</p>
             </button>
             <button
               className={cn(
                 "group relative rounded-lg border p-4 hover:bg-accent transition-colors",
-                selectedTheme === 'system' && 'ring-2 ring-blue-500 border-blue-500'
+                selectedTheme === 'system' && 'ring-2 ring-primary border-primary'
               )}
               onClick={() => applyTheme('system')}
             >
-              <div className="mb-2 h-20 w-full rounded bg-gradient-to-br from-blue-50 to-gray-900" />
+              <div className="mb-2 h-20 w-full rounded bg-gradient-to-br from-card to-muted border border-border/40" />
               <p className="text-sm font-medium">System</p>
               <p className="text-xs text-muted-foreground">Follow system preference</p>
             </button>

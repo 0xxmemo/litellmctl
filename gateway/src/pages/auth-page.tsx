@@ -109,8 +109,8 @@ export function AuthPage() {
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <div className="flex justify-center mb-4">
-              <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-amber-500/20">
-                <Clock className="h-6 w-6 text-amber-500" />
+              <div className="glass glass--warning flex h-12 w-12 items-center justify-center rounded-lg">
+                <Clock className="h-6 w-6" />
               </div>
             </div>
             <CardTitle className="text-2xl">Request Submitted</CardTitle>

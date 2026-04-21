@@ -208,14 +208,14 @@ export function Admin() {
                 </div>
 
                 {addError && (
-                  <div className="flex items-start gap-2 p-3 rounded-lg bg-red-500/10 border border-red-500/30 text-red-400 text-sm">
+                  <div className="glass glass--ui-danger flex items-start gap-2 p-3 text-sm">
                     <XCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                     <span>{addError}</span>
                   </div>
                 )}
 
                 {addSuccess && (
-                  <div className="flex items-start gap-2 p-3 rounded-lg bg-green-500/10 border border-green-500/30 text-green-400 text-sm">
+                  <div className="glass glass--success flex items-start gap-2 p-3 text-sm">
                     <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
                     <span>{addSuccess}</span>
                   </div>
@@ -285,7 +285,7 @@ export function Admin() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <AlertCircle className="w-5 h-5 text-amber-500" />
+            <AlertCircle className="w-5 h-5 text-ui-warning-fg" />
             Pending Approvals ({pendingUsers.length})
           </CardTitle>
         </CardHeader>
@@ -295,12 +295,12 @@ export function Admin() {
               <p className="text-muted-foreground">Loading pending requests...</p>
             </div>
           ) : error ? (
-            <div className="p-4 border border-red-500/30 rounded-lg bg-red-500/10">
+            <div className="glass glass--ui-danger p-4">
               <div className="flex items-start gap-3">
-                <XCircle className="w-5 h-5 text-red-500 mt-0.5" />
+                <XCircle className="w-5 h-5 mt-0.5 shrink-0" />
                 <div>
-                  <p className="font-medium text-red-500">Error loading users</p>
-                  <p className="text-sm text-red-400 mt-1">{error}</p>
+                  <p className="font-medium">Error loading users</p>
+                  <p className="text-sm mt-1 opacity-80">{error}</p>
                   <Button
                     variant="outline"
                     size="sm"
@@ -314,7 +314,7 @@ export function Admin() {
             </div>
           ) : pendingUsers.length === 0 ? (
             <div className="flex items-center gap-3 py-4 text-muted-foreground">
-              <CheckCircle className="w-5 h-5 text-green-500" />
+              <CheckCircle className="w-5 h-5 text-ui-success-fg" />
               <p>No pending approvals. All caught up!</p>
             </div>
           ) : (
@@ -340,7 +340,6 @@ export function Admin() {
                         size="sm"
                         onClick={() => handleApprove(user.email)}
                         disabled={actionInProgress === user.email}
-                        className="bg-green-600 hover:bg-green-700"
                       >
                         {actionInProgress === user.email ? '...' : 'Approve'}
                       </Button>
@@ -366,7 +365,7 @@ export function Admin() {
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <CheckCircle className="w-5 h-5 text-green-500" />
+              <CheckCircle className="w-5 h-5 text-ui-success-fg" />
               Approved Users ({approvedUsers.length})
             </CardTitle>
             <CardDescription>Approved LitellmCTL users with request and token totals</CardDescription>
@@ -401,8 +400,7 @@ export function Admin() {
                           </TableCell>
                           <TableCell>
                             <Badge
-                              variant="outline"
-                              className={user.role === 'admin' ? 'bg-red-500/10 text-red-500 border-red-500/20' : 'bg-green-500/10 text-green-500 border-green-500/20'}
+                              variant={user.role === 'admin' ? 'default' : 'success'}
                             >
                               {user.role}
                             </Badge>
@@ -421,7 +419,7 @@ export function Admin() {
                               <Button
                                 size="sm"
                                 variant="ghost"
-                                className="text-red-500 hover:text-red-400 hover:bg-red-500/10"
+                                className="text-ui-danger-fg hover:bg-ui-danger-soft-bg"
                                 onClick={() => setDeleteTarget(user.email)}
                                 disabled={actionInProgress === user.email}
                                 title="Remove user"
@@ -442,18 +440,18 @@ export function Admin() {
       )}
 
       {/* Danger Zone */}
-      <Card className="border-red-500/30 bg-red-500/5">
+      <Card className="border-ui-danger-border bg-ui-danger-soft-bg">
         <CardContent className="pt-6">
           <div className="flex items-center gap-2 mb-4">
-            <AlertTriangle className="h-5 w-5 text-red-500" />
-            <h2 className="text-xl font-bold text-red-500">Danger Zone</h2>
+            <AlertTriangle className="h-5 w-5 text-ui-danger-fg" />
+            <h2 className="text-xl font-bold text-ui-danger-fg">Danger Zone</h2>
           </div>
           <p className="text-muted-foreground mb-6">
             Emergency actions that affect all users. These actions cannot be undone.
           </p>
           <div className="space-y-4">
             {/* Reject All Pending Users */}
-            <div className="border border-red-500/20 rounded-lg p-4">
+            <div className="border border-ui-danger-border/50 rounded-lg p-4">
               <h3 className="font-semibold mb-2">Reject All Pending Requests</h3>
               <p className="text-sm text-muted-foreground mb-4">
                 Delete all pending access requests (guests). Approved users and admins remain unaffected.
@@ -469,7 +467,7 @@ export function Admin() {
               </Button>
             </div>
             {/* Revoke All API Keys */}
-            <div className="border border-red-500/20 rounded-lg p-4">
+            <div className="border border-ui-danger-border/50 rounded-lg p-4">
               <h3 className="font-semibold mb-2">Revoke All API Keys</h3>
               <p className="text-sm text-muted-foreground mb-4">
                 Revoke all active API keys for all users. Users will need to generate new keys.
@@ -493,17 +491,17 @@ export function Admin() {
       {/* Disapprove All Confirmation Dialog */}
       {showDisapproveConfirm && (
         <div className="glass-overlay fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="glass glass--muted w-full max-w-md rounded-xl text-card-foreground shadow-none ring-1 ring-red-500/40">
+          <div className="glass glass--muted w-full max-w-md rounded-xl text-card-foreground shadow-none ring-1 ring-ui-danger-border">
             <div className="p-6">
               <div className="flex items-center gap-2 mb-4">
-                <AlertTriangle className="h-6 w-6 text-red-500" />
+                <AlertTriangle className="h-6 w-6 text-ui-danger-fg" />
                 <h3 className="text-lg font-bold">Confirm Reject All Pending</h3>
               </div>
               <p className="text-muted-foreground mb-4">
                 This will permanently delete <strong>{disapprovableUsers.length} pending users</strong> (guests).
                 Approved users and admins remain unaffected.
               </p>
-              <p className="text-sm text-red-500 mb-6">
+              <p className="text-sm text-ui-danger-fg mb-6">
                 This action cannot be undone. Users will need to request access again.
               </p>
               <div className="flex gap-3">
@@ -540,17 +538,17 @@ export function Admin() {
       {/* Revoke All Keys Confirmation Dialog */}
       {showRevokeAllConfirm && (
         <div className="glass-overlay fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="glass glass--muted w-full max-w-md rounded-xl text-card-foreground shadow-none ring-1 ring-red-500/40">
+          <div className="glass glass--muted w-full max-w-md rounded-xl text-card-foreground shadow-none ring-1 ring-ui-danger-border">
             <div className="p-6">
               <div className="flex items-center gap-2 mb-4">
-                <AlertTriangle className="h-6 w-6 text-red-500" />
+                <AlertTriangle className="h-6 w-6 text-ui-danger-fg" />
                 <h3 className="text-lg font-bold">Confirm Revoke All API Keys</h3>
               </div>
               <p className="text-muted-foreground mb-4">
                 This will permanently revoke <strong>ALL API keys</strong> for all users.
                 Users will need to generate new API keys to continue using the service.
               </p>
-              <p className="text-sm text-red-500 mb-6">
+              <p className="text-sm text-ui-danger-fg mb-6">
                 This action cannot be undone. All active sessions using API keys will be immediately terminated.
               </p>
               <div className="flex gap-3">

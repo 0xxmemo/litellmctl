@@ -15,22 +15,21 @@ interface TopBarProps {
   onLogout: () => void
 }
 
+function roleVariant(role: string): 'default' | 'success' | 'warning' | 'outline' {
+  switch (role) {
+    case 'admin': return 'default'
+    case 'user': return 'success'
+    case 'guest': return 'warning'
+    default: return 'outline'
+  }
+}
+
 export function TopBar({ auth, onLogout }: TopBarProps) {
   const { user, loading } = auth
   const [profileOpen, setProfileOpen] = useState(false)
 
-  const getRoleColor = (role: string) => {
-    switch (role) {
-      case 'admin': return 'bg-red-500/20 text-red-500 hover:bg-red-500/30'
-      case 'user': return 'bg-green-500/20 text-green-500 hover:bg-green-500/30'
-      case 'guest': return 'bg-amber-500/20 text-amber-500 hover:bg-amber-500/30'
-      default: return 'bg-gray-500/20 text-gray-500'
-    }
-  }
-
   return (
     <div className="flex items-center gap-2">
-      {/* User Profile */}
       <Popover open={profileOpen} onOpenChange={setProfileOpen}>
         <PopoverTrigger asChild>
           <Button variant="ghost" size="sm" className="gap-2">
@@ -48,17 +47,17 @@ export function TopBar({ auth, onLogout }: TopBarProps) {
               {!loading && user && (
                 <>
                   <p className="text-xs text-muted-foreground break-all">{user.email}</p>
-                  <Badge className={getRoleColor(user.role)}>
+                  <Badge variant={roleVariant(user.role)}>
                     {user.role}
                   </Badge>
                 </>
               )}
             </div>
-            <div className="pt-2 border-t">
+            <div className="pt-2 border-t border-border/50">
               <Button
                 variant="ghost"
                 size="sm"
-                className="w-full justify-start text-red-500 hover:bg-red-500/10 hover:text-red-600 dark:hover:bg-red-950/40"
+                className="w-full justify-start text-ui-danger-fg hover:bg-ui-danger-soft-bg"
                 onClick={onLogout}
               >
                 <LogOut className="w-4 h-4 mr-2" />

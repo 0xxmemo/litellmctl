@@ -96,7 +96,7 @@ export function SkillsInstall({ apiKey, baseUrl }: SkillsInstallProps) {
                       </div>
                     </div>
                     {apiKey ? (
-                      <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+                      <p className="text-xs text-ui-success-fg flex items-center gap-1">
                         <Check className="h-3.5 w-3.5" />
                         API key will be substituted on copy
                       </p>

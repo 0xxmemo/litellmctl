@@ -220,9 +220,9 @@ export function ApiKeys() {
 
       {/* Created Key Display */}
       {createdKey && (
-        <Card className="border-green-500/50 bg-green-500/5">
+        <Card className="border-ui-success-border bg-ui-success-bg">
           <CardHeader>
-            <CardTitle className="text-green-500 flex items-center gap-2">
+            <CardTitle className="text-ui-success-fg flex items-center gap-2">
               <Key className="h-5 w-5" />
               API Key Created
             </CardTitle>
@@ -312,7 +312,7 @@ export function ApiKeys() {
                               title="Copy ID"
                             >
                               {copiedId === keyId ? (
-                                <Copy className="h-3 w-3 text-green-500" />
+                                <Copy className="h-3 w-3 text-ui-success-fg" />
                               ) : (
                                 <Copy className="h-3 w-3 text-muted-foreground" />
                               )}

@@ -56,21 +56,21 @@ export function UserStats() {
       value: <PrettyAmount amountFormatted={user?.requests ?? 0} size="2xl" />,
       change: user?.requestsChange || '+0%',
       icon: Activity,
-      color: 'text-blue-500',
+      color: 'text-ui-info-fg',
     },
     {
       title: 'Your Tokens',
       value: <PrettyAmount amountFormatted={user?.tokens ?? 0} size="2xl" />,
       change: user?.tokensChange || '+0%',
       icon: Key,
-      color: 'text-green-500',
+      color: 'text-ui-success-fg',
     },
     {
       title: 'Active Keys',
       value: <PrettyAmount amountFormatted={user?.keys ?? 0} size="2xl" normalPrecision={0} />,
       change: user?.keysChange || '0',
       icon: TrendingUp,
-      color: 'text-purple-500',
+      color: 'text-ui-accent-fg',
     },
   ]
 
@@ -99,8 +99,8 @@ export function UserStats() {
                 {isLoading ? '...' : stat.value}
               </div>
               <div className="flex items-center text-xs text-muted-foreground">
-                <TrendingUp className="mr-1 h-3 w-3 text-green-500" />
-                <span className="text-green-500">{stat.change}</span>
+                <TrendingUp className="mr-1 h-3 w-3 text-ui-success-fg" />
+                <span className="text-ui-success-fg">{stat.change}</span>
                 <span className="ml-1">from last month</span>
               </div>
             </CardContent>

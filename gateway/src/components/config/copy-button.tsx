@@ -43,7 +43,7 @@ export function CopyButton({
       >
         {copied ? (
           <>
-            <Check className="h-3.5 w-3.5 text-green-500" /> Copied!
+            <Check className="h-3.5 w-3.5 text-ui-success-fg" /> Copied!
           </>
         ) : (
           <>
@@ -63,7 +63,7 @@ export function CopyButton({
       title="Copy to clipboard"
     >
       {copied ? (
-        <Check className="h-3.5 w-3.5 text-green-500" />
+        <Check className="h-3.5 w-3.5 text-ui-success-fg" />
       ) : (
         <Copy className="h-3.5 w-3.5" />
       )}

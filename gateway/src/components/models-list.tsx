@@ -46,7 +46,7 @@ export function ModelsList({ extendedModels }: ModelsListProps) {
             >
               <Cpu className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
               {model.isStub ? (
-                <span className="text-xs px-1.5 py-0.5 rounded border font-mono shrink-0 bg-slate-500/15 text-slate-400 border-slate-500/30">
+                <span className="glass glass--muted-dim text-xs px-1.5 py-0.5 font-mono shrink-0">
                   Stub
                 </span>
               ) : (
@@ -85,19 +85,19 @@ export function ModelsList({ extendedModels }: ModelsListProps) {
               <div className="flex items-center gap-1.5 shrink-0">
                 {model.supportsVision && (
                   <Eye
-                    className="h-3 w-3 text-blue-400"
+                    className="h-3 w-3 text-ui-info-fg"
                     aria-label="Supports vision/image input"
                   />
                 )}
                 {model.supportsReasoning && (
                   <Brain
-                    className="h-3 w-3 text-violet-400"
+                    className="h-3 w-3 text-ui-accent-fg"
                     aria-label="Supports reasoning/thinking"
                   />
                 )}
                 {model.supportsFunctionCalling && (
                   <Zap
-                    className="h-3 w-3 text-yellow-400"
+                    className="h-3 w-3 text-ui-warning-fg"
                     aria-label="Supports function/tool calling"
                   />
                 )}

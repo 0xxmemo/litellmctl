@@ -4,7 +4,16 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { formatProviderName, getProviderColor, extractProvider, resolveProvider } from '@lib/models'
 
-const COLORS = ['#3b82f6', '#8b5cf6', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#06b6d4', '#f97316']
+const COLORS = [
+  'var(--color-chart-3)',
+  'var(--color-chart-1)',
+  'var(--color-chart-2)',
+  'var(--color-chart-4)',
+  'var(--color-destructive)',
+  'var(--color-chart-5)',
+  'var(--color-accent)',
+  'var(--color-primary)',
+]
 
 interface ModelUsagePieChartProps {
   data: Array<{
@@ -113,30 +122,27 @@ export function ModelUsagePieChart({ data }: ModelUsagePieChartProps) {
               labelLine={false}
               label={renderCustomLabel}
               outerRadius={95}
-              fill="#8884d8"
+              fill="var(--color-primary)"
               dataKey="value"
             >
               {data.map((entry, index) => (
                 <Cell key={`${entry.name}-${index}`} fill={COLORS[index % COLORS.length]} />
               ))}
             </Pie>
-            <Tooltip 
+            <Tooltip
               formatter={((value: number | undefined, name: string | undefined, props: any) => [
                 `${(value ?? 0).toLocaleString()} (${props?.payload?.percentage ?? '0'}%)`,
                 props?.payload?.name ?? name
               ]) as any}
               contentStyle={{
-                backgroundColor: 'rgba(0, 0, 0, 0.75)',
-                backdropFilter: 'blur(10px)',
-                WebkitBackdropFilter: 'blur(10px)',
-                border: '1px solid rgba(255, 255, 255, 0.15)',
-                borderRadius: '10px',
+                backgroundColor: 'var(--card)',
+                border: '1px solid var(--border)',
+                borderRadius: '8px',
                 fontSize: '13px',
-                color: '#f1f5f9',
-                boxShadow: '0 4px 16px rgba(0, 0, 0, 0.4)',
+                color: 'var(--foreground)',
               }}
-              labelStyle={{ color: '#e2e8f0', fontWeight: 600, marginBottom: '4px' }}
-              itemStyle={{ color: '#cbd5e1' }}
+              labelStyle={{ color: 'var(--foreground)', fontWeight: 600 }}
+              itemStyle={{ color: 'var(--muted-foreground)' }}
             />
           </PieChart>
         </ResponsiveContainer>

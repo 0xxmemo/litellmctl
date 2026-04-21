@@ -271,11 +271,11 @@ export function ModelSelector({
               isDefaultSelected ? 'bg-muted/50' : ''
             }`}
           >
-            <span className="shrink-0 rounded border border-emerald-500/30 bg-emerald-500/15 px-1.5 py-0.5 font-mono text-xs text-emerald-400">
+            <span className="glass glass--success shrink-0 px-1.5 py-0.5 font-mono text-xs">
               {defaultOption.badge}
             </span>
             <span className={optionLabelStyles}>{defaultOption.label}</span>
-            {isDefaultSelected && <span className="ml-auto shrink-0 text-xs text-green-500">✓</span>}
+            {isDefaultSelected && <span className="ml-auto shrink-0 text-xs text-ui-success-fg">✓</span>}
           </button>
         )}
 
@@ -314,7 +314,7 @@ export function ModelSelector({
                     )}
                     <span className={optionLabelStyles}>{m.displayName}</span>
                     {isSelected && (
-                      <span className="ml-auto shrink-0 text-xs text-green-500">✓</span>
+                      <span className="ml-auto shrink-0 text-xs text-ui-success-fg">✓</span>
                     )}
                   </button>
                 )
@@ -361,7 +361,7 @@ export function ModelSelector({
 
         {defaultOption && isDefaultSelected ? (
           <>
-            <span className="text-xs px-1.5 py-0.5 rounded border font-mono shrink-0 bg-emerald-500/15 text-emerald-400 border-emerald-500/30">
+            <span className="glass glass--success text-xs px-1.5 py-0.5 font-mono shrink-0">
               {defaultOption.badge}
             </span>
             <span className={optionLabelStyles}>{defaultOption.label}</span>

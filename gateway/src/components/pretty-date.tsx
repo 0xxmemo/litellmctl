@@ -126,7 +126,7 @@ export function PrettyDate({
   if (format === 'countdown') {
     const duration = formatDuration(timeInfo.milliseconds, showSeconds)
     const suffix = timeInfo.isPast ? agoLabel : fromNowLabel
-    const colorClass = timeInfo.isPast ? 'text-red-500' : 'text-green-500'
+    const colorClass = timeInfo.isPast ? 'text-ui-danger-fg' : 'text-ui-success-fg'
 
     return (
       <span className={cn('inline-flex items-baseline gap-1', className)}>
@@ -139,7 +139,7 @@ export function PrettyDate({
   if (format === 'relative') {
     const duration = formatDuration(Math.abs(timeInfo.milliseconds), showSeconds)
     const suffix = timeInfo.isPast ? agoLabel : fromNowLabel
-    const colorClass = timeInfo.isPast ? 'text-muted-foreground' : 'text-green-500'
+    const colorClass = timeInfo.isPast ? 'text-muted-foreground' : 'text-ui-success-fg'
 
     return (
       <span className={cn('inline-flex items-baseline gap-1', className)}>

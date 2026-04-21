@@ -137,6 +137,28 @@
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-ring: var(--sidebar-ring);
 
+  /* Semantic UI tokens — drives text-ui-* bg-ui-* border-ui-* utilities */
+  --color-ui-success-fg: var(--ui-success-fg);
+  --color-ui-success-bg: var(--ui-success-bg);
+  --color-ui-success-border: var(--ui-success-border);
+  --color-ui-warning-fg: var(--ui-warning-fg);
+  --color-ui-warning-bg: var(--ui-warning-bg);
+  --color-ui-warning-border: var(--ui-warning-border);
+  --color-ui-danger-fg: var(--ui-danger-fg);
+  --color-ui-danger-bg: var(--ui-danger-bg);
+  --color-ui-danger-border: var(--ui-danger-border);
+  --color-ui-danger-soft-bg: var(--ui-danger-soft-bg);
+  --color-ui-danger-soft-border: var(--ui-danger-soft-border);
+  --color-ui-info-fg: var(--ui-info-fg);
+  --color-ui-info-bg: var(--ui-info-bg);
+  --color-ui-info-border: var(--ui-info-border);
+  --color-ui-accent-fg: var(--ui-accent-fg);
+  --color-ui-accent-bg: var(--ui-accent-bg);
+  --color-ui-accent-border: var(--ui-accent-border);
+  --color-ui-brand-fg: var(--ui-brand-fg);
+  --color-ui-brand-bg: var(--ui-brand-bg);
+  --color-ui-brand-border: var(--ui-brand-border);
+
   --font-sans: var(--font-sans);
   --font-mono: var(--font-mono);
   --font-serif: var(--font-serif);

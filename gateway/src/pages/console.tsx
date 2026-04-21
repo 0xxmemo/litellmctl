@@ -264,14 +264,14 @@ export function Console() {
   // ── Render ───────────────────────────────────────────────────────────
   const statusPill =
     state === 'open'
-      ? { label: 'connected', tone: 'bg-emerald-500/10 text-emerald-400 ring-emerald-500/20' }
+      ? { label: 'connected', tone: 'bg-ui-success-bg text-ui-success-fg ring-ui-success-border' }
       : state === 'connecting'
-      ? { label: 'connecting…', tone: 'bg-amber-500/10 text-amber-400 ring-amber-500/20' }
+      ? { label: 'connecting…', tone: 'bg-ui-warning-bg text-ui-warning-fg ring-ui-warning-border' }
       : state === 'error'
-      ? { label: 'error', tone: 'bg-rose-500/10 text-rose-400 ring-rose-500/20' }
+      ? { label: 'error', tone: 'bg-ui-danger-bg text-ui-danger-fg ring-ui-danger-border' }
       : state === 'denied'
-      ? { label: 'access denied', tone: 'bg-rose-500/10 text-rose-400 ring-rose-500/20' }
-      : { label: 'disconnected', tone: 'bg-zinc-500/10 text-zinc-400 ring-zinc-500/20' }
+      ? { label: 'access denied', tone: 'bg-ui-danger-bg text-ui-danger-fg ring-ui-danger-border' }
+      : { label: 'disconnected', tone: 'bg-muted/30 text-muted-foreground ring-border/50' }
 
   return (
     <div
@@ -296,9 +296,9 @@ export function Console() {
               className={
                 'w-1.5 h-1.5 rounded-full ' +
                 (state === 'open'
-                  ? 'bg-emerald-400 animate-pulse'
+                  ? 'bg-ui-success-fg animate-pulse'
                   : state === 'connecting'
-                  ? 'bg-amber-400 animate-pulse'
+                  ? 'bg-ui-warning-fg animate-pulse'
                   : 'bg-current')
               }
             />

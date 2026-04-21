@@ -71,7 +71,7 @@ export function ApiKeyInput({ apiKey, onChange }: ApiKeyInputProps) {
         </button>
       </div>
       {apiKey && (
-        <div className="flex items-center gap-1 text-green-500 text-xs font-medium shrink-0">
+        <div className="flex items-center gap-1 text-ui-success-fg text-xs font-medium shrink-0">
           <Check className="h-3.5 w-3.5" />
           Saved
         </div>
@@ -83,7 +83,7 @@ export function ApiKeyInput({ apiKey, onChange }: ApiKeyInputProps) {
 // ─── Method badge ────────────────────────────────────────────────────────────
 
 function MethodBadge({ method }: { method: string }) {
-  const color = method === 'GET' ? 'bg-blue-500 text-white' : 'bg-green-500 text-white'
+  const color = method === 'GET' ? 'glass glass--info' : 'glass glass--success'
   return (
     <Badge className={`${color} text-xs font-mono px-2 py-0.5 shrink-0`}>{method}</Badge>
   )
@@ -92,10 +92,10 @@ function MethodBadge({ method }: { method: string }) {
 // ─── Status colour helper ────────────────────────────────────────────────────
 
 function statusColor(status: number | null) {
-  if (!status) return 'text-red-500'
-  if (status < 300) return 'text-green-500'
-  if (status < 400) return 'text-yellow-500'
-  return 'text-red-500'
+  if (!status) return 'text-ui-danger-fg'
+  if (status < 300) return 'text-ui-success-fg'
+  if (status < 400) return 'text-ui-warning-fg'
+  return 'text-ui-danger-fg'
 }
 
 // ─── Copy button ─────────────────────────────────────────────────────────────
@@ -111,10 +111,10 @@ function CopyButton({ copyText }: { displayText: string; copyText: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="absolute top-2 right-2 p-1.5 rounded text-slate-400 hover:text-slate-200 hover:bg-slate-700 transition-colors"
+      className="absolute top-2 right-2 p-1.5 rounded text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
       title="Copy to clipboard (key replaced with placeholder)"
     >
-      {copied ? <Check className="h-3.5 w-3.5 text-green-400" /> : <Copy className="h-3.5 w-3.5" />}
+      {copied ? <Check className="h-3.5 w-3.5 text-ui-success-fg" /> : <Copy className="h-3.5 w-3.5" />}
     </button>
   )
 }
@@ -274,7 +274,7 @@ export function EndpointTryCard({
               : activeCurl
             return (
               <div className="relative">
-                <pre className="bg-slate-900 text-slate-200 p-4 rounded-lg text-xs overflow-x-auto leading-relaxed pr-10">
+                <pre className="bg-card text-foreground p-4 rounded-lg text-xs overflow-x-auto leading-relaxed pr-10">
                   {displayCurl}
                 </pre>
                 <CopyButton displayText={displayCurl} copyText={copyCurl} />
@@ -288,7 +288,7 @@ export function EndpointTryCard({
           <div className="space-y-4">
             {/* Auth warning */}
             {requiresAuth && !apiKey && (
-              <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg text-xs text-amber-500 flex items-center gap-2">
+              <div className="glass glass--warning p-3 text-xs flex items-center gap-2">
                 <Key className="h-4 w-4 shrink-0" />
                 Enter your API key in the panel above to send authenticated requests.
               </div>
@@ -311,7 +311,7 @@ export function EndpointTryCard({
                   Request Body (JSON)
                 </label>
                 <textarea
-                  className="w-full font-mono text-xs bg-slate-900 text-slate-200 p-3 rounded-lg border border-slate-700 resize-y min-h-[120px] focus:outline-none focus:ring-1 focus:ring-ring"
+                  className="w-full font-mono text-xs bg-card text-foreground p-3 rounded-lg border border-border resize-y min-h-[120px] focus:outline-none focus:ring-1 focus:ring-ring"
                   value={body}
                   onChange={(e) => handleBodyChange(e.target.value)}
                   spellCheck={false}
@@ -367,7 +367,7 @@ export function EndpointTryCard({
                       {response.status} {response.statusText}
                     </span>
                   ) : response.error ? (
-                    <span className="text-red-500 font-semibold">Error</span>
+                    <span className="text-ui-danger-fg font-semibold">Error</span>
                   ) : null}
                   {response.timingMs !== null && (
                     <span className="text-muted-foreground flex items-center gap-1">
@@ -378,7 +378,7 @@ export function EndpointTryCard({
                 </div>
 
                 {response.error && (
-                  <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-400">
+                  <div className="glass glass--ui-danger p-3 text-sm">
                     {response.error}
                   </div>
                 )}
@@ -402,12 +402,12 @@ export function EndpointTryCard({
                               <img
                                 src={src}
                                 alt="Generated image"
-                                className="rounded-lg max-w-full border border-slate-700"
+                                className="rounded-lg max-w-full border border-border"
                                 style={{ maxHeight: '512px' }}
                               />
                               {imageItem.revised_prompt && (
                                 <p className="text-xs text-muted-foreground italic">
-                                  <span className="font-semibold not-italic text-slate-400">Revised prompt:</span>{' '}
+                                  <span className="font-semibold not-italic text-muted-foreground">Revised prompt:</span>{' '}
                                   {imageItem.revised_prompt}
                                 </p>
                               )}
@@ -419,7 +419,7 @@ export function EndpointTryCard({
                       }
                       return null
                     })()}
-                    <pre className="bg-slate-900 text-slate-200 p-3 rounded-lg text-xs overflow-x-auto max-h-96 overflow-y-auto">
+                    <pre className="bg-card text-foreground p-3 rounded-lg text-xs overflow-x-auto max-h-96 overflow-y-auto">
                       {response.body}
                     </pre>
                   </div>
