@@ -21,6 +21,7 @@ set -euo pipefail
 # --- Injected configuration (install.sh rewrites these lines) -------------
 : "${GATEWAY_URL:=__GATEWAY_URL__}"
 : "${API_KEY:=__API_KEY__}"
+_SKILL_CONFIGURED="__SKILL_CONFIGURED__"  # install.sh replaces with: yes
 
 # --- Inputs ---------------------------------------------------------------
 PROMPT="${PROMPT:-}"
@@ -33,12 +34,17 @@ if [ -z "$PROMPT" ]; then
     echo "ERROR: set PROMPT to a detailed description of the image" >&2
     exit 2
 fi
-if [ -z "$GATEWAY_URL" ] || [ "$GATEWAY_URL" = "__GATEWAY_URL__" ]; then
-    echo "ERROR: GATEWAY_URL is not configured. Re-run the skill installer." >&2
+if [ "${_SKILL_CONFIGURED:-no}" != "yes" ]; then
+    echo "ERROR: skill not properly installed (GATEWAY_URL / API_KEY not injected)." >&2
+    echo "       Re-run the skill installer." >&2
     exit 2
 fi
-if [ -z "$API_KEY" ] || [ "$API_KEY" = "__API_KEY__" ]; then
-    echo "ERROR: API_KEY is not configured. Re-run the skill installer." >&2
+if [ -z "$GATEWAY_URL" ]; then
+    echo "ERROR: GATEWAY_URL is empty. Re-run the skill installer." >&2
+    exit 2
+fi
+if [ -z "$API_KEY" ]; then
+    echo "ERROR: API_KEY is empty. Re-run the skill installer." >&2
     exit 2
 fi
 

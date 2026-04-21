@@ -161,6 +161,7 @@ if [ -f "$RUN_SH" ]; then
     echo "  Injecting configuration into run.sh..."
     sed_inplace "__GATEWAY_URL__" "${GATEWAY_ORIGIN}" "$RUN_SH"
     sed_inplace "__API_KEY__" "${API_KEY}" "$RUN_SH"
+    sed_inplace "__SKILL_CONFIGURED__" "yes" "$RUN_SH"
     chmod +x "$RUN_SH"
     echo "  run.sh configured and made executable"
 else
