@@ -23,7 +23,12 @@ type PtyHandle = {
   onExit(cb: (code: number) => void): void;
 };
 
-type PtyLib = typeof import("node-pty");
+// Using @homebridge/node-pty-prebuilt-multiarch instead of upstream node-pty:
+// it ships working prebuilt binaries for Linux ARM64 (graviton, raspberry pi,
+// etc.). The upstream node-pty 1.1.0 has no Linux ARM64 prebuild and the
+// node-gyp rebuild produces a binary that's broken under Bun — every pty
+// child receives SIGHUP immediately after spawn, regardless of the command.
+type PtyLib = typeof import("@homebridge/node-pty-prebuilt-multiarch");
 let ptyModule: PtyLib | null | undefined;
 
 function loadPty(): PtyLib | null {
@@ -31,7 +36,7 @@ function loadPty(): PtyLib | null {
   try {
     // Dynamic require so a missing / broken native binding doesn't kill
     // the whole gateway at startup.
-    ptyModule = require("node-pty") as PtyLib;
+    ptyModule = require("@homebridge/node-pty-prebuilt-multiarch") as PtyLib;
   } catch (err) {
     console.warn("[console] node-pty unavailable — admin console disabled:", (err as Error).message);
     ptyModule = null;
@@ -124,27 +129,7 @@ export function spawnConsole(cols = 80, rows = 24): PtyHandle {
   // signal.signal(SIGHUP, SIG_IGN) runs as a direct syscall at startup,
   // and SIG_IGN is inherited across exec at the kernel level, so the
   // follow-up interactive bash starts with HUP already ignored.
-  // Triple-layered SIGHUP defence against the Bun+node-pty quirk:
-  //   1. setsid --ctty puts the child into its own session with the pty
-  //      as its controlling terminal, isolated from the outer session's
-  //      hangup propagation.
-  //   2. python3 -c installs signal.SIG_IGN for SIGHUP at the syscall
-  //      level, which is preserved across execvp per POSIX.
-  //   3. bash -il inherits SIG_IGN and (per bash startup rules) keeps
-  //      it ignored for its entire lifetime.
-  const proc = pty.spawn("/usr/bin/setsid", [
-    "--ctty",
-    "/usr/bin/python3",
-    "-c",
-    [
-      "import os, sys, signal",
-      "signal.signal(signal.SIGHUP, signal.SIG_IGN)",
-      "signal.signal(signal.SIGPIPE, signal.SIG_DFL)",
-      "sys.stdout.write('[console] shell ready\\r\\n')",
-      "sys.stdout.flush()",
-      "os.execvp('/bin/bash', ['/bin/bash', '-il'])",
-    ].join("; "),
-  ], {
+  const proc = pty.spawn(shell, ["-il"], {
     name: "xterm-256color",
     cols,
     rows,
@@ -154,8 +139,8 @@ export function spawnConsole(cols = 80, rows = 24): PtyHandle {
 
   // Surface exit details in gateway logs so we can diagnose the next
   // "shell keeps dying" report without having to instrument the client.
-  proc.onExit(({ exitCode, signal }) => {
-    console.log(`[console] pty exited code=${exitCode} signal=${signal ?? "-"} shell=${shell} cwd=${cwd}`);
+  proc.onExit((e: { exitCode: number; signal?: number }) => {
+    console.log(`[console] pty exited code=${e.exitCode} signal=${e.signal ?? "-"} shell=${shell} cwd=${cwd}`);
   });
 
   return {
@@ -165,7 +150,7 @@ export function spawnConsole(cols = 80, rows = 24): PtyHandle {
     },
     kill: () => { try { proc.kill(); } catch {} },
     onData: (cb) => proc.onData(cb),
-    onExit: (cb) => proc.onExit(({ exitCode }) => cb(exitCode)),
+    onExit: (cb) => proc.onExit((e: { exitCode: number }) => cb(e.exitCode)),
   };
 }
 
