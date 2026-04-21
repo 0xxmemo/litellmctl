@@ -8,7 +8,7 @@ import { PrettyAmount } from '@/components/pretty-amount'
 import { ModelUsagePieChart } from '@/components/model-usage-pie-chart'
 import { RequestsTable } from '@/components/requests-table'
 import { PluginsOverview } from '@/components/plugins/plugins-overview'
-import { getDisplayName, formatProviderName, getProviderColor, extractProvider, resolveProvider } from '@lib/models'
+import { getDisplayName, formatProviderName, extractProvider, resolveProvider } from '@lib/models'
 import { useUserStats } from '@/hooks/use-stats'
 import { useAuth } from '@/hooks/use-auth'
 import { useRequestsTable } from '@/hooks/use-requests'
@@ -198,7 +198,6 @@ export function Overview() {
                     value: m.requests ?? 0,
                     percentage: m.percentage || '0',
                     provider,
-                    colorClass: getProviderColor(provider),
                     providerName: formatProviderName(provider),
                   }
                 })}

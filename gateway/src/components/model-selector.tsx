@@ -4,7 +4,7 @@ import { ChevronDown, Search, Loader2 } from 'lucide-react'
 import {
   NormalizedModel,
   formatProviderName,
-  getProviderColor,
+  getProviderBadgeClassName,
   detectIsStub,
 } from '@lib/models'
 import type { ExtendedModel } from '@lib/models'
@@ -217,7 +217,7 @@ export function ModelSelector({
     : 0
 
   const selectedModel = models.find((m) => m.id === selectedValue)
-  const provColorClass = selectedModel ? getProviderColor(selectedModel.provider) : getProviderColor('')
+  const provBadgeClass = getProviderBadgeClassName(selectedModel?.provider ?? '')
   const isDefaultSelected = !!defaultOption && selectedValue === defaultOption.value
 
   const handleSelect = (modelId: string) => {
@@ -306,9 +306,7 @@ export function ModelSelector({
                         Stub
                       </span>
                     ) : (
-                      <span
-                        className={`shrink-0 rounded border px-1.5 py-0.5 font-mono text-xs ${getProviderColor(m.provider)}`}
-                      >
+                      <span className={getProviderBadgeClassName(m.provider)}>
                         {formatProviderName(m.provider)}
                       </span>
                     )}
@@ -373,7 +371,7 @@ export function ModelSelector({
                 Stub
               </span>
             ) : (
-              <span className={`text-xs px-1.5 py-0.5 rounded border font-mono shrink-0 ${provColorClass}`}>
+              <span className={provBadgeClass}>
                 {selectedModel ? formatProviderName(selectedModel.provider) : '—'}
               </span>
             )}

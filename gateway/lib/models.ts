@@ -159,6 +159,21 @@ export function getProviderColor(provider: string): string {
   return PALETTE[Math.abs(hash) % PALETTE.length]
 }
 
+/** Size presets for `getProviderBadgeClassName` (model list, selector, usage table, request rows). */
+export type ProviderBadgeSize = 'sm' | 'xs'
+
+/**
+ * Full Tailwind class string for a provider chip. Use this instead of hand-joining
+ * `getProviderColor()` so layout and colors stay aligned across the UI.
+ */
+export function getProviderBadgeClassName(provider: string, size: ProviderBadgeSize = 'sm'): string {
+  const tint = getProviderColor(provider)
+  if (size === 'xs') {
+    return `inline-flex items-center text-[10px] px-1 py-px rounded border font-mono flex-shrink-0 leading-tight ${tint}`
+  }
+  return `inline-flex items-center text-xs px-1.5 py-0.5 rounded border font-mono shrink-0 ${tint}`
+}
+
 // ─── Display / stub helpers ───────────────────────────────────────────────────
 
 export function getDisplayName(id: string): string {

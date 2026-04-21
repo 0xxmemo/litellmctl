@@ -1,6 +1,5 @@
 'use client'
 import { useState } from 'react'
-import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
   TableCell,
@@ -12,7 +11,7 @@ import { ChevronDown, ChevronRight, Loader2, Layers } from 'lucide-react'
 import {
   getDisplayName,
   formatProviderName,
-  getProviderColor,
+  getProviderBadgeClassName,
   extractProvider,
   resolveProvider,
 } from '@lib/models'
@@ -67,7 +66,7 @@ export function StackedRequestItem({ group }: StackedRequestItemProps) {
   const provider = model
     ? (extractProvider(model) || resolveProvider(model, ''))
     : group.provider
-  const colorClass = getProviderColor(provider)
+  const providerBadgeClass = getProviderBadgeClassName(provider, 'xs')
   const providerLabel = formatProviderName(provider)
   const displayName = model ? getDisplayName(model) : '—'
 
@@ -103,21 +102,15 @@ export function StackedRequestItem({ group }: StackedRequestItemProps) {
                 </span>
                 {/* Nx stacking badge */}
                 {!isSingle && (
-                  <Badge
-                    className="text-[10px] px-1.5 py-0 h-4 bg-primary/10 text-primary border-primary/20 font-bold flex-shrink-0"
-                    variant="outline"
-                  >
+                  <span className="inline-flex items-center text-[10px] px-1.5 py-0 h-4 rounded border bg-primary/10 text-primary border-primary/20 font-bold flex-shrink-0">
                     {group.count}×
-                  </Badge>
+                  </span>
                 )}
               </div>
               {provider && (
-                <Badge
-                  className={cn('text-[10px] px-1.5 py-0 border w-fit', colorClass)}
-                  variant="outline"
-                >
+                <span className={cn(providerBadgeClass, 'w-fit')}>
                   {providerLabel}
-                </Badge>
+                </span>
               )}
             </div>
           </div>

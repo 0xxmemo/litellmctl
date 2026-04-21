@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { formatProviderName, getProviderColor, extractProvider, resolveProvider } from '@lib/models'
+import { formatProviderName, getProviderBadgeClassName, extractProvider, resolveProvider } from '@lib/models'
 
 const COLORS = [
   'var(--color-chart-3)',
@@ -22,7 +22,6 @@ interface ModelUsagePieChartProps {
     percentage: string | number
     requested_aliases?: string[]
     provider?: string
-    colorClass?: string
     providerName?: string
   }>
 }
@@ -165,7 +164,7 @@ export function ModelUsagePieChart({ data }: ModelUsagePieChartProps) {
               {data.map((model, index) => {
                 const aliases = (model.requested_aliases || []).filter(a => a && a !== model.name)
                 const effectiveProvider = model.provider || extractProvider(model.name) || resolveProvider(model.name, '')
-                const effectiveColorClass = model.colorClass || getProviderColor(effectiveProvider)
+                const providerBadgeClass = getProviderBadgeClassName(effectiveProvider, 'xs')
                 const effectiveProviderName = model.providerName || formatProviderName(effectiveProvider)
                 const pct = typeof model.percentage === 'number' ? model.percentage : parseFloat(String(model.percentage)) || 0
                 return (
@@ -176,7 +175,7 @@ export function ModelUsagePieChart({ data }: ModelUsagePieChartProps) {
                           className="inline-block w-2 h-2 rounded-sm flex-shrink-0"
                           style={{ backgroundColor: COLORS[index % COLORS.length] }}
                         />
-                        <span className={`text-[10px] px-1 py-px rounded border font-mono flex-shrink-0 leading-tight ${effectiveColorClass}`}>
+                        <span className={providerBadgeClass}>
                           {effectiveProviderName}
                         </span>
                         <span className="truncate text-xs" title={model.name}>{shortModelName(model.name)}</span>

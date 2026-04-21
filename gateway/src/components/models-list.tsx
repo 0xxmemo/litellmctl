@@ -1,6 +1,6 @@
 import {} from 'react'
 import { Loader2, Cpu, Eye, Zap, Brain, Key } from 'lucide-react'
-import { formatProviderName, getProviderColor } from '@lib/models'
+import { formatProviderName, getProviderBadgeClassName } from '@lib/models'
 import type { UseExtendedModelsReturn } from '@/lib/models-hooks'
 
 export interface ModelsListProps {
@@ -38,7 +38,6 @@ export function ModelsList({ extendedModels }: ModelsListProps) {
     >
       <div className="p-2 space-y-1">
         {models.map((model) => {
-          const colorClass = getProviderColor(model.provider)
           return (
             <div
               key={model.id}
@@ -50,7 +49,7 @@ export function ModelsList({ extendedModels }: ModelsListProps) {
                   Stub
                 </span>
               ) : (
-                <span className={`text-xs px-1.5 py-0.5 rounded border font-mono shrink-0 ${colorClass}`}>
+                <span className={getProviderBadgeClassName(model.provider)}>
                   {formatProviderName(model.provider)}
                 </span>
               )}
