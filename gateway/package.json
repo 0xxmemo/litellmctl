@@ -36,7 +36,6 @@
     "jose": "^6.1.3",
     "js-yaml": "^4.1.1",
     "lucide-react": "^0.575.0",
-    "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "nodemailer": "^8.0.1",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
@@ -46,7 +45,6 @@
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.1"
   },
-  "trustedDependencies": ["@homebridge/node-pty-prebuilt-multiarch"],
   "devDependencies": {
     "@types/bun": "^1.3.11",
     "@types/js-yaml": "^4.0.9",

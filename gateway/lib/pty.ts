@@ -1,18 +1,23 @@
 /**
  * Admin PTY console — spawns an interactive shell inside the container and
- * exposes it over WebSocket to the gateway UI. Container-only by design.
+ * exposes it over WebSocket to the gateway UI.
+ *
+ * Implementation notes:
+ *   - We do NOT use node-pty. Both upstream node-pty and the @homebridge
+ *     prebuilt fork are broken under Bun on Linux ARM64: every spawned
+ *     child dies immediately with SIGHUP regardless of the command. See
+ *     the commit history and ./bin/pty-proxy.py for the reproduction.
+ *   - Instead we spawn `python3 bin/pty-proxy.py` via Bun.spawn with piped
+ *     stdio, and use a tiny length-prefixed frame protocol over stdin to
+ *     carry typed input, resize events, and a kill request.
  *
  * Gating:
- *   1. LITELLM_HARNESS=docker  (set automatically by the Dockerfile)
+ *   1. requireAdmin() at the WebSocket upgrade boundary (routes/console.ts)
  *   2. GATEWAY_CONSOLE_ENABLED !== "false"
- *   3. requireAdmin() session gate at the WebSocket upgrade boundary
- *
- * The PTY is backed by node-pty (native addon, works under Bun's node compat).
- * If node-pty fails to load (e.g. wrong arch), consoleEnabled() returns false
- * and the UI tab hides itself — no silent degradation.
+ *   3. Re-checked per message inside attachPty / handleClientMessage
  */
 
-import type { ServerWebSocket } from "bun";
+import type { ServerWebSocket, Subprocess } from "bun";
 import { loadUser } from "./db";
 
 type PtyHandle = {
@@ -23,75 +28,49 @@ type PtyHandle = {
   onExit(cb: (code: number) => void): void;
 };
 
-// Using @homebridge/node-pty-prebuilt-multiarch instead of upstream node-pty:
-// it ships working prebuilt binaries for Linux ARM64 (graviton, raspberry pi,
-// etc.). The upstream node-pty 1.1.0 has no Linux ARM64 prebuild and the
-// node-gyp rebuild produces a binary that's broken under Bun — every pty
-// child receives SIGHUP immediately after spawn, regardless of the command.
-type PtyLib = typeof import("@homebridge/node-pty-prebuilt-multiarch");
-let ptyModule: PtyLib | null | undefined;
-
-function loadPty(): PtyLib | null {
-  if (ptyModule !== undefined) return ptyModule;
-  try {
-    // Dynamic require so a missing / broken native binding doesn't kill
-    // the whole gateway at startup.
-    ptyModule = require("@homebridge/node-pty-prebuilt-multiarch") as PtyLib;
-  } catch (err) {
-    console.warn("[console] node-pty unavailable — admin console disabled:", (err as Error).message);
-    ptyModule = null;
-  }
-  return ptyModule ?? null;
-}
-
 export function consoleEnabled(): boolean {
-  // Explicit opt-out always wins.
   if (process.env.GATEWAY_CONSOLE_ENABLED === "false") return false;
-  // Opt-in either by setting GATEWAY_CONSOLE_ENABLED=true OR by running
-  // under a known managed harness (docker container, CFN-provisioned EC2).
-  const enabled =
+  return (
     process.env.GATEWAY_CONSOLE_ENABLED === "true" ||
     process.env.LITELLM_HARNESS === "docker" ||
-    process.env.LITELLM_HARNESS === "ec2";
-  if (!enabled) return false;
-  return loadPty() !== null;
+    process.env.LITELLM_HARNESS === "ec2"
+  );
 }
 
-/**
- * Project root — the repo directory that contains `bin/`, `install.sh`,
- * `.env`, etc. The gateway process runs with cwd=<root>/gateway, so the
- * parent dir is the right place to drop the admin.
- *   Docker: /app
- *   EC2:    /home/ec2-user/.litellm
- *   Laptop: ~/.litellm
- * All of them satisfy new URL("../..", import.meta.url).
- */
 const PROJECT_ROOT = new URL("../..", import.meta.url).pathname.replace(/\/$/, "");
+const PROXY_SCRIPT = new URL("../bin/pty-proxy.py", import.meta.url).pathname;
+
+/**
+ * Frame builder for the Python proxy. See `bin/pty-proxy.py` for the
+ * matching decoder.
+ */
+function frameInput(data: string): Uint8Array {
+  const payload = new TextEncoder().encode(data);
+  const frame = new Uint8Array(1 + 4 + payload.length);
+  frame[0] = 0x44; // 'D'
+  new DataView(frame.buffer).setUint32(1, payload.length, false);
+  frame.set(payload, 5);
+  return frame;
+}
+
+function frameResize(cols: number, rows: number): Uint8Array {
+  const frame = new Uint8Array(1 + 2 + 2);
+  frame[0] = 0x52; // 'R'
+  const dv = new DataView(frame.buffer);
+  dv.setUint16(1, Math.max(1, cols), false);
+  dv.setUint16(3, Math.max(1, rows), false);
+  return frame;
+}
+
+const KILL_FRAME = new Uint8Array([0x58]); // 'X'
 
 export function spawnConsole(cols = 80, rows = 24): PtyHandle {
-  const pty = loadPty();
-  if (!pty) throw new Error("node-pty not available");
-
-  // When bun runs under systemd, $SHELL often points at /sbin/nologin or is
-  // unset. Hard-code bash — the container/VPC always has it on $PATH.
-  const shell = "/bin/bash";
-  // Resolve HOME ourselves: systemd user services occasionally launch with
-  // HOME unset, and `bash -l` will exit immediately if it can't find its
-  // startup files. Fall back to the effective user's home.
   const home =
     process.env.HOME ||
     (process.env.USER ? `/home/${process.env.USER}` : "") ||
     "/root";
-  // Prefer GATEWAY_DATA_DIR if the operator pointed us somewhere; else
-  // the resolved project root; absolute last resort is $HOME then /tmp.
-  const cwd = process.env.GATEWAY_DATA_DIR
-    || PROJECT_ROOT
-    || home
-    || "/tmp";
+  const cwd = process.env.GATEWAY_DATA_DIR || PROJECT_ROOT || home || "/tmp";
 
-  // Filter undefined values from process.env — node-pty chokes on them and
-  // will silently exit the child (seen as "[process exited: 0]" with no
-  // prompt ever appearing).
   const baseEnv: Record<string, string> = {};
   for (const [k, v] of Object.entries(process.env)) {
     if (typeof v === "string") baseEnv[k] = v;
@@ -100,11 +79,12 @@ export function spawnConsole(cols = 80, rows = 24): PtyHandle {
   const env: Record<string, string> = {
     ...baseEnv,
     HOME: home,
-    SHELL: shell,
+    SHELL: "/bin/bash",
     TERM: "xterm-256color",
     LANG: baseEnv.LANG || "C.UTF-8",
     LC_ALL: baseEnv.LC_ALL || "C.UTF-8",
     PS1: baseEnv.PS1 || "\\u@\\h:\\w\\$ ",
+    PTY_SHELL: "/bin/bash",
     PATH: [
       "/opt/venv/bin",
       `${PROJECT_ROOT}/venv/bin`,
@@ -120,37 +100,83 @@ export function spawnConsole(cols = 80, rows = 24): PtyHandle {
     ].filter(Boolean).join(":"),
   };
 
-  // Under Bun+node-pty on Linux, the kernel delivers a spurious SIGHUP to
-  // the pty child before bash can install its own signal handlers — the
-  // shell dies with exitCode=0 signal=1 before ever printing a prompt.
-  //
-  // A `bash -c "trap '' HUP; exec bash -il"` wrapper is NOT sufficient:
-  // the HUP can arrive before the `trap` builtin executes. Python's
-  // signal.signal(SIGHUP, SIG_IGN) runs as a direct syscall at startup,
-  // and SIG_IGN is inherited across exec at the kernel level, so the
-  // follow-up interactive bash starts with HUP already ignored.
-  const proc = pty.spawn(shell, ["-il"], {
-    name: "xterm-256color",
-    cols,
-    rows,
+  const proc: Subprocess<"pipe", "pipe", "pipe"> = Bun.spawn({
+    cmd: ["/usr/bin/python3", "-u", PROXY_SCRIPT],
+    stdin: "pipe",
+    stdout: "pipe",
+    stderr: "pipe",
     cwd,
     env,
   });
 
-  // Surface exit details in gateway logs so we can diagnose the next
-  // "shell keeps dying" report without having to instrument the client.
-  proc.onExit((e: { exitCode: number; signal?: number }) => {
-    console.log(`[console] pty exited code=${e.exitCode} signal=${e.signal ?? "-"} shell=${shell} cwd=${cwd}`);
-  });
+  // Send the initial window size straight away so bash's first prompt is
+  // rendered at the right width. The proxy sets a default 24x80 otherwise.
+  try {
+    proc.stdin.write(frameResize(cols, rows));
+  } catch {}
+
+  const dataSubscribers: ((d: string) => void)[] = [];
+  const exitSubscribers: ((code: number) => void)[] = [];
+  let exited = false;
+
+  // Pump stdout → data subscribers.
+  (async () => {
+    const decoder = new TextDecoder();
+    const reader = proc.stdout.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done || value == null) break;
+        const chunk = decoder.decode(value);
+        for (const sub of dataSubscribers) {
+          try { sub(chunk); } catch {}
+        }
+      }
+    } catch (err) {
+      console.error("[console][stdout]", err);
+    }
+  })();
+
+  // Drain stderr to the gateway log (proxy errors, exec failures, etc).
+  (async () => {
+    const decoder = new TextDecoder();
+    const reader = proc.stderr.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done || value == null) break;
+        const msg = decoder.decode(value).trimEnd();
+        if (msg) console.warn("[console][proxy stderr]", msg);
+      }
+    } catch {}
+  })();
+
+  // Watch for exit.
+  (async () => {
+    const code = await proc.exited;
+    exited = true;
+    console.log(`[console] proxy exited code=${code}`);
+    for (const sub of exitSubscribers) {
+      try { sub(typeof code === "number" ? code : 1); } catch {}
+    }
+  })();
 
   return {
-    write: (d) => proc.write(d),
-    resize: (c, r) => {
-      try { proc.resize(Math.max(c, 1), Math.max(r, 1)); } catch {}
+    write: (d) => {
+      if (exited) return;
+      try { proc.stdin.write(frameInput(d)); } catch {}
     },
-    kill: () => { try { proc.kill(); } catch {} },
-    onData: (cb) => proc.onData(cb),
-    onExit: (cb) => proc.onExit((e: { exitCode: number }) => cb(e.exitCode)),
+    resize: (c, r) => {
+      if (exited) return;
+      try { proc.stdin.write(frameResize(c, r)); } catch {}
+    },
+    kill: () => {
+      if (exited) return;
+      try { proc.stdin.write(KILL_FRAME); } catch {}
+      try { proc.kill(); } catch {}
+    },
+    onData: (cb) => { dataSubscribers.push(cb); },
+    onExit: (cb) => { exitSubscribers.push(cb); },
   };
 }
 
@@ -163,12 +189,6 @@ export interface ConsoleSocketData {
   pty?: PtyHandle;
 }
 
-/**
- * Belt-and-suspenders admin check at the WebSocket boundary.
- * The HTTP upgrade already passed `requireAdmin`, but the role could
- * have been revoked in the ~ms between upgrade and `open`, and we want
- * to refuse the PTY spawn rather than leak a shell to a demoted user.
- */
 function isStillAdmin(email: string): boolean {
   const user = loadUser(email);
   return user !== null && user.role === "admin";
@@ -204,15 +224,12 @@ export function handleClientMessage(
 ): void {
   const handle = ws.data.pty;
   if (!handle) return;
-  // Re-check admin on every message frame — cheap (cached) and ensures
-  // a revoked admin cannot keep typing into a shell they opened earlier.
   if (!ws.data?.email || !isStillAdmin(ws.data.email)) {
     try { ws.close(1008, "admin-required"); } catch {}
     return;
   }
   const text = typeof message === "string" ? message : message.toString("utf8");
 
-  // Try JSON (control frames); any parse failure → treat as raw input.
   if (text.startsWith("{")) {
     try {
       const parsed = JSON.parse(text) as { type: string; data?: string; cols?: number; rows?: number };

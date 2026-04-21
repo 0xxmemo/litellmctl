@@ -506,8 +506,6 @@ fi
 if [ "$WITH_GATEWAY" = 1 ]; then
   info "Installing gateway (bun install + frontend build) ..."
   as_user "cd '$INSTALL_DIR' && ./bin/litellmctl install --with-gateway"
-  # Force node-pty's native build now that node-gyp is available
-  as_user "cd '$INSTALL_DIR/gateway' && bun install"
 fi
 
 # ── Pipeline: litellmctl install --with-protonmail + auto-auth ───────────
