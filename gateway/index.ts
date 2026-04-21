@@ -26,10 +26,12 @@ import { searchRoutes } from "./routes/search";
 import { healthRoutes } from "./routes/health";
 import { setupRoutes } from "./routes/setup";
 import { skillsRoutes } from "./routes/skills";
-import { vectorDbRoutes, handleVectorDbByName } from "./routes/vectordb";
 import { pluginsRoutes } from "./routes/plugins";
-import { pluginStatsRoutes } from "./routes/plugin-stats";
 import { consoleRoutes } from "./routes/console";
+import { gatewayPlugins } from "./plugins";
+import { buildPluginRoutes, runPluginMigrations } from "./lib/plugin-registry";
+
+const pluginRegistryRoutes = buildPluginRoutes(gatewayPlugins);
 import {
   attachPty,
   detachPty,
@@ -81,6 +83,7 @@ const port = parseInt(process.env.GATEWAY_PORT || "14041");
 
 initConfig(litellmUrl, masterKey, configPath, port);
 await connectDB();
+runPluginMigrations(gatewayPlugins);
 await initCliSecret();
 
 // ============================================================================
@@ -90,7 +93,7 @@ await initCliSecret();
 const allRoutes = [
   authRoutes, keysRoutes, modelsRoutes, statsRoutes,
   userRoutes, adminRoutes, proxyRoutes, searchRoutes, healthRoutes, setupRoutes, skillsRoutes,
-  vectorDbRoutes, pluginsRoutes, pluginStatsRoutes, consoleRoutes,
+  pluginsRoutes, consoleRoutes, pluginRegistryRoutes,
 ];
 
 function buildRouteManifest() {
@@ -245,10 +248,9 @@ Bun.serve({
     ...healthRoutes,
     ...setupRoutes,
     ...skillsRoutes,
-    ...vectorDbRoutes,
     ...pluginsRoutes,
-    ...pluginStatsRoutes,
     ...consoleRoutes,
+    ...pluginRegistryRoutes,
 
     // Icons (served from /public/)
     "/favicon.ico": async () => (await serveStaticFile("/public/favicon.ico")) || new Response("Not found", { status: 404 }),
@@ -278,12 +280,6 @@ Bun.serve({
     // /api/keys/:id — DELETE, PUT
     if (url.pathname.startsWith("/api/keys/")) {
       const res = await handleKeyById(req);
-      if (res) return res;
-    }
-
-    // /api/vectordb/collections/:name[/insert|/search|/delete|/query]
-    if (url.pathname.startsWith("/api/vectordb/collections/")) {
-      const res = await handleVectorDbByName(req);
       if (res) return res;
     }
 

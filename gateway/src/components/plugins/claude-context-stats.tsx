@@ -1,4 +1,4 @@
-import { FolderTree, FileCode, Database } from "lucide-react";
+import { FolderTree, FileCode, Database, Loader2, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { StatCard } from "@/components/stat-card";
 import { PrettyAmount } from "@/components/pretty-amount";
@@ -32,7 +32,10 @@ export function ClaudeContextStats({ query }: Props) {
       </p>
     );
   }
-  if (!data || data.totals.codebases === 0) {
+  const hasIndexed = data && data.totals.codebases > 0;
+  const hasActive = data && data.indexing && data.indexing.length > 0;
+
+  if (!hasIndexed && !hasActive) {
     return (
       <Card className="border-dashed">
         <CardContent className="flex flex-col items-center justify-center py-10 gap-3">
@@ -51,64 +54,108 @@ export function ClaudeContextStats({ query }: Props) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <StatCard
-          title="Codebases"
-          value={<PrettyAmount amountFormatted={data.totals.codebases} size="2xl" normalPrecision={0} />}
-          icon={FolderTree}
-        />
-        <StatCard
-          title="Files"
-          value={<PrettyAmount amountFormatted={data.totals.files} size="2xl" normalPrecision={0} />}
-          icon={FileCode}
-        />
-        <StatCard
-          title="Chunks"
-          value={<PrettyAmount amountFormatted={data.totals.chunks} size="2xl" normalPrecision={0} />}
-          icon={Database}
-        />
-      </div>
+      {hasActive && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Indexing in Progress</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {data!.indexing.map((job) => (
+              <div key={job.path} className="space-y-1">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="flex items-center gap-1.5 font-mono text-muted-foreground truncate">
+                    {job.status === 'indexing' ? (
+                      <Loader2 className="w-3 h-3 shrink-0 animate-spin" />
+                    ) : (
+                      <AlertCircle className="w-3 h-3 shrink-0 text-destructive" />
+                    )}
+                    {job.path}
+                  </span>
+                  <span className="shrink-0 ml-2 text-muted-foreground">
+                    {job.status === 'failed'
+                      ? 'failed'
+                      : `${Math.round(job.percentage)}%`}
+                  </span>
+                </div>
+                {job.status === 'indexing' && (
+                  <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
+                    <div
+                      className="h-full bg-primary transition-all"
+                      style={{ width: `${job.percentage}%` }}
+                    />
+                  </div>
+                )}
+                {job.status === 'failed' && job.error && (
+                  <p className="text-xs text-destructive truncate">{job.error}</p>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Indexed Codebases</CardTitle>
-          <CardDescription>
-            What <code>index_codebase</code> has stored on this gateway (shared across keys).
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs text-muted-foreground border-b">
-                  <th className="py-2 pr-4 font-medium">Codebase</th>
-                  <th className="py-2 pr-4 font-medium">Files</th>
-                  <th className="py-2 pr-4 font-medium">Chunks</th>
-                  <th className="py-2 pr-4 font-medium">Dim</th>
-                  <th className="py-2 pr-4 font-medium">Indexed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {data.collections.map((c) => (
-                  <tr key={c.name} className="border-b last:border-b-0">
-                    <td className="py-2 pr-4 font-mono text-xs break-all">
-                      {c.codebasePath ? (
-                        <span title={c.name}>{c.codebasePath}</span>
-                      ) : (
-                        <span className="text-muted-foreground">{c.name}</span>
-                      )}
-                    </td>
-                    <td className="py-2 pr-4">{c.files.toLocaleString()}</td>
-                    <td className="py-2 pr-4">{c.chunks.toLocaleString()}</td>
-                    <td className="py-2 pr-4 text-muted-foreground">{c.dimension}</td>
-                    <td className="py-2 pr-4 text-muted-foreground">{formatRelative(c.createdAt)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+      {hasIndexed && (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <StatCard
+              title="Codebases"
+              value={<PrettyAmount amountFormatted={data!.totals.codebases} size="2xl" normalPrecision={0} />}
+              icon={FolderTree}
+            />
+            <StatCard
+              title="Files"
+              value={<PrettyAmount amountFormatted={data!.totals.files} size="2xl" normalPrecision={0} />}
+              icon={FileCode}
+            />
+            <StatCard
+              title="Chunks"
+              value={<PrettyAmount amountFormatted={data!.totals.chunks} size="2xl" normalPrecision={0} />}
+              icon={Database}
+            />
           </div>
-        </CardContent>
-      </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Indexed Codebases</CardTitle>
+              <CardDescription>
+                What <code>index_codebase</code> has stored on this gateway (shared across keys).
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs text-muted-foreground border-b">
+                      <th className="py-2 pr-4 font-medium">Codebase</th>
+                      <th className="py-2 pr-4 font-medium">Files</th>
+                      <th className="py-2 pr-4 font-medium">Chunks</th>
+                      <th className="py-2 pr-4 font-medium">Dim</th>
+                      <th className="py-2 pr-4 font-medium">Indexed</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data!.collections.map((c) => (
+                      <tr key={c.name} className="border-b last:border-b-0">
+                        <td className="py-2 pr-4 font-mono text-xs break-all">
+                          {c.codebasePath ? (
+                            <span title={c.name}>{c.codebasePath}</span>
+                          ) : (
+                            <span className="text-muted-foreground">{c.name}</span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-4">{c.files.toLocaleString()}</td>
+                        <td className="py-2 pr-4">{c.chunks.toLocaleString()}</td>
+                        <td className="py-2 pr-4 text-muted-foreground">{c.dimension}</td>
+                        <td className="py-2 pr-4 text-muted-foreground">{formatRelative(c.createdAt)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 }

@@ -82,9 +82,22 @@ export interface ClaudeContextCollection {
   codebasePath: string | null
 }
 
+export interface ClaudeContextIndexingJob {
+  path: string
+  collection: string
+  status: 'indexing' | 'failed'
+  percentage: number
+  error: string | null
+  total_files: number | null
+  indexed_files: number | null
+  total_chunks: number | null
+  updatedAt: number
+}
+
 export interface ClaudeContextUsage {
   totals: { codebases: number; chunks: number; files: number }
   collections: ClaudeContextCollection[]
+  indexing: ClaudeContextIndexingJob[]
 }
 
 export interface SupermemoryEntry {
@@ -118,6 +131,8 @@ export function useClaudeContextUsage(options?: { enabled?: boolean }) {
     queryFn: fetchClaudeContextUsage,
     enabled: options?.enabled ?? true,
     refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      query.state.data?.indexing?.length ? 3000 : false,
   })
 }
 
