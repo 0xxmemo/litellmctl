@@ -154,13 +154,17 @@ else
     echo "  Warning: hook.sh not found in ${SKILL_DIR}, skipping hook installation"
 fi
 
-# Inject gateway URL and API key into SKILL.md
-SKILL_MD="${SKILLS_DIR}/image-generation/SKILL.md"
-if [ -f "$SKILL_MD" ]; then
-    echo "  Injecting configuration into SKILL.md..."
-    sed_inplace "__GATEWAY_URL__" "${GATEWAY_ORIGIN}" "$SKILL_MD"
-    sed_inplace "__API_KEY__" "${API_KEY}" "$SKILL_MD"
-    echo "  Configuration injected"
+# Inject gateway URL and API key into run.sh (the runnable entry point).
+# SKILL.md stays free of secrets so it's safe to view / share.
+RUN_SH="${SKILLS_DIR}/image-generation/run.sh"
+if [ -f "$RUN_SH" ]; then
+    echo "  Injecting configuration into run.sh..."
+    sed_inplace "__GATEWAY_URL__" "${GATEWAY_ORIGIN}" "$RUN_SH"
+    sed_inplace "__API_KEY__" "${API_KEY}" "$RUN_SH"
+    chmod +x "$RUN_SH"
+    echo "  run.sh configured and made executable"
+else
+    echo "  Warning: run.sh not found at ${RUN_SH} — skill will not run."
 fi
 
 echo "Setup complete!"
