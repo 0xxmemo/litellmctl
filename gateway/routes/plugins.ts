@@ -2,7 +2,6 @@
  * Plugins API routes (mirror of skills — but plugins register MCP servers).
  */
 
-import * as path from "path";
 import {
   scanPlugins,
   hasPluginComponent,
@@ -56,9 +55,40 @@ async function getPluginInstallScript(req: Request): Promise<Response> {
   const target = getTarget(url.searchParams.get("target"));
   const gatewayOrigin = buildGatewayOrigin(req);
   const installContent = await getPluginComponent(slug, "install.sh");
-  const pluginAbsoluteDir = path.join(PLUGINS_DIR, slug);
-  const script = buildInstallScript(slug, target, gatewayOrigin, installContent, pluginAbsoluteDir);
+  const script = buildInstallScript(slug, target, gatewayOrigin, installContent);
   return scriptResponse(script);
+}
+
+async function getPluginBundle(req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const slug = url.searchParams.get("slug") || "";
+  if (!/^[a-z0-9-]+$/.test(slug)) {
+    return Response.json({ error: "Invalid plugin slug" }, { status: 400 });
+  }
+  if (!(await hasPluginComponent(slug, PLUGIN_MANIFEST))) {
+    return Response.json({ error: "Plugin not found" }, { status: 404 });
+  }
+
+  const proc = Bun.spawn(
+    [
+      "tar",
+      "-czf", "-",
+      "-C", PLUGINS_DIR,
+      "--exclude=node_modules",
+      "--exclude=.git",
+      "--exclude=.DS_Store",
+      slug,
+    ],
+    { stdout: "pipe", stderr: "inherit" },
+  );
+
+  return new Response(proc.stdout as ReadableStream, {
+    headers: {
+      "Content-Type": "application/gzip",
+      "Content-Disposition": `attachment; filename="${slug}.tar.gz"`,
+      "Cache-Control": "no-cache",
+    },
+  });
 }
 
 async function getPluginUninstallScript(req: Request): Promise<Response> {
@@ -100,4 +130,5 @@ export const pluginsRoutes = {
   "/api/plugins/install.sh": { GET: getPluginInstallScript },
   "/api/plugins/uninstall.sh": { GET: getPluginUninstallScript },
   "/api/plugins/PLUGIN.md": { GET: getPluginManifest },
+  "/api/plugins/bundle.tar.gz": { GET: getPluginBundle },
 };

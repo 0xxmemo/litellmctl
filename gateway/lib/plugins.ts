@@ -126,7 +126,6 @@ export function buildInstallScript(
   targetConfig: PluginTargetConfig,
   gatewayOrigin: string,
   installContent: string | null,
-  pluginAbsoluteDir: string,
 ): string {
   const usageUrl = `${gatewayOrigin}/api/plugins/install.sh?slug=${slug}`;
 
@@ -155,20 +154,48 @@ ${scriptValidateKey(targetConfig.configVar, usageUrl)}
 SETTINGS_DIR_RAW="${targetConfig.settingsDir}"
 ${scriptExpandTilde("SETTINGS_DIR_RAW")}
 SETTINGS_DIR="\$SETTINGS_DIR_RAW"
-PLUGIN_DIR="\${SETTINGS_DIR}/plugins/${slug}"
+PLUGINS_PARENT="\${SETTINGS_DIR}/plugins"
+PLUGIN_DIR="\${PLUGINS_PARENT}/${slug}"
 GATEWAY_ORIGIN="${gatewayOrigin}"
 PLUGIN_SLUG="${slug}"
-# Absolute path to the plugin source in the LiteLLM repo.
-PLUGIN_SRC_DIR="${pluginAbsoluteDir}"
+# Plugin source is installed alongside the plugin dir on the client host.
+PLUGIN_SRC_DIR="\${PLUGIN_DIR}"
 
 ensure_dir "\${SETTINGS_DIR}"
-ensure_dir "\${PLUGIN_DIR}"
+ensure_dir "\${PLUGINS_PARENT}"
 
 echo "Installing ${slug} plugin for ${targetConfig.name}..."
 echo "  Target settings: \${SETTINGS_DIR}"
-echo "  Plugin source:   \${PLUGIN_SRC_DIR}"
+echo "  Plugin dir:      \${PLUGIN_DIR}"
 
-# --- Download PLUGIN.md for documentation reference ---
+# --- Download plugin source bundle from gateway ---
+if ! has_command curl; then
+  echo "Error: curl is required to download the plugin bundle." >&2
+  exit 1
+fi
+if ! has_command tar; then
+  echo "Error: tar is required to extract the plugin bundle." >&2
+  exit 1
+fi
+
+BUNDLE_URL="\${GATEWAY_ORIGIN}/api/plugins/bundle.tar.gz?slug=\${PLUGIN_SLUG}"
+TMPTAR="\$(mktemp -t plugin-${slug}.XXXXXX)"
+trap 'rm -f "\$TMPTAR"' EXIT
+echo "  Downloading plugin source from \${BUNDLE_URL}..."
+if ! curl -fsSL "\$BUNDLE_URL" -o "\$TMPTAR"; then
+  echo "Error: failed to download plugin bundle." >&2
+  exit 1
+fi
+
+# Clean-install: archive root is "${slug}/", extract into plugins/ to (re)create PLUGIN_DIR.
+rm -rf "\${PLUGIN_DIR}"
+if ! tar -xzf "\$TMPTAR" -C "\${PLUGINS_PARENT}"; then
+  echo "Error: failed to extract plugin bundle." >&2
+  exit 1
+fi
+echo "  Plugin source extracted to \${PLUGIN_DIR}"
+
+# --- Download PLUGIN.md with install annotations (overwrites the one from the bundle) ---
 if ORIGINAL_CONTENT=\$(curl -fsSL "\${GATEWAY_ORIGIN}/api/plugins/PLUGIN.md?slug=\${PLUGIN_SLUG}"); then
   CONTENT=\$(echo "\$ORIGINAL_CONTENT" | sed -e '/^---\$/,/^---\$/d')
   INSTALLED_AT=\$(date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -188,7 +215,7 @@ ${embeddedInstall}
 echo ""
 echo "${slug} plugin installed successfully!"
 echo ""
-echo "  Plugin source:   \${PLUGIN_SRC_DIR}"
+echo "  Plugin dir:      \${PLUGIN_DIR}"
 echo "  Settings dir:    \${SETTINGS_DIR}"
 echo "  Gateway URL:     \${GATEWAY_ORIGIN}"
 `;

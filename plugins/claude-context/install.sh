@@ -26,7 +26,7 @@ if ! command -v bun >/dev/null 2>&1; then
 fi
 
 SETTINGS_FILE="${SETTINGS_DIR}/settings.json"
-STATE_DIR="${HOME}/.litellm/plugin-state/claude-context"
+STATE_DIR="${SETTINGS_DIR}/plugin-state/claude-context"
 mkdir -p "$SETTINGS_DIR" "$STATE_DIR"
 
 # --- Create settings.json if missing ---
