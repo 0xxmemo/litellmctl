@@ -214,8 +214,14 @@ Resources:
           chown -R ec2-user:ec2-user /home/ec2-user/.litellm
 
           # Clone (or pull) the repo onto the data volume.
+          #
+          # mkfs.ext4 creates a `lost+found` directory on the fresh EBS
+          # volume, which makes git refuse to clone into /home/ec2-user/.litellm
+          # ("destination path ... already exists and is not an empty directory").
+          # If there's no .git yet, wipe anything in the dir before cloning.
           REPO_URL="https://github.com/${GithubOrg}/${GithubRepo}.git"
           if [ ! -d /home/ec2-user/.litellm/.git ]; then
+            find /home/ec2-user/.litellm -mindepth 1 -maxdepth 1 -exec rm -rf {} +
             sudo -u ec2-user -H git clone --branch "${GithubBranch}" "$REPO_URL" /home/ec2-user/.litellm
           else
             sudo -u ec2-user -H git -C /home/ec2-user/.litellm fetch origin

@@ -52,8 +52,11 @@ dnf install -y --allowerasing \
   golang
 
 # ── 2. Swap file ────────────────────────────────────────────────────────
+# fallocate reserves extents without writing zeros — instant on ext4/xfs
+# and safe for swap on a freshly-provisioned EBS volume (EBS is zeroed
+# by AWS before attach). Saves ~4 min vs `dd if=/dev/zero` on 32 GB.
 if [ ! -f /swapfile ]; then
-  dd if=/dev/zero of=/swapfile bs=1M count=$((SWAP_SIZE_GB * 1024)) status=progress
+  fallocate -l "${SWAP_SIZE_GB}G" /swapfile
   chmod 600 /swapfile
   mkswap /swapfile
   swapon /swapfile
