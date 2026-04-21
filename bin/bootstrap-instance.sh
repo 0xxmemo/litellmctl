@@ -49,7 +49,8 @@ dnf install -y --allowerasing \
   python3-pip python3-devel \
   gcc gcc-c++ make \
   sqlite sqlite-devel \
-  golang
+  golang \
+  nodejs npm   # needed by node-gyp for the node-pty native addon the admin console relies on
 
 # ── 2. Swap file ────────────────────────────────────────────────────────
 # fallocate reserves extents without writing zeros — instant on ext4/xfs
@@ -97,6 +98,14 @@ sudo -u ${APP_USER} -H bash -lc "cd ${LITELLM_DIR} && bash install.sh"
 # ── 8. litellmctl install — gateway + hydroxide (idempotent) ────────────
 sudo -u ${APP_USER} -H bash -lc \
   "cd ${LITELLM_DIR} && ./bin/litellmctl install --with-gateway --with-protonmail"
+
+# Force node-pty's install script so the admin console's PTY works.
+# trustedDependencies in gateway/package.json tells bun to run it, but
+# we call bun install a second time with --force to trigger the rebuild
+# on re-runs in case the previous install was skipped (trusted list
+# wasn't there yet).
+sudo -u ${APP_USER} -H bash -lc \
+  "cd ${LITELLM_DIR}/gateway && bun install"
 
 # ── 9. Auto-auth hydroxide if Proton creds are in .env ──────────────────
 # litellmctl auth protonmail sees GATEWAY_PROTON_PASSWORD and drives the

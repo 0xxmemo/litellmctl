@@ -41,6 +41,7 @@
     "tailwind-merge": "^3.5.0",
     "tailwindcss": "^4.2.1"
   },
+  "trustedDependencies": ["node-pty"],
   "devDependencies": {
     "@types/bun": "^1.3.11",
     "@types/js-yaml": "^4.0.9",
