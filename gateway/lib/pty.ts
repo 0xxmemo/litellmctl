@@ -127,8 +127,11 @@ export function spawnConsole(cols = 80, rows = 24): PtyHandle {
   const proc = pty.spawn("/usr/bin/python3", [
     "-c",
     [
-      "import os, signal",
+      "import os, sys, signal",
       "signal.signal(signal.SIGHUP, signal.SIG_IGN)",
+      "signal.signal(signal.SIGPIPE, signal.SIG_DFL)",
+      "sys.stdout.write('[wrapper] SIGHUP=IGN, exec bash\\r\\n')",
+      "sys.stdout.flush()",
       "os.execvp('/bin/bash', ['/bin/bash', '-il'])",
     ].join("; "),
   ], {
