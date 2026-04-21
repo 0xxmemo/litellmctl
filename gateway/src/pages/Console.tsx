@@ -11,7 +11,9 @@ import { RefreshCw, Eraser, Search, X, Copy, Maximize2, Minimize2 } from 'lucide
 import { useAuth } from '@/hooks/useAuth'
 import { useHealth } from '@/hooks/useHealth'
 
-type ConnState = 'connecting' | 'open' | 'closed' | 'error'
+type ConnState = 'connecting' | 'open' | 'closed' | 'error' | 'denied'
+
+const MAX_RETRIES = 5
 
 // Theme mapped to the app's dark palette (tailwind slate/zinc family).
 // Matching the rest of the UI so the console doesn't look bolted on.
@@ -51,6 +53,7 @@ export function Console() {
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimer = useRef<number | null>(null)
   const retryCount = useRef(0)
+  const unmountedRef = useRef(false)
 
   const [state, setState] = useState<ConnState>('connecting')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -86,15 +89,29 @@ export function Console() {
       term.write(data)
     }
     ws.onerror = () => setState('error')
-    ws.onclose = () => {
-      setState('closed')
+    ws.onclose = (ev) => {
       wsRef.current = null
-      // Auto-reconnect with a capped exponential backoff — the shell
-      // process dying (exit) or the gateway restarting both trigger this.
-      const attempt = Math.min(retryCount.current++, 5)
+      if (unmountedRef.current) return
+
+      // 1008 = policy violation — server denied us (non-admin, or console
+      // disabled). Do NOT reconnect; that just hammers the endpoint.
+      // 1011 pty-failed = node-pty unavailable on the server; same deal.
+      const terminal =
+        ev.code === 1008 ||
+        (ev.code === 1011 && ev.reason === 'pty-failed')
+      if (terminal) {
+        setState('denied')
+        return
+      }
+      setState('closed')
+
+      // Give up after MAX_RETRIES consecutive failures rather than looping
+      // forever — avoids the "connecting/disconnected" UI loop the user saw.
+      if (retryCount.current >= MAX_RETRIES) return
+      const attempt = retryCount.current++
       const delay = Math.min(1000 * 2 ** attempt, 15_000)
       reconnectTimer.current = window.setTimeout(() => {
-        if (termRef.current) connect(termRef.current)
+        if (termRef.current && !unmountedRef.current) connect(termRef.current)
       }, delay)
     }
   }, [])
@@ -172,6 +189,7 @@ export function Console() {
     window.addEventListener('resize', sendResize)
 
     return () => {
+      unmountedRef.current = true
       window.removeEventListener('resize', sendResize)
       ro.disconnect()
       onData.dispose()
@@ -193,6 +211,7 @@ export function Console() {
     }
     wsRef.current?.close()
     retryCount.current = 0
+    unmountedRef.current = false
     if (termRef.current) connect(termRef.current)
   }, [connect])
 
@@ -238,6 +257,8 @@ export function Console() {
       ? { label: 'connecting…', tone: 'bg-amber-500/10 text-amber-400 ring-amber-500/20' }
       : state === 'error'
       ? { label: 'error', tone: 'bg-rose-500/10 text-rose-400 ring-rose-500/20' }
+      : state === 'denied'
+      ? { label: 'access denied', tone: 'bg-rose-500/10 text-rose-400 ring-rose-500/20' }
       : { label: 'disconnected', tone: 'bg-zinc-500/10 text-zinc-400 ring-zinc-500/20' }
 
   return (

@@ -13,6 +13,7 @@
  */
 
 import type { ServerWebSocket } from "bun";
+import { loadUser } from "./db";
 
 type PtyHandle = {
   write(data: string): void;
@@ -119,7 +120,26 @@ export interface ConsoleSocketData {
   pty?: PtyHandle;
 }
 
+/**
+ * Belt-and-suspenders admin check at the WebSocket boundary.
+ * The HTTP upgrade already passed `requireAdmin`, but the role could
+ * have been revoked in the ~ms between upgrade and `open`, and we want
+ * to refuse the PTY spawn rather than leak a shell to a demoted user.
+ */
+function isStillAdmin(email: string): boolean {
+  const user = loadUser(email);
+  return user !== null && user.role === "admin";
+}
+
 export function attachPty(ws: ServerWebSocket<ConsoleSocketData>): void {
+  if (!consoleEnabled()) {
+    try { ws.close(1008, "console-disabled"); } catch {}
+    return;
+  }
+  if (!ws.data?.email || !isStillAdmin(ws.data.email)) {
+    try { ws.close(1008, "admin-required"); } catch {}
+    return;
+  }
   const handle = spawnConsole();
   ws.data.pty = handle;
   handle.onData((chunk) => { try { ws.send(chunk); } catch {} });
@@ -141,6 +161,12 @@ export function handleClientMessage(
 ): void {
   const handle = ws.data.pty;
   if (!handle) return;
+  // Re-check admin on every message frame — cheap (cached) and ensures
+  // a revoked admin cannot keep typing into a shell they opened earlier.
+  if (!ws.data?.email || !isStillAdmin(ws.data.email)) {
+    try { ws.close(1008, "admin-required"); } catch {}
+    return;
+  }
   const text = typeof message === "string" ? message : message.toString("utf8");
 
   // Try JSON (control frames); any parse failure → treat as raw input.
