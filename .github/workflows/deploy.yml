@@ -130,26 +130,33 @@ jobs:
           cat > /tmp/runme.sh <<SCRIPT
           set -eux
 
-          # Wait for user-data to finish on first boot. On subsequent deploys
-          # this file already exists and the loop is a no-op.
-          for attempt in \$(seq 1 60); do
-            [ -f /var/log/user-data-done ] && break
-            echo "[ssm] waiting for user-data to finish (attempt \$attempt/60)..."
-            sleep 10
+          # Wait for the repo to exist on the data volume — user-data
+          # clones it early, so this usually resolves in seconds. On a
+          # cold first boot it takes up to ~60s for the EBS to mount +
+          # git clone to finish.
+          for attempt in \$(seq 1 30); do
+            [ -d /home/ec2-user/.litellm/.git ] && break
+            echo "[ssm] waiting for repo to exist (attempt \$attempt/30)..."
+            sleep 5
           done
-          if [ ! -f /var/log/user-data-done ]; then
-            echo "[ssm] user-data did not finish within 10 min — see /var/log/user-data.log"
+          if [ ! -d /home/ec2-user/.litellm/.git ]; then
+            echo "[ssm] repo did not appear within 2.5 min — user-data must have failed before git clone"
             tail -n 200 /var/log/user-data.log || true
             exit 1
           fi
 
+          # Pull the branch/tag we're deploying.
           cd /home/ec2-user/.litellm
-          sudo -u ec2-user -H git fetch --tags origin
+          sudo -u ec2-user -H git fetch --tags --prune origin
           sudo -u ec2-user -H git checkout "${REF}"
           sudo -u ec2-user -H git pull --ff-only origin "${REF}" || true   # tags can't pull
           sudo -u ec2-user -H git submodule update --init --recursive
-          sudo -u ec2-user -H bash -lc "cd /home/ec2-user/.litellm && bash install.sh" || true
-          sudo -u ec2-user -H bash -lc "cd /home/ec2-user/.litellm && ./bin/litellmctl restart proxy gateway" || true
+
+          # Full idempotent bootstrap. This is the SAME script user-data
+          # ran; re-running it heals any half-finished install, picks up
+          # new apt deps / systemd units / caddy config, and restarts
+          # services. Fail-forward: no stack teardown, ever.
+          bash /home/ec2-user/.litellm/bin/bootstrap-instance.sh
           SCRIPT
 
           python3 -c "

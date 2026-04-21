@@ -189,47 +189,31 @@ Resources:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
+          # Minimal first-boot user-data. All the real provisioning lives
+          # in bin/bootstrap-instance.sh — an idempotent script in the
+          # repo that the SSM deploy step also runs. Fail-forward: if
+          # anything here breaks mid-flow, SSM in and re-run
+          # `bash ~/.litellm/bin/bootstrap-instance.sh` to finish setup —
+          # no stack teardown needed.
           set -euxo pipefail
           exec > >(tee /var/log/user-data.log) 2>&1
 
-          # ── System packages ──────────────────────────────────────────────
-          # AL2023 ships with curl-minimal / tar / gzip / python3 / aws-cli
-          # pre-installed. --allowerasing handles rare curl-minimal vs curl
-          # conflicts that block install.sh's `curl | bash` installers.
-          dnf install -y --allowerasing \
-            git jq unzip \
-            python3-pip python3-devel \
-            gcc gcc-c++ make \
-            sqlite sqlite-devel \
-            golang
+          dnf install -y --allowerasing git
 
-          # ── 32 GB swap on root volume ────────────────────────────────────
-          if [ ! -f /swapfile ]; then
-            dd if=/dev/zero of=/swapfile bs=1M count=$((${SwapSizeGb} * 1024)) status=progress
-            chmod 600 /swapfile
-            mkswap /swapfile
-            swapon /swapfile
-            echo '/swapfile none swap sw 0 0' >> /etc/fstab
-          fi
-
-          # ── Mount data volume at ~ec2-user/.litellm ──────────────────────
+          # Mount the EBS data volume at ~ec2-user/.litellm (the repo lives
+          # on it too, so it survives instance replacement).
           DEV=/dev/nvme1n1
           [ -b "$DEV" ] || DEV=/dev/xvdf
-          if ! blkid "$DEV"; then mkfs.ext4 -L litellm-data "$DEV"; fi
+          if ! blkid "$DEV" >/dev/null 2>&1; then
+            mkfs.ext4 -L litellm-data "$DEV"
+          fi
           mkdir -p /home/ec2-user/.litellm
-          grep -q litellm-data /etc/fstab || \
+          grep -q 'LABEL=litellm-data' /etc/fstab || \
             echo 'LABEL=litellm-data /home/ec2-user/.litellm ext4 defaults,nofail 0 2' >> /etc/fstab
-          mount -a
+          mountpoint -q /home/ec2-user/.litellm || mount -a
           chown -R ec2-user:ec2-user /home/ec2-user/.litellm
 
-          # ── Caddy (static ARM64 binary) ──────────────────────────────────
-          if ! command -v caddy >/dev/null 2>&1; then
-            curl -fsSL "https://github.com/caddyserver/caddy/releases/download/v${CaddyVersion}/caddy_${CaddyVersion}_linux_arm64.tar.gz" \
-              | tar -C /usr/local/bin -xz caddy
-            chmod +x /usr/local/bin/caddy
-          fi
-
-          # ── Clone the repo onto the EBS volume (idempotent) ──────────────
+          # Clone (or pull) the repo onto the data volume.
           REPO_URL="https://github.com/${GithubOrg}/${GithubRepo}.git"
           if [ ! -d /home/ec2-user/.litellm/.git ]; then
             sudo -u ec2-user -H git clone --branch "${GithubBranch}" "$REPO_URL" /home/ec2-user/.litellm
@@ -239,95 +223,31 @@ Resources:
             sudo -u ec2-user -H git -C /home/ec2-user/.litellm pull --ff-only
           fi
 
-          # ── Run install.sh (creates venv, pip-installs litellm[proxy], etc.) ─
-          # install.sh is idempotent: re-runs just update the submodule +
-          # re-install deps.
-          sudo -u ec2-user -H bash -lc "cd /home/ec2-user/.litellm && bash install.sh" || true
-
-          # Bun (install.sh doesn't pull bun; the gateway needs it)
-          sudo -u ec2-user -H bash -lc 'command -v bun || curl -fsSL https://bun.sh/install | bash'
-
-          # Claude Code CLI (native ARM64 binary)
-          sudo -u ec2-user -H bash -lc 'command -v claude || curl -fsSL https://claude.ai/install.sh | bash'
-
-          # ── Seed .env from CFN parameters ────────────────────────────────
+          # Seed .env from CloudFormation parameters (first boot only; user
+          # or admin manages it after that — edit via the console or SSM).
           ENV_FILE=/home/ec2-user/.litellm/.env
-          touch "$ENV_FILE"
-          chown ec2-user:ec2-user "$ENV_FILE"
-
-          upsert() {
-            local k="$1" v="$2"
-            [ -z "$v" ] && return
-            if grep -q "^${!k}=" "$ENV_FILE"; then
-              sed -i "s|^${!k}=.*|${!k}=${!v}|" "$ENV_FILE"
-            else
-              echo "${!k}=${!v}" >> "$ENV_FILE"
-            fi
-          }
-
-          upsert LITELLM_MASTER_KEY        "${LitellmMasterKey}"
-          upsert GATEWAY_ADMIN_EMAILS      "${AdminEmails}"
-          upsert GATEWAY_PROTON_EMAIL      "${ProtonEmail}"
-          upsert GATEWAY_PROTON_USERNAME   "${ProtonUsername}"
-          upsert GATEWAY_PROTON_PASSWORD   "${ProtonPassword}"
-          upsert GATEWAY_PROTON_2FA_SECRET "${Proton2faSecret}"
-          upsert GATEWAY_CONSOLE_ENABLED   "true"
-
-          # Generate GATEWAY_SESSION_SECRET if absent
-          if ! grep -q "^GATEWAY_SESSION_SECRET=.\+" "$ENV_FILE"; then
-            secret="$(head -c 48 /dev/urandom | base64 | tr -d '=+/' | head -c 48)"
-            upsert GATEWAY_SESSION_SECRET "$secret"
+          if [ ! -f "$ENV_FILE" ]; then
+            SESSION_SECRET="$(head -c 48 /dev/urandom | base64 | tr -d '=+/' | head -c 48)"
+            cat > "$ENV_FILE" <<ENV
+          LITELLM_MASTER_KEY=${LitellmMasterKey}
+          GATEWAY_ADMIN_EMAILS=${AdminEmails}
+          GATEWAY_SESSION_SECRET=${!SESSION_SECRET}
+          GATEWAY_CONSOLE_ENABLED=true
+          GATEWAY_PROTON_EMAIL=${ProtonEmail}
+          GATEWAY_PROTON_USERNAME=${ProtonUsername}
+          GATEWAY_PROTON_PASSWORD=${ProtonPassword}
+          GATEWAY_PROTON_2FA_SECRET=${Proton2faSecret}
+          SWAP_SIZE_GB=${SwapSizeGb}
+          CADDY_VERSION=${CaddyVersion}
+          ENV
+            chmod 600 "$ENV_FILE"
+            chown ec2-user:ec2-user "$ENV_FILE"
           fi
 
-          # ── Install features + start services (via litellmctl) ───────────
-          sudo -u ec2-user -H bash -lc "cd /home/ec2-user/.litellm && ./bin/litellmctl install --with-gateway --with-protonmail" || true
-
-          # Auto-auth hydroxide if Proton creds are set (non-interactive pty flow)
-          if [ -n "${ProtonPassword}" ]; then
-            sudo -u ec2-user -H bash -lc "cd /home/ec2-user/.litellm && ./bin/litellmctl auth protonmail" || true
-          fi
-
-          # Start proxy + gateway + protonmail bridge (systemd user units)
-          sudo -u ec2-user -H bash -lc "cd /home/ec2-user/.litellm && ./bin/litellmctl start proxy" || true
-          sudo -u ec2-user -H bash -lc "cd /home/ec2-user/.litellm && ./bin/litellmctl start gateway" || true
-          sudo -u ec2-user -H bash -lc "cd /home/ec2-user/.litellm && ./bin/litellmctl start protonmail" || true
-
-          # ── Caddy: default Caddyfile + systemd unit (runs as ec2-user) ───
-          CADDYFILE=/home/ec2-user/.litellm/Caddyfile
-          if [ ! -f "$CADDYFILE" ]; then
-            cat > "$CADDYFILE" <<'CADDY'
-          # Default Caddyfile — proxies all :80 traffic to the gateway.
-          # Replace the :80 block with `your.domain.com { reverse_proxy localhost:14041 }`
-          # to enable automatic HTTPS via Let's Encrypt, then:
-          #   sudo systemctl reload caddy
-          :80 {
-            reverse_proxy localhost:14041
-          }
-          CADDY
-            chown ec2-user:ec2-user "$CADDYFILE"
-          fi
-
-          cat > /etc/systemd/system/caddy.service <<UNIT
-          [Unit]
-          Description=Caddy reverse proxy
-          After=network.target
-
-          [Service]
-          User=ec2-user
-          AmbientCapabilities=CAP_NET_BIND_SERVICE
-          ExecStart=/usr/local/bin/caddy run --config /home/ec2-user/.litellm/Caddyfile --adapter caddyfile
-          ExecReload=/usr/local/bin/caddy reload --config /home/ec2-user/.litellm/Caddyfile --adapter caddyfile
-          Restart=on-failure
-          RestartSec=5
-
-          [Install]
-          WantedBy=multi-user.target
-          UNIT
-          systemctl daemon-reload
-          systemctl enable --now caddy.service
-
-          # Breadcrumb so SSM-session operators can confirm user-data finished.
-          date -u +%FT%TZ > /var/log/user-data-done
+          # Hand off to the idempotent bootstrap. Fails here won't wreck
+          # the stack — `bash bootstrap-instance.sh` can be re-run any
+          # time via SSM to finish the setup.
+          bash /home/ec2-user/.litellm/bin/bootstrap-instance.sh
 
 Outputs:
   PublicIp:
