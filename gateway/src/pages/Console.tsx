@@ -95,11 +95,19 @@ export function Console() {
       // 1008 = policy violation — server denied us (non-admin, or console
       // disabled). Do NOT reconnect; that just hammers the endpoint.
       // 1011 pty-failed = node-pty unavailable on the server; same deal.
-      const terminal =
+      // 1000 "exited" = the shell itself exited (user typed `exit` or the
+      // shell crashed at startup); re-spawning immediately would either
+      // surprise the user or loop forever. Require a manual Reconnect.
+      const denied =
         ev.code === 1008 ||
         (ev.code === 1011 && ev.reason === 'pty-failed')
-      if (terminal) {
+      const exited = ev.code === 1000 && ev.reason === 'exited'
+      if (denied) {
         setState('denied')
+        return
+      }
+      if (exited) {
+        setState('closed')
         return
       }
       setState('closed')

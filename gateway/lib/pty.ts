@@ -67,37 +67,69 @@ export function spawnConsole(cols = 80, rows = 24): PtyHandle {
   const pty = loadPty();
   if (!pty) throw new Error("node-pty not available");
 
-  const shell = process.env.SHELL || "/bin/bash";
+  // When bun runs under systemd, $SHELL often points at /sbin/nologin or is
+  // unset. Hard-code bash — the container/VPC always has it on $PATH.
+  const shell = "/bin/bash";
+  // Resolve HOME ourselves: systemd user services occasionally launch with
+  // HOME unset, and `bash -l` will exit immediately if it can't find its
+  // startup files. Fall back to the effective user's home.
+  const home =
+    process.env.HOME ||
+    (process.env.USER ? `/home/${process.env.USER}` : "") ||
+    "/root";
   // Prefer GATEWAY_DATA_DIR if the operator pointed us somewhere; else
   // the resolved project root; absolute last resort is $HOME then /tmp.
   const cwd = process.env.GATEWAY_DATA_DIR
     || PROJECT_ROOT
-    || process.env.HOME
+    || home
     || "/tmp";
-  const env = {
-    ...process.env,
+
+  // Filter undefined values from process.env — node-pty chokes on them and
+  // will silently exit the child (seen as "[process exited: 0]" with no
+  // prompt ever appearing).
+  const baseEnv: Record<string, string> = {};
+  for (const [k, v] of Object.entries(process.env)) {
+    if (typeof v === "string") baseEnv[k] = v;
+  }
+
+  const env: Record<string, string> = {
+    ...baseEnv,
+    HOME: home,
+    SHELL: shell,
     TERM: "xterm-256color",
+    LANG: baseEnv.LANG || "C.UTF-8",
+    LC_ALL: baseEnv.LC_ALL || "C.UTF-8",
+    PS1: baseEnv.PS1 || "\\u@\\h:\\w\\$ ",
     PATH: [
       "/opt/venv/bin",
       `${PROJECT_ROOT}/venv/bin`,
       `${PROJECT_ROOT}/bin`,
-      process.env.HOME ? `${process.env.HOME}/.local/bin` : "",
-      process.env.HOME ? `${process.env.HOME}/.bun/bin` : "",
+      `${home}/.local/bin`,
+      `${home}/.bun/bin`,
       "/root/.bun/bin",
       "/root/.local/bin",
       "/usr/local/bin",
       "/usr/bin",
       "/bin",
-      process.env.PATH || "",
+      baseEnv.PATH || "",
     ].filter(Boolean).join(":"),
   };
 
-  const proc = pty.spawn(shell, ["-l"], {
+  // `-i -l` = interactive login shell. Without `-i`, bash that detects a
+  // pipe-like stdin (some systemd/containerd configurations) runs the
+  // profile and exits — which is exactly the "[process exited: 0]" bug.
+  const proc = pty.spawn(shell, ["-i", "-l"], {
     name: "xterm-256color",
     cols,
     rows,
     cwd,
-    env: env as Record<string, string>,
+    env,
+  });
+
+  // Surface exit details in gateway logs so we can diagnose the next
+  // "shell keeps dying" report without having to instrument the client.
+  proc.onExit(({ exitCode, signal }) => {
+    console.log(`[console] pty exited code=${exitCode} signal=${signal ?? "-"} shell=${shell} cwd=${cwd}`);
   });
 
   return {
