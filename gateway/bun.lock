@@ -8,7 +8,7 @@
         "@dnd-kit/core": "^6.3.1",
         "@dnd-kit/sortable": "^10.0.0",
         "@dnd-kit/utilities": "^3.2.2",
-        "@homebridge/node-pty-prebuilt-multiarch": "^0.12.0",
+        "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
         "@radix-ui/react-popover": "^1.1.15",
         "@radix-ui/react-tabs": "^1.1.13",
         "@tailwindcss/forms": "^0.5.11",
@@ -68,7 +68,7 @@
 
     "@floating-ui/utils": ["@floating-ui/utils@0.2.11", "", {}, "sha512-RiB/yIh78pcIxl6lLMG0CgBXAZ2Y0eVHqMPYugu+9U0AeT6YBeiJpf7lbdJNIugFP5SIjwNRgo4DhR1Qxi26Gg=="],
 
-    "@homebridge/node-pty-prebuilt-multiarch": ["@homebridge/node-pty-prebuilt-multiarch@0.12.0", "", { "dependencies": { "node-addon-api": "^7.1.0", "prebuild-install": "^7.1.2" } }, "sha512-hJCGcfOnMeRh2KUdWPlVN/1egnfqI4yxgpDhqHSkF2DLn5fiJNdjEHHlcM1K2w9+QBmRE2D/wfmM4zUOb8aMyQ=="],
+    "@homebridge/node-pty-prebuilt-multiarch": ["@homebridge/node-pty-prebuilt-multiarch@0.13.1", "", { "dependencies": { "node-addon-api": "^7.1.0", "prebuild-install": "^7.1.2" } }, "sha512-ccQ60nMcbEGrQh0U9E6x0ajW9qJNeazpcM/9CH6J8leyNtJgb+gu24WTBAfBUVeO486ZhscnaxLEITI2HXwhow=="],
 
     "@radix-ui/primitive": ["@radix-ui/primitive@1.1.3", "", {}, "sha512-JTF99U/6XIjCBo0wqkU5sK10glYe27MRRsfwoiq5zzOEZLHU3A3KCMa5X/azekYRCJ0HlwI0crAXS/5dEHTzDg=="],
 
