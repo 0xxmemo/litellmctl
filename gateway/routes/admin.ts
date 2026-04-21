@@ -1,3 +1,4 @@
+import { resolve as resolvePath } from "node:path";
 import {
   requireAdmin,
   listAllUsers,
@@ -139,37 +140,45 @@ async function adminRevokeAllKeysHandler(req: Request) {
   return Response.json({ success: true, count });
 }
 
-// POST /api/admin/restart — detaches `litellmctl restart gateway` into a new
-// systemd transient scope so it survives this process going down. Plain
-// Bun.spawn(detached: true) would still die with the gateway unit's cgroup
-// under systemd's default KillMode=control-group.
+// POST /api/admin/restart — spawn `litellmctl restart gateway`. The Python
+// entrypoint detects it was launched inside the gateway's systemd cgroup and
+// re-execs itself into a fresh transient scope, so the restart survives when
+// this service is torn down. The gateway unit's `PATH` does not include
+// `~/.litellm/bin`, so we must use an absolute path to the wrapper.
 async function adminRestartGatewayHandler(req: Request) {
   const auth = await requireAdmin(req);
   if (auth instanceof Response) return auth;
 
+  // gateway/ is the cwd; ../bin/litellmctl is the wrapper.
+  const litellmctl = resolvePath(process.cwd(), "..", "bin", "litellmctl");
+  const f = Bun.file(litellmctl);
+  if (!(await f.exists())) {
+    return Response.json(
+      { error: `litellmctl not found at ${litellmctl}` },
+      { status: 500 },
+    );
+  }
+
   const proc = Bun.spawn(
-    [
-      "systemd-run", "--user", "--scope", "--no-block",
-      "sh", "-c", "sleep 1 && exec litellmctl restart gateway",
-    ],
+    [litellmctl, "restart", "gateway"],
     { stdout: "ignore", stderr: "pipe", stdin: "ignore" },
   );
   proc.unref();
 
-  // Race systemd-run's stderr against a short deadline — we want fast
-  // launch failures (e.g. "Failed to connect to bus") reported to the UI,
-  // but we won't wait for the actual restart.
+  // Give the child a brief window to fail fast (bad interpreter, missing
+  // systemd-run, etc.) so we can surface the error to the UI. We never wait
+  // for the actual restart to complete.
   let launchErr = "";
   try {
     launchErr = (await Promise.race([
       new Response(proc.stderr as ReadableStream).text(),
-      new Promise<string>((resolve) => setTimeout(() => resolve(""), 300)),
+      new Promise<string>((resolve) => setTimeout(() => resolve(""), 400)),
     ])).trim();
   } catch {
     // stderr read failure isn't fatal — proceed optimistically.
   }
 
-  if (launchErr && /failed|error|not found/i.test(launchErr)) {
+  if (launchErr && /failed|error|not found|traceback/i.test(launchErr)) {
     return Response.json(
       { error: `restart launch failed: ${launchErr}` },
       { status: 500 },

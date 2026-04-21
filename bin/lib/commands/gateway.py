@@ -837,9 +837,67 @@ def gateway_routes() -> None:
     console.print("  [dim]Usage: litellmctl api <command...> [-d json] [key=val...][/]\n")
 
 
+def _detach_from_gateway_cgroup_if_needed() -> None:
+    """When we're being called as a descendant of the gateway's systemd unit
+    (e.g. from the console pty or from the /api/admin/restart handler),
+    ``gateway_stop()`` will tear down the whole cgroup and kill this restart
+    script before ``gateway_start()`` gets a chance to run. Fork off a fully
+    detached child inside a fresh transient scope so the restart survives the
+    service going down, then exit. If systemd-run isn't available we skip
+    the detach and hope for the best (non-cgroup supervisors usually reparent
+    orphans to init rather than killing them).
+    """
+    if os.environ.get("_LITELLMCTL_RESTART_DETACHED"):
+        return
+    if not (is_linux() and has_systemd_user()):
+        return
+    if not shutil.which("systemd-run"):
+        return
+    try:
+        with open("/proc/self/cgroup", encoding="utf-8") as f:
+            cgroup = f.read()
+    except OSError:
+        return
+    # The service cgroup path contains e.g. "litellm-gateway.service".
+    if f"{GATEWAY_SYSTEMD_UNIT}.service" not in cgroup:
+        return
+
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = LOG_DIR / "gateway-restart.log"
+    # 'ab' so both parent and (spawned) child can concurrently append.
+    log_f = open(log_path, "ab")
+
+    env = os.environ.copy()
+    env["_LITELLMCTL_RESTART_DETACHED"] = "1"
+
+    litellmctl = str(BIN_DIR / "litellmctl")
+    argv = [
+        "systemd-run", "--user", "--scope", "--quiet", "--collect",
+        f"--unit=litellm-gateway-restart-{os.getpid()}",
+        "--",
+        litellmctl, "restart", "gateway",
+    ]
+    info(f"Detaching restart into transient systemd scope (logs: {log_path}) ...")
+    # start_new_session=True → setsid() so SIGHUP from a closing pty can't
+    # reach us. stdio → log file so writes don't fail when the pty dies.
+    subprocess.Popen(
+        argv,
+        stdin=subprocess.DEVNULL,
+        stdout=log_f,
+        stderr=log_f,
+        start_new_session=True,
+        env=env,
+        close_fds=True,
+    )
+    log_f.close()
+    # Parent returns success immediately; detached child owns the actual restart.
+    raise SystemExit(0)
+
+
 def gateway_restart() -> None:
     """Rebuild frontend (if bun is available) and restart the gateway."""
     load_env()
+    _detach_from_gateway_cgroup_if_needed()
     gateway_stop()
     time.sleep(1)
     bun = _bun_bin()
