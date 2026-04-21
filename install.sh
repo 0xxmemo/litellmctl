@@ -51,6 +51,7 @@ VENV_DIR="$INSTALL_DIR/venv"
 
 WITH_SWAP=0;      SWAP_SIZE_GB=32
 WITH_CADDY=0;     CADDY_VERSION=2.8.4
+SQLITE_VEC_VERSION=0.1.9
 WITH_BUN=0
 WITH_CLAUDE=0
 WITH_NODE_GYP=0
@@ -366,21 +367,70 @@ as_user "'$INSTALL_DIR/bin/litellmctl' init-env 2>/dev/null || true"
 mkdir -p "$INSTALL_DIR/gateway"
 ok "Gateway SQLite DB dir ready"
 
-case "$PLATFORM" in
-  macOS)
-    if command -v brew &>/dev/null; then
-      if ! [ -f /opt/homebrew/lib/vec0.dylib ] && ! [ -f /usr/local/lib/vec0.dylib ]; then
-        brew install asg017/sqlite-vec/sqlite-vec 2>/dev/null && ok "sqlite-vec installed" \
-          || warn "sqlite-vec install via brew failed — non-fatal"
-      fi
+# sqlite-vec — required by the gateway for the vectordb endpoints that
+# back claude-context and supermemory plugins. The asg017/sqlite-vec brew
+# tap was deleted upstream, so we fetch the loadable extension straight
+# from GitHub releases on both macOS and Linux. Idempotent: skip if already
+# present at one of the paths the gateway probes (see gateway/lib/db.ts).
+install_sqlite_vec() {
+  local arch ext target archive_arch
+  case "$PLATFORM" in
+    macOS) ext=dylib ;;
+    Linux) ext=so ;;
+    *) skip "sqlite-vec: unsupported platform $PLATFORM"; return 0 ;;
+  esac
+
+  # Honor existing installs at any path the gateway probes.
+  for p in /opt/homebrew/lib/vec0.$ext /usr/local/lib/vec0.$ext /usr/lib/sqlite-vec/vec0.$ext; do
+    if [ -f "$p" ]; then
+      ok "sqlite-vec already installed ($p)"
+      return 0
     fi
-    ;;
-  Linux)
-    if ! [ -f /usr/lib/sqlite-vec/vec0.so ] && ! [ -f /usr/local/lib/vec0.so ]; then
-      skip "sqlite-vec not installed (optional — vector features disabled)"
-    fi
-    ;;
-esac
+  done
+
+  case "$(uname -m)" in
+    aarch64|arm64) archive_arch=aarch64 ;;
+    x86_64|amd64)  archive_arch=x86_64 ;;
+    *) warn "sqlite-vec: unsupported arch $(uname -m) — skipping"; return 0 ;;
+  esac
+
+  case "$PLATFORM" in
+    macOS) target=/usr/local/lib/vec0.dylib; archive_os=macos ;;
+    Linux) target=/usr/local/lib/vec0.so;    archive_os=linux ;;
+  esac
+
+  local url="https://github.com/asg017/sqlite-vec/releases/download/v${SQLITE_VEC_VERSION}/sqlite-vec-${SQLITE_VEC_VERSION}-loadable-${archive_os}-${archive_arch}.tar.gz"
+  local tmp; tmp=$(mktemp -d)
+  trap 'rm -rf "$tmp"' RETURN
+
+  info "Installing sqlite-vec ${SQLITE_VEC_VERSION} (${archive_os}/${archive_arch}) → $target"
+  if ! curl -fsSL "$url" | tar -xz -C "$tmp" 2>/dev/null; then
+    error "sqlite-vec: download/extract failed from $url"
+    return 1
+  fi
+
+  local src="$tmp/vec0.$ext"
+  if [ ! -f "$src" ]; then
+    # Some release archives nest under a folder; fall back to a search.
+    src=$(find "$tmp" -maxdepth 3 -name "vec0.$ext" -type f 2>/dev/null | head -n1)
+  fi
+  if [ -z "$src" ] || [ ! -f "$src" ]; then
+    error "sqlite-vec: vec0.$ext not found in archive"
+    return 1
+  fi
+
+  if [ "$(id -u)" -eq 0 ]; then
+    install -d /usr/local/lib && install -m 0755 "$src" "$target"
+  else
+    sudo install -d /usr/local/lib && sudo install -m 0755 "$src" "$target"
+  fi || { error "sqlite-vec: failed to install $target (need sudo?)"; return 1; }
+
+  ok "sqlite-vec installed ($target)"
+}
+
+if ! install_sqlite_vec; then
+  warn "sqlite-vec install failed — gateway vector endpoints (claude-context, supermemory) will return 503 until resolved"
+fi
 
 # Shell completions (only when running as the target user, not root)
 if [ "$(id -u)" -ne 0 ]; then
