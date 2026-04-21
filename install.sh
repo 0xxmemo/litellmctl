@@ -188,11 +188,23 @@ echo ""
 FINGERPRINT_FILE=/var/lib/litellm-install.fingerprint
 
 compute_fingerprint() {
-  local sha env_hash script_hash
+  local sha env_hash script_hash auth_hash
   sha="$(git -C "$INSTALL_DIR" rev-parse HEAD 2>/dev/null || echo none)"
   env_hash="$(md5sum "$INSTALL_DIR/.env" 2>/dev/null | awk '{print $1}')"
   script_hash="$(md5sum "$0" 2>/dev/null | awk '{print $1}')"
-  echo "${sha}:${env_hash}:${script_hash}"
+  # auth.*.json files (ChatGPT/Gemini/Kimi/Qwen OAuth tokens) live next to
+  # config.yaml. They're .gitignore'd and can appear *after* first-boot
+  # install.sh runs — e.g. when an operator rsyncs them from an orphan
+  # data volume during a single-volume migration, or drops them in by hand
+  # from a laptop. Hashing them into the fingerprint means such a drop
+  # invalidates the cache on the next pipeline run, forcing `litellmctl
+  # init-env` to re-scan and add the CHATGPT_TOKEN_DIR / *_AUTH_FILE vars
+  # to .env (without those, the ChatGPT/Gemini/Kimi/Qwen providers fail
+  # at load-time and their models silently vanish from /v1/models).
+  # Includes mtime + size so regenerated-same-contents tokens still flip.
+  auth_hash="$(find "$INSTALL_DIR" -maxdepth 1 -name 'auth.*.json' -printf '%f:%s:%T@\n' 2>/dev/null \
+              | sort | md5sum | awk '{print $1}')"
+  echo "${sha}:${env_hash}:${script_hash}:${auth_hash}"
 }
 
 services_healthy() {
