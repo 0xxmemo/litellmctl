@@ -47,8 +47,13 @@ EOF
 fi
 
 # --- Register MCP server in ~/.claude.json ---
-MCP_JSON=$(python3 -c '
-import json, os, sys
+MCP_JSON=$(
+  PLUGIN_SRC_DIR="$PLUGIN_SRC_DIR" \
+  GATEWAY_ORIGIN="$GATEWAY_ORIGIN" \
+  API_KEY="$API_KEY" \
+  STATE_DIR="$STATE_DIR" \
+  python3 -c '
+import json, os
 print(json.dumps({
     "command": "bun",
     "args": ["run", os.path.join(os.environ["PLUGIN_SRC_DIR"], "src", "index.ts")],
@@ -58,7 +63,8 @@ print(json.dumps({
         "CLAUDE_CONTEXT_STATE_DIR": os.environ["STATE_DIR"],
     },
 }))
-' PLUGIN_SRC_DIR="$PLUGIN_SRC_DIR" GATEWAY_ORIGIN="$GATEWAY_ORIGIN" API_KEY="$API_KEY" STATE_DIR="$STATE_DIR")
+'
+)
 
 # Idempotent: remove (ignore failure — may not exist) then add.
 claude mcp remove -s user claude-context >/dev/null 2>&1 || true
