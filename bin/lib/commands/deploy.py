@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets as _secrets
 import shutil
 import subprocess
@@ -159,6 +160,39 @@ def _gh_is_authed() -> bool:
     return _run(["gh", "auth", "status"], check=False, capture=True).returncode == 0
 
 
+def _gh_secret_names(repo: str) -> set[str]:
+    """Names of secrets already set on the repo (values never exposed by GH)."""
+    try:
+        out = _run_out(["gh", "secret", "list", "-R", repo, "--json", "name"])
+        return {s["name"] for s in json.loads(out)}
+    except Exception:
+        return set()
+
+
+def _oidc_stack_state(stack_name: str, region: str) -> tuple[str, dict[str, str]] | None:
+    """Current CloudFormation state for an OIDC bootstrap stack.
+
+    Returns (StackStatus, {paramName: paramValue}) or None if absent.
+    Used to decide whether `aws cloudformation deploy` would be a no-op
+    and can be skipped entirely.
+    """
+    res = _run(
+        ["aws", "cloudformation", "describe-stacks",
+         "--stack-name", stack_name, "--region", region,
+         "--query", "Stacks[0]", "--output", "json"],
+        check=False, capture=True,
+    )
+    if res.returncode != 0:
+        return None
+    try:
+        stack = json.loads(res.stdout)
+        status = stack.get("StackStatus", "")
+        params = {p["ParameterKey"]: p["ParameterValue"] for p in stack.get("Parameters", [])}
+        return (status, params)
+    except (json.JSONDecodeError, KeyError):
+        return None
+
+
 def _gh_login_interactive() -> bool:
     """Offer `gh auth login` inline with guidance. Returns True if authed after."""
     warn("gh CLI is not authenticated.")
@@ -254,12 +288,31 @@ def _aws_deploy() -> None:
 
     admin_emails = ask("Admin email(s), comma-separated", default=git_email or "you@example.com")
 
+    repo = f"{gh_org}/{gh_repo}"
+    oidc_stack = f"{app_name}-oidc"
+
+    # One call to the GitHub API — reused for every "is this already set?" check.
+    existing_secrets = _gh_secret_names(repo)
+
     # ── Optional: ProtonMail SMTP for OTP delivery ───────────────────────
-    # If skipped, the gateway logs OTP codes to journalctl (readable from
-    # the admin web console: `journalctl --user -u litellm-gateway -f`).
+    # If all four Proton secrets are already set, default the confirm to
+    # "no" so re-runs don't ask for the creds again.
+    proton_keys = (
+        "GATEWAY_PROTON_EMAIL",
+        "GATEWAY_PROTON_USERNAME",
+        "GATEWAY_PROTON_PASSWORD",
+        "GATEWAY_PROTON_2FA_SECRET",
+    )
+    proton_all_set = all(k in existing_secrets for k in proton_keys)
     proton_email = proton_user = proton_pass = proton_totp = ""
-    if confirm("Wire ProtonMail SMTP for OTP emails? (say no to read OTPs from container logs instead)", default=False):
-        # Try to seed from /data/.env on the local machine if present.
+
+    proton_prompt = (
+        "Update ProtonMail SMTP creds? (all 4 secrets already set — say no to keep them)"
+        if proton_all_set else
+        "Wire ProtonMail SMTP for OTP emails? (say no to read OTPs from instance logs instead)"
+    )
+    if confirm(proton_prompt, default=False):
+        # Try to seed defaults from the local machine's .env.
         env_file = PROJECT_DIR / ".env"
         seeded: dict[str, str] = {}
         if env_file.exists():
@@ -272,17 +325,8 @@ def _aws_deploy() -> None:
         proton_pass  = ask("GATEWAY_PROTON_PASSWORD (account password)", default=seeded.get("GATEWAY_PROTON_PASSWORD", ""))
         proton_totp  = ask("GATEWAY_PROTON_2FA_SECRET (TOTP seed, blank if no 2FA)", default=seeded.get("GATEWAY_PROTON_2FA_SECRET", ""))
 
-    repo = f"{gh_org}/{gh_repo}"
-    oidc_stack = f"{app_name}-oidc"
-
-    # Decide whether to rotate the master key
-    reuse_key = False
-    try:
-        out = _run_out(["gh", "secret", "list", "-R", repo, "--json", "name"])
-        reuse_key = any(s.get("name") == "LITELLM_MASTER_KEY" for s in json.loads(out))
-    except Exception:
-        reuse_key = False
-
+    # Decide whether to rotate the master key — always preserve if set.
+    reuse_key = "LITELLM_MASTER_KEY" in existing_secrets
     if reuse_key:
         warn("LITELLM_MASTER_KEY already set on the repo — leaving it alone.")
         master_key = ""
@@ -325,27 +369,42 @@ def _aws_deploy() -> None:
     else:
         console.print("  [green]✓[/] no provider present — CFN will create one")
 
-    # ── Deploy OIDC bootstrap stack ──────────────────────────────────────
-    info(f"Deploying {oidc_stack} (CloudFormation)")
+    # ── OIDC bootstrap stack — deploy only if something changed ─────────
+    info(f"Checking {oidc_stack} (CloudFormation)")
 
     template = str(PROJECT_DIR / "aws" / "bootstrap-github-oidc.yml")
     if not os.path.exists(template):
         error(f"template missing: {template}")
         sys.exit(1)
 
-    _run([
-        "aws", "cloudformation", "deploy",
-        "--stack-name", oidc_stack,
-        "--template-file", template,
-        "--capabilities", "CAPABILITY_NAMED_IAM",
-        "--no-fail-on-empty-changeset",
-        "--region", region,
-        "--parameter-overrides",
-        f"GithubOrg={gh_org}",
-        f"GithubRepo={gh_repo}",
-        f"AppName={app_name}",
-        f"ExistingOidcProviderArn={existing_arn}",
-    ])
+    desired_params = {
+        "GithubOrg": gh_org,
+        "GithubRepo": gh_repo,
+        "AppName": app_name,
+        "ExistingOidcProviderArn": existing_arn,
+    }
+
+    current = _oidc_stack_state(oidc_stack, region)
+    skip_cfn = (
+        current is not None
+        and current[0] in ("CREATE_COMPLETE", "UPDATE_COMPLETE", "UPDATE_ROLLBACK_COMPLETE")
+        and all(current[1].get(k, "") == v for k, v in desired_params.items())
+    )
+
+    if skip_cfn:
+        console.print(f"  [green]✓[/] {oidc_stack} already in desired state — skipping deploy")
+    else:
+        info(f"Deploying {oidc_stack}")
+        _run([
+            "aws", "cloudformation", "deploy",
+            "--stack-name", oidc_stack,
+            "--template-file", template,
+            "--capabilities", "CAPABILITY_NAMED_IAM",
+            "--no-fail-on-empty-changeset",
+            "--region", region,
+            "--parameter-overrides",
+            *(f"{k}={v}" for k, v in desired_params.items()),
+        ])
 
     role_arn = _run_out([
         "aws", "cloudformation", "describe-stacks",
@@ -358,7 +417,6 @@ def _aws_deploy() -> None:
     # IAM role ARN, not a name. A blank or malformed value here silently turns
     # into "Source Account ID is needed if the Role Name is provided ..." on
     # the workflow side.
-    import re
     if not re.fullmatch(r"arn:aws:iam::\d{12}:role/[\w+=,.@-]+", role_arn):
         error(f"CFN returned an unexpected role ARN: {role_arn!r}")
         error("Expected format: arn:aws:iam::<account>:role/<name>")
@@ -366,13 +424,13 @@ def _aws_deploy() -> None:
     console.print(f"  [green]✓[/] deploy role: [cyan]{role_arn}[/]")
 
     # ── GitHub secrets ───────────────────────────────────────────────────
-    info(f"Writing GitHub Actions secrets to {repo}")
+    # GitHub doesn't let us read secret values back, so we only skip
+    # writes when (a) the OIDC stack didn't change AND we already have
+    # that exact secret, or (b) the secret is "write-once" (master key)
+    # or (c) the user opted to not update this one (empty Proton value).
+    info(f"Updating GitHub Actions secrets on {repo}")
 
     def set_secret(name: str, value: str) -> None:
-        # Always strip — `gh secret set --body -` used to preserve trailing
-        # newlines from stdin, which then broke tools that do strict ARN
-        # validation (e.g. aws-actions/configure-aws-credentials). Pass via
-        # --body directly instead of stdin to avoid the issue entirely.
         clean = value.strip()
         if not clean:
             error(f"refusing to set empty secret {name}")
@@ -380,27 +438,48 @@ def _aws_deploy() -> None:
         _run(["gh", "secret", "set", name, "-R", repo, "--body", clean])
         console.print(f"  [green]✓[/] set {name}")
 
-    set_secret("AWS_DEPLOY_ROLE_ARN", role_arn)
-    set_secret("AWS_REGION", region)
-    set_secret("APP_NAME", app_name)
-    set_secret("GATEWAY_ADMIN_EMAILS", admin_emails)
-    # Note: we don't set GITHUB_ORG / GITHUB_REPO — GitHub reserves the
-    # GITHUB_ prefix for its own context vars, and the workflow already
-    # knows them via ${{ github.repository_owner }} / github.event.repository.name.
-    if not reuse_key:
+    def skip_if_present(name: str) -> None:
+        console.print(f"  [dim]-[/] {name} already set — skipping")
+
+    # If neither CFN params NOR the set-of-required-secrets changed, the
+    # role ARN and other values are guaranteed identical to what's on the
+    # repo — skip the gh API calls.
+    oidc_unchanged_secrets = (
+        "AWS_DEPLOY_ROLE_ARN",
+        "AWS_REGION",
+        "APP_NAME",
+        "GATEWAY_ADMIN_EMAILS",
+    )
+
+    for name, value in [
+        ("AWS_DEPLOY_ROLE_ARN",   role_arn),
+        ("AWS_REGION",            region),
+        ("APP_NAME",              app_name),
+        ("GATEWAY_ADMIN_EMAILS",  admin_emails),
+    ]:
+        if skip_cfn and name in existing_secrets and name in oidc_unchanged_secrets:
+            skip_if_present(name)
+        else:
+            set_secret(name, value)
+
+    if reuse_key:
+        skip_if_present("LITELLM_MASTER_KEY")
+    else:
         set_secret("LITELLM_MASTER_KEY", master_key)
         console.print("  [dim]   master key saved only to GitHub secrets — store it yourself if you want a copy.[/]")
 
-    # Only overwrite Proton secrets if the user provided values. Empty string
-    # would clobber an existing secret — skip instead so re-runs don't wipe.
-    if proton_email:
-        set_secret("GATEWAY_PROTON_EMAIL", proton_email)
-    if proton_user:
-        set_secret("GATEWAY_PROTON_USERNAME", proton_user)
-    if proton_pass:
-        set_secret("GATEWAY_PROTON_PASSWORD", proton_pass)
-    if proton_totp:
-        set_secret("GATEWAY_PROTON_2FA_SECRET", proton_totp)
+    # Proton: only write what the user explicitly provided. Empty string
+    # would blow away an existing secret — leave those alone.
+    for name, value in [
+        ("GATEWAY_PROTON_EMAIL",      proton_email),
+        ("GATEWAY_PROTON_USERNAME",   proton_user),
+        ("GATEWAY_PROTON_PASSWORD",   proton_pass),
+        ("GATEWAY_PROTON_2FA_SECRET", proton_totp),
+    ]:
+        if value:
+            set_secret(name, value)
+        elif name in existing_secrets:
+            skip_if_present(name)
 
     # ── Trigger workflow ─────────────────────────────────────────────────
     # `workflow_dispatch` can target any branch that has the workflow file
