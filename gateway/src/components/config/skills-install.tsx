@@ -59,6 +59,7 @@ export function SkillsInstall({ apiKey, baseUrl }: SkillsInstallProps) {
             {skills.map((skill) => {
               const installUrl = `${baseUrl}/api/skills/install.sh?slug=${skill.slug}&target=${selectedTarget}`;
               const uninstallUrl = `${baseUrl}/api/skills/uninstall.sh?slug=${skill.slug}&target=${selectedTarget}`;
+              // TODO: default to LITELLMCTL_API_KEY after migration from LLM_GATEWAY_API_KEY.
               const configVar =
                 targets.find((t) => t.id === selectedTarget)?.configVar || "LLM_GATEWAY_API_KEY";
               const installCmd = `curl -fsSL ${installUrl} | ${configVar}="${KEY_PLACEHOLDER}" bash`;

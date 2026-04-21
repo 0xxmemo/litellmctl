@@ -1,5 +1,5 @@
 /**
- * LLM API Gateway - Bun Stack
+ * LitellmCTL - Bun Stack
  *
  * A lightweight authentication and rate-limiting proxy for LiteLLM.
  * Built with Bun.serve() for simplicity and performance.

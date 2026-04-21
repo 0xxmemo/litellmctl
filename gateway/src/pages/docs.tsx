@@ -173,7 +173,7 @@ curl ${baseUrl}/v1/audio/transcriptions \\
       method: "GET",
       path: "/api/health",
       description:
-        "Gateway health check — status, uptime, and available features",
+        "Health check — status, uptime, and available features",
       requiresAuth: false,
       curlExample: `curl ${baseUrl}/api/health | jq .
 

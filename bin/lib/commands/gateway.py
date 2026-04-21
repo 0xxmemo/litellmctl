@@ -1,4 +1,4 @@
-"""Gateway UI management."""
+"""LitellmCTL UI management."""
 
 from __future__ import annotations
 
@@ -156,7 +156,7 @@ def _gateway_launchd_install(bun: str, port: int) -> None:
         subprocess.check_call(["launchctl", "bootstrap", f"gui/{uid}", str(GATEWAY_LAUNCHD_PLIST)])
 
     info(f"Installed launchd service ({GATEWAY_LAUNCHD_LABEL})")
-    info(f"Gateway starting on port {port} (auto-starts on login, auto-restarts on crash)")
+    info(f"LitellmCTL starting on port {port} (auto-starts on login, auto-restarts on crash)")
 
 
 def _gateway_launchd_stop() -> None:
@@ -164,9 +164,9 @@ def _gateway_launchd_stop() -> None:
     ret = subprocess.call(["launchctl", "bootout", f"gui/{uid}/{GATEWAY_LAUNCHD_LABEL}"],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if ret == 0:
-        info("Gateway service stopped.")
+        info("LitellmCTL service stopped.")
     else:
-        warn("Gateway service not running.")
+        warn("LitellmCTL service not running.")
 
 
 def _gateway_launchd_is_running() -> bool:
@@ -191,7 +191,7 @@ def _gateway_systemd_install(bun: str, port: int) -> None:
     launch_sh = BIN_DIR / "gateway-launch.sh"
 
     unit = f"""[Unit]
-Description=LiteLLM Gateway UI
+Description=LitellmCTL UI
 After=network.target
 
 [Service]
@@ -217,7 +217,7 @@ WantedBy=default.target"""
     subprocess.call(["systemctl", "--user", "start", GATEWAY_SYSTEMD_UNIT])
 
     info(f"Installed systemd user service ({GATEWAY_SYSTEMD_UNIT})")
-    info(f"Gateway starting on port {port} (auto-starts on login, auto-restarts on crash)")
+    info(f"LitellmCTL starting on port {port} (auto-starts on login, auto-restarts on crash)")
 
     # Ensure linger so service survives logout
     import shutil
@@ -236,9 +236,9 @@ def _gateway_systemd_stop() -> None:
     ret = subprocess.call(["systemctl", "--user", "stop", GATEWAY_SYSTEMD_UNIT],
                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     if ret == 0:
-        info("Gateway service stopped.")
+        info("LitellmCTL service stopped.")
     else:
-        warn("Gateway service not running.")
+        warn("LitellmCTL service not running.")
 
 
 def _gateway_systemd_is_running() -> bool:
@@ -269,7 +269,7 @@ def _gateway_nohup_start(bun: str, port: int) -> None:
         env=env,
     )
     GATEWAY_PIDFILE.write_text(str(proc.pid))
-    info(f"Gateway started in background (PID {proc.pid}, port {port})")
+    info(f"LitellmCTL started in background (PID {proc.pid}, port {port})")
     warn("Note: nohup mode has no auto-restart on crash. Use systemd for crash recovery.")
 
 
@@ -284,9 +284,9 @@ def _gateway_nohup_stop() -> None:
                 os.kill(pid, 9)
             except ProcessLookupError:
                 pass
-            info(f"Gateway stopped (PID {pid})")
+            info(f"LitellmCTL stopped (PID {pid})")
         except (ValueError, ProcessLookupError):
-            info("Gateway process not running")
+            info("LitellmCTL process not running")
         GATEWAY_PIDFILE.unlink(missing_ok=True)
     else:
         port = _gateway_port()
@@ -299,7 +299,7 @@ def _gateway_nohup_stop() -> None:
                 )
                 if any(x in result.stdout for x in ("bun", "node", "index.ts")):
                     os.kill(pid, 9)
-                    info(f"Gateway stopped (PID {pid} on port {port})")
+                    info(f"LitellmCTL stopped (PID {pid} on port {port})")
                     found = True
             except Exception:
                 pass
@@ -318,7 +318,7 @@ def gateway_start_foreground() -> None:
     from ..common.harness import is_docker
     gateway_dir = PROJECT_DIR / "gateway"
     if not gateway_dir.exists():
-        error(f"Gateway directory not found at {gateway_dir}")
+        error(f"gateway/ directory not found at {gateway_dir}")
         raise SystemExit(1)
 
     _load_gateway_env()
@@ -351,7 +351,7 @@ def gateway_start() -> None:
     gateway_dir = PROJECT_DIR / "gateway"
 
     if not gateway_dir.exists():
-        error(f"Gateway directory not found at {gateway_dir}")
+        error(f"gateway/ directory not found at {gateway_dir}")
         error("Run 'litellmctl install --with-gateway' to install")
         return
 
@@ -361,7 +361,7 @@ def gateway_start() -> None:
     # Refresh launchd/systemd/nohup even when healthy so upgrades (wrapper, throttle,
     # env) apply — same as re-running install on an old checkout.
     if gateway_is_running():
-        info(f"Gateway already running on port {port} — refreshing supervisor config ...")
+        info(f"LitellmCTL already running on port {port} — refreshing supervisor config ...")
         gateway_stop()
         time.sleep(1)
         # Stray bun after a partial stop (e.g. old nohup + manual run)
@@ -401,7 +401,7 @@ def gateway_start() -> None:
             except Exception:
                 pass
             return
-    warn("Gateway started but not responding yet")
+    warn("LitellmCTL started but not responding yet")
     warn(f"Check logs: tail -f {LOG_DIR}/gateway.log")
 
 
@@ -416,7 +416,7 @@ def gateway_stop() -> None:
 
 def gateway_status() -> None:
     port = _gateway_port()
-    console.print("[bold]Gateway UI[/]")
+    console.print("[bold]LitellmCTL[/]")
     if not (PROJECT_DIR / "gateway").exists():
         console.print("  Status:   [yellow]not installed[/]")
         console.print("  [dim]Install: litellmctl install --with-gateway[/]")
@@ -441,7 +441,7 @@ def gateway_status() -> None:
 def install_gateway() -> bool:
     gateway_dir = PROJECT_DIR / "gateway"
     if not gateway_dir.exists():
-        warn(f"Gateway directory not found at {gateway_dir}")
+        warn(f"gateway/ directory not found at {gateway_dir}")
         return False
 
     _ensure_bun_path()
@@ -456,16 +456,16 @@ def install_gateway() -> bool:
     info("Installing gateway dependencies ...")
     ret = subprocess.call(["bun", "install"], cwd=str(gateway_dir))
     if ret != 0:
-        warn("Gateway dependency installation failed")
+        warn("LitellmCTL dependency installation failed")
         return False
-    info("Gateway dependencies installed")
+    info("LitellmCTL dependencies installed")
 
     info("Building gateway frontend ...")
     ret = subprocess.call(["bun", "run", "build"], cwd=str(gateway_dir))
     if ret != 0:
-        warn("Gateway frontend build failed — UI may not render correctly")
+        warn("LitellmCTL frontend build failed — UI may not render correctly")
     else:
-        info("Gateway frontend built")
+        info("LitellmCTL frontend built")
 
     env_path = gateway_dir / ".env"
     if not env_path.exists():
@@ -483,14 +483,14 @@ def install_gateway() -> bool:
                 )
                 env_path.write_text(text)
 
-    info(f"Gateway installed at {gateway_dir}")
+    info(f"LitellmCTL installed at {gateway_dir}")
     info("Start with: litellmctl start gateway")
     return True
 
 
 def uninstall_gateway() -> None:
     gateway_dir = PROJECT_DIR / "gateway"
-    console.print("\n  [bold]Gateway UI[/]")
+    console.print("\n  [bold]LitellmCTL[/]")
     if not gateway_dir.exists():
         console.print("  Not installed.\n")
         return
@@ -528,7 +528,7 @@ def _gateway_db_path() -> str:
 def _open_gateway_db() -> sqlite3.Connection | None:
     path = _gateway_db_path()
     if not os.path.exists(path):
-        error(f"Gateway DB not found at {path}")
+        error(f"LitellmCTL DB not found at {path}")
         error("Start the gateway once (litellmctl start gateway) to create it.")
         return None
     conn = sqlite3.connect(path)
@@ -738,7 +738,7 @@ def gateway_api(args: list[str], data: str | None = None) -> None:
         return
 
     if not gateway_is_running():
-        error("Gateway not running — litellmctl start gateway")
+        error("LitellmCTL not running — litellmctl start gateway")
         return
 
     secret = _gateway_secret()

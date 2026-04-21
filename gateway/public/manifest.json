@@ -1,7 +1,7 @@
 {
-  "name": "LLM API Gateway",
-  "short_name": "LLM Gateway",
-  "description": "Fast, secure, unified AI proxy for LLM APIs — OpenAI-compatible gateway with analytics and access control.",
+  "name": "LitellmCTL",
+  "short_name": "LitellmCTL",
+  "description": "Fast, secure, unified AI proxy — OpenAI-compatible control plane with analytics and access control.",
   "start_url": "/",
   "display": "standalone",
   "orientation": "any",

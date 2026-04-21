@@ -60,6 +60,7 @@ export function PluginsInstall({ apiKey, baseUrl }: PluginsInstallProps) {
           {plugins.map((plugin) => {
             const installUrl = `${baseUrl}/api/plugins/install.sh?slug=${plugin.slug}&target=${selectedTarget}`;
             const uninstallUrl = `${baseUrl}/api/plugins/uninstall.sh?slug=${plugin.slug}&target=${selectedTarget}`;
+            // TODO: default to LITELLMCTL_API_KEY after migration from LLM_GATEWAY_API_KEY.
             const configVar =
               targets.find((t) => t.id === selectedTarget)?.configVar || "LLM_GATEWAY_API_KEY";
             const installCmd = `curl -fsSL ${installUrl} | ${configVar}="${KEY_PLACEHOLDER}" bash`;

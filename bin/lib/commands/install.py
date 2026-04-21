@@ -190,20 +190,20 @@ def cmd_install(
     # ── Gateway ───────────────────────────────────────────────────────────
     if not gateway_mode:
         if gateway_is_running():
-            info("Gateway already running — skipping")
+            info("LitellmCTL already running — skipping")
         elif (PROJECT_DIR / "gateway" / "dist").exists():
-            info("Gateway already built — start with: litellmctl start gateway")
+            info("LitellmCTL already built — start with: litellmctl start gateway")
         elif (PROJECT_DIR / "gateway").exists() and shutil.which("bun"):
             gateway_mode = "yes"
         elif is_interactive():
-            if _confirm("Set up LLM API Gateway UI?"):
+            if _confirm("Set up LitellmCTL?"):
                 gateway_mode = "yes"
             else:
                 gateway_mode = "no"
 
     if gateway_mode == "yes":
         console.print()
-        info("Setting up LLM API Gateway UI")
+        info("Setting up LitellmCTL")
         install_gateway()
 
     # ── ProtonMail ────────────────────────────────────────────────────────

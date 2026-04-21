@@ -1,5 +1,5 @@
 {
-  "name": "llm-api-gateway",
+  "name": "litellmctl",
   "version": "2.0.0-bun",
   "type": "module",
   "packageManager": "bun@1.3.9",

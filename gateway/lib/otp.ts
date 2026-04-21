@@ -139,7 +139,7 @@ export async function sendOTP(email: string, code: string) {
       <svg class="logo" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
       </svg>
-      <h1>LLM API Gateway</h1>
+      <h1>LitellmCTL</h1>
       <p class="subtitle">Email Verification Code</p>
     </div>
 
@@ -158,7 +158,7 @@ export async function sendOTP(email: string, code: string) {
     <p>Enter this code on the verification page to complete your registration.</p>
 
     <div class="footer">
-      <p>&copy; 2026 LLM API Gateway. All rights reserved.</p>
+      <p>&copy; 2026 LitellmCTL. All rights reserved.</p>
       <p>This is an automated message, please do not reply.</p>
     </div>
   </div>
@@ -167,7 +167,7 @@ export async function sendOTP(email: string, code: string) {
   `;
 
   const text = `
-LLM API Gateway - Email Verification Code
+LitellmCTL - Email Verification Code
 
 Your verification code is: ${code}
 
@@ -176,7 +176,7 @@ Your verification code is: ${code}
 ⚠️ Important: This code can only be used once. If you didn't request this code, you can safely ignore this email.
 
 ---
-© 2026 LLM API Gateway
+© 2026 LitellmCTL
   `.trim();
 
   // If SMTP is not available, log the code for testing
@@ -195,9 +195,9 @@ Your verification code is: ${code}
 
   try {
     const result = await transporter.sendMail({
-      from: `"LLM API Gateway" <${process.env.PROTON_EMAIL}>`,
+      from: `"LitellmCTL" <${process.env.PROTON_EMAIL}>`,
       to: email,
-      subject: '🔐 Your LLM API Gateway Verification Code',
+      subject: '🔐 Your LitellmCTL verification code',
       text,
       html
     });

@@ -65,6 +65,7 @@ function requireEnv(name: string): string {
     return v;
 }
 
+// TODO: Prefer LITELLMCTL_URL / LITELLMCTL_API_KEY once deployments migrate; keep LLM_GATEWAY_* as canonical for now.
 export function createMcpConfig(): ContextMcpConfig {
     const gatewayUrl = requireEnv('LLM_GATEWAY_URL');
     const gatewayApiKey = requireEnv('LLM_GATEWAY_API_KEY');
@@ -97,6 +98,7 @@ Usage: bun run index.ts
 Required env:
   LLM_GATEWAY_URL       e.g. http://localhost:14041
   LLM_GATEWAY_API_KEY   User's gateway API key
+  (TODO: document LITELLMCTL_* aliases when we switch defaults.)
 
 Optional env:
   CLAUDE_CONTEXT_STATE_DIR    Default: ~/.litellm/plugin-state/claude-context

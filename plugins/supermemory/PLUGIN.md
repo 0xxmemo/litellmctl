@@ -37,6 +37,8 @@ The MCP server is registered in `~/.claude/settings.json` under
 | `LLM_GATEWAY_URL` | yes | — |
 | `LLM_GATEWAY_API_KEY` | yes | — |
 
+<!-- TODO: migrate docs to LITELLMCTL_URL / LITELLMCTL_API_KEY without breaking deployments. -->
+
 Embedding model (`local/nomic-embed-text`) and dimensions (`512`) are fixed
 by the LiteLLM control plane — not configurable.
 

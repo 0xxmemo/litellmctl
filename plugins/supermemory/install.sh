@@ -53,6 +53,7 @@ except Exception:
     settings = {"env": {}, "permissions": {"allow": [], "deny": [], "ask": []}}
 
 settings.setdefault("mcpServers", {})
+# TODO: add LITELLMCTL_URL / LITELLMCTL_API_KEY when we migrate env names.
 settings["mcpServers"][entry_name] = {
     "command": "bun",
     "args": ["run", os.path.join(plugin_src, "src", "index.ts")],

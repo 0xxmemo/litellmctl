@@ -18,6 +18,7 @@ const INSTALL_TARGETS: Record<string, PluginTargetConfig> = {
   "claude-code": {
     name: "Claude Code",
     settingsDir: "~/.claude",
+    // TODO: LITELLMCTL_API_KEY — keep LLM_GATEWAY_API_KEY for existing deployments.
     configVar: "LLM_GATEWAY_API_KEY",
   },
 };

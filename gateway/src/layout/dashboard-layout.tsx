@@ -54,16 +54,16 @@ export function DashboardLayout() {
             <a
               href="/"
               className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
-              aria-label="LLM API Gateway home"
+              aria-label="LitellmCTL home"
             >
               <img
                 src="/icon-32.png"
-                alt="LLM API Gateway"
+                alt="LitellmCTL"
                 width={28}
                 height={28}
                 className="flex-shrink-0"
               />
-              <span className="text-base lg:text-lg font-bold truncate">LLM Gateway</span>
+              <span className="text-base lg:text-lg font-bold truncate">LitellmCTL</span>
             </a>
           </div>
           <div className="p-3 lg:p-4">
@@ -84,16 +84,16 @@ export function DashboardLayout() {
               <a
                 href="/"
                 className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
-                aria-label="LLM API Gateway home"
+                aria-label="LitellmCTL home"
               >
                 <img
                   src="/icon-32.png"
-                  alt="LLM API Gateway"
+                  alt="LitellmCTL"
                   width={24}
                   height={24}
                   className="flex-shrink-0"
                 />
-                <span className="text-base font-bold truncate">LLM Gateway</span>
+                <span className="text-base font-bold truncate">LitellmCTL</span>
               </a>
             </div>
             <div className="p-3 flex-1 overflow-y-auto">
@@ -122,16 +122,16 @@ export function DashboardLayout() {
             <a
               href="/"
               className="md:hidden flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
-              aria-label="LLM API Gateway home"
+              aria-label="LitellmCTL home"
             >
               <img
                 src="/icon-32.png"
-                alt="LLM API Gateway"
+                alt="LitellmCTL"
                 width={24}
                 height={24}
                 className="flex-shrink-0"
               />
-              <span className="text-sm font-bold truncate hidden sm:block">LLM API Gateway</span>
+              <span className="text-sm font-bold truncate hidden sm:block">LitellmCTL</span>
             </a>
           </div>
           <TopBar auth={auth} onLogout={() => logoutMutation.mutate()} />

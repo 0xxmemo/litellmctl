@@ -6,7 +6,8 @@ import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { ModelSelector } from '@/components/model-selector'
 
-const LS_KEY = 'llm-gateway-api-key'
+const LS_KEY = 'litellmctl-api-key'
+const LS_KEY_LEGACY = 'llm-gateway-api-key'
 
 // ─── API Key hook ────────────────────────────────────────────────────────────
 
@@ -14,13 +15,25 @@ export function useApiKey() {
   const [apiKey, setApiKeyState] = useState('')
 
   useEffect(() => {
-    const stored = localStorage.getItem(LS_KEY)
+    let stored = localStorage.getItem(LS_KEY)
+    if (!stored) {
+      stored = localStorage.getItem(LS_KEY_LEGACY)
+      if (stored) {
+        localStorage.setItem(LS_KEY, stored)
+        localStorage.removeItem(LS_KEY_LEGACY)
+      }
+    }
     if (stored) setApiKeyState(stored)
   }, [])
 
   const setApiKey = (val: string) => {
     setApiKeyState(val)
     localStorage.setItem(LS_KEY, val)
+    try {
+      localStorage.removeItem(LS_KEY_LEGACY)
+    } catch {
+      /* ignore */
+    }
   }
 
   return { apiKey, setApiKey }

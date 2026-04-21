@@ -1,4 +1,4 @@
-# LLM API Gateway
+# LitellmCTL
 
 Authentication and rate-limiting proxy for LiteLLM, built with Bun.serve().
 
@@ -9,7 +9,7 @@ Client (CLI / Web / App)
     │
     ▼
 ┌─────────────────────────┐
-│   LLM API Gateway       │  :14041
+│   LitellmCTL            │  :14041
 │   (Bun.serve)           │
 │                         │
 │  ├─ OTP auth (email)    │

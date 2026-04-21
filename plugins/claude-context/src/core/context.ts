@@ -97,6 +97,7 @@ function readGitBranch(codebasePath: string): string | null {
 export function resolveRefId(codebasePath: string, apiKeyForFallback = ''): RefId {
     const branch = readGitBranch(codebasePath);
     if (branch) return { refId: `branch:${branch}`, display: branch };
+    // TODO: also consider process.env.LITELLMCTL_API_KEY when renaming env vars.
     const fallbackSource = apiKeyForFallback || process.env.LLM_GATEWAY_API_KEY || 'anonymous';
     const hash = crypto.createHash('sha256').update(fallbackSource).digest('hex').slice(0, 12);
     return { refId: `user:${hash}`, display: `user-${hash}` };

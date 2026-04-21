@@ -114,7 +114,7 @@ If you didn't request this code, please ignore this email.
 
   try {
     const result = await transporter.sendMail({
-      from: `"LLM API Gateway" <${process.env.GATEWAY_PROTON_EMAIL || process.env.PROTON_EMAIL}>`,
+      from: `"LitellmCTL" <${process.env.GATEWAY_PROTON_EMAIL || process.env.PROTON_EMAIL}>`,
       to: email,
       subject: '🔐 Your OTP Verification Code',
       text,
@@ -232,12 +232,12 @@ async function sendAdminNotification(requesterEmail: string, adminEmail: string)
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
       </svg>
       <h1>New Access Request</h1>
-      <p class="subtitle">LLM API Gateway Dashboard</p>
+      <p class="subtitle">LitellmCTL Dashboard</p>
     </div>
 
     <p>Hello Admin,</p>
 
-    <p>A new user has requested access to the LLM API Gateway dashboard:</p>
+    <p>A new user has requested access to the LitellmCTL dashboard:</p>
 
     <div class="email-highlight">
       ${requesterEmail}
@@ -262,8 +262,8 @@ async function sendAdminNotification(requesterEmail: string, adminEmail: string)
     <p>If you don't recognize this request, you can safely ignore it.</p>
 
     <div class="footer">
-      <p>&copy; 2026 LLM API Gateway. All rights reserved.</p>
-      <p>This is an automated notification from your LLM API Gateway.</p>
+      <p>&copy; 2026 LitellmCTL. All rights reserved.</p>
+      <p>This is an automated notification from LitellmCTL.</p>
     </div>
   </div>
 </body>
@@ -271,11 +271,11 @@ async function sendAdminNotification(requesterEmail: string, adminEmail: string)
   `;
 
   const text = `
-New Access Request - LLM API Gateway
+New Access Request - LitellmCTL
 
 Hello Admin,
 
-A new user has requested access to the LLM API Gateway dashboard:
+A new user has requested access to the LitellmCTL dashboard:
 
 Email: ${requesterEmail}
 Requested at: ${new Date().toLocaleString()}
@@ -287,7 +287,7 @@ To approve this request:
 2. CLI: bun admin.js approve ${requesterEmail}
 
 ---
-© 2026 LLM API Gateway
+© 2026 LitellmCTL
   `.trim();
 
   if (!smtpAvailable || !transporter) {
@@ -305,7 +305,7 @@ To approve this request:
 
   try {
     const result = await transporter.sendMail({
-      from: `"LLM API Gateway" <${process.env.GATEWAY_PROTON_EMAIL || process.env.PROTON_EMAIL}>`,
+      from: `"LitellmCTL" <${process.env.GATEWAY_PROTON_EMAIL || process.env.PROTON_EMAIL}>`,
       to: adminEmail,
       subject: '🔐 New Dashboard Access Request',
       text,

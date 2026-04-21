@@ -1,5 +1,5 @@
 /**
- * Setup script routes — configure client tools to use LLM Gateway.
+ * Setup script routes — configure client tools to use LitellmCTL.
  *
  * Script generation uses shared utilities from lib/scripts.ts.
  */
@@ -35,8 +35,9 @@ const SETUP_OPTIONS = {
   "claude-code": {
     name: "Claude Code",
     description:
-      "Configure Claude Code to use LLM Gateway as your API provider",
+      "Configure Claude Code to use LitellmCTL as your API provider",
     icon: "terminal",
+    // TODO: migrate generated scripts to LITELLMCTL_API_KEY (keep LLM_GATEWAY_API_KEY until deployments update).
     configVar: "LLM_GATEWAY_API_KEY",
     features: [
       "Creates ~/.claude/settings.json — non-destructive merge",
@@ -51,11 +52,11 @@ const SETUP_OPTIONS = {
   },
   openclaw: {
     name: "OpenClaw",
-    description: "Configure OpenClaw to use LLM Gateway as your API provider",
+    description: "Configure OpenClaw to use LitellmCTL as your API provider",
     icon: "bot",
     configVar: "LITELLM_API_KEY",
     features: [
-      "Updates ~/.openclaw/openclaw.json — adds LLM Gateway provider",
+      "Updates ~/.openclaw/openclaw.json — adds LitellmCTL provider",
       "Sets LITELLM_API_KEY in ~/.openclaw/.env",
       "Configures model aliases: litellm/ultra / litellm/plus / litellm/lite",
       "Sets up fallback chain: ultra → plus → lite",
@@ -133,7 +134,7 @@ function generateClaudeCodeScript(
   const usageUrl = `${gatewayOrigin}/api/setup/claude-code`;
 
   const script = `#!/usr/bin/env bash
-# Configure Claude Code to use LLM Gateway as your API provider.
+# Configure Claude Code to use LitellmCTL as your API provider.
 #
 # Usage:
 #   curl -fsSL ${usageUrl} | ${configVar}="sk-..." bash
@@ -194,7 +195,7 @@ echo ""
 echo "  API Base URL:  ${gatewayOrigin}/v1"
 echo "  Settings file: \$SETTINGS_FILE"
 echo ""
-echo "Run 'claude' to start using Claude Code through LLM Gateway."
+echo "Run 'claude' to start using Claude Code through LitellmCTL."
 `;
 
   return scriptResponse(script);
@@ -207,7 +208,7 @@ function generateOpenClawScript(
   const usageUrl = `${gatewayOrigin}/api/setup/openclaw`;
 
   const script = `#!/usr/bin/env bash
-# Configure OpenClaw to use LLM Gateway as your API provider.
+# Configure OpenClaw to use LitellmCTL as your API provider.
 #
 # Usage:
 #   curl -fsSL ${usageUrl} | ${configVar}="sk-..." bash
@@ -231,7 +232,7 @@ else
   echo "${configVar}=\$API_KEY" > "\$ENV_FILE"
 fi
 
-# Update openclaw.json with LLM Gateway provider
+# Update openclaw.json with LitellmCTL provider
 if [ -f "\$CONFIG_FILE" ]; then
   if command -v jq &>/dev/null; then
     tmp=\$(mktemp)
@@ -244,9 +245,9 @@ if [ -f "\$CONFIG_FILE" ]; then
         "apiKey": "${configVar}",
         "api": "anthropic-messages",
         "models": [
-          {"id": "ultra", "name": "LLM Gateway Ultra"},
-          {"id": "plus", "name": "LLM Gateway Plus"},
-          {"id": "lite", "name": "LLM Gateway Lite"}
+          {"id": "ultra", "name": "LitellmCTL Ultra"},
+          {"id": "plus", "name": "LitellmCTL Plus"},
+          {"id": "lite", "name": "LitellmCTL Lite"}
         ]
       } |
       .agents.defaults.model.primary = "litellm/ultra" |
@@ -261,9 +262,9 @@ if [ -f "\$CONFIG_FILE" ]; then
         "apiKey": "${configVar}",
         "api": "anthropic-messages",
         "models": [
-          {"id": "ultra", "name": "LLM Gateway Ultra"},
-          {"id": "plus", "name": "LLM Gateway Plus"},
-          {"id": "lite", "name": "LLM Gateway Lite"}
+          {"id": "ultra", "name": "LitellmCTL Ultra"},
+          {"id": "plus", "name": "LitellmCTL Plus"},
+          {"id": "lite", "name": "LitellmCTL Lite"}
         ]
       } |
       .agents.defaults.model.primary = "litellm/ultra" |
@@ -278,7 +279,7 @@ fi
 
 echo "OpenClaw configured successfully!"
 echo ""
-echo "  Gateway URL:   ${gatewayOrigin}"
+echo "  LitellmCTL URL: ${gatewayOrigin}"
 echo "  Config file:   \$CONFIG_FILE"
 echo "  Env file:      \$ENV_FILE"
 echo ""

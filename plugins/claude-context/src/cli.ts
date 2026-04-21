@@ -54,6 +54,7 @@ function buildContext(): {
     snapshot: SnapshotManager;
     vectorDatabase: GatewayVectorDatabase;
 } {
+    // TODO: accept LITELLMCTL_URL / LITELLMCTL_API_KEY when we migrate env names.
     const baseUrl = process.env.LLM_GATEWAY_URL;
     const apiKey = process.env.LLM_GATEWAY_API_KEY;
     if (!baseUrl || !apiKey) {

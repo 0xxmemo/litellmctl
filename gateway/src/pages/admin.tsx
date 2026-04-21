@@ -369,7 +369,7 @@ export function Admin() {
               <CheckCircle className="w-5 h-5 text-green-500" />
               Approved Users ({approvedUsers.length})
             </CardTitle>
-            <CardDescription>Approved gateway users with request and token totals</CardDescription>
+            <CardDescription>Approved LitellmCTL users with request and token totals</CardDescription>
           </CardHeader>
           <CardContent>
             {approvedUsers.length === 0 ? (

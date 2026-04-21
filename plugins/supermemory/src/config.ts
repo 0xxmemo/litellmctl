@@ -26,6 +26,7 @@ function requireEnv(name: string): string {
     return v;
 }
 
+// TODO: Prefer LITELLMCTL_URL / LITELLMCTL_API_KEY once deployments migrate; keep LLM_GATEWAY_* as canonical for now.
 export function createConfig(): PluginConfig {
     return {
         name: process.env.MCP_SERVER_NAME || "supermemory",
@@ -52,6 +53,7 @@ Usage: bun run src/index.ts
 Required env:
   LLM_GATEWAY_URL       e.g. http://localhost:14041
   LLM_GATEWAY_API_KEY   User's gateway API key
+  (TODO: document LITELLMCTL_* aliases when we switch defaults.)
 
 Embedding model (${EMBEDDING_MODEL}) and dimensions (${EMBEDDING_DIMENSIONS})
 are fixed by the LiteLLM control plane.

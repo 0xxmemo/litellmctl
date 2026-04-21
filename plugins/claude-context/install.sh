@@ -61,6 +61,7 @@ settings.setdefault("mcpServers", {})
 settings["mcpServers"][entry_name] = {
     "command": "bun",
     "args": ["run", os.path.join(plugin_src, "src", "index.ts")],
+    # TODO: add LITELLMCTL_URL / LITELLMCTL_API_KEY when we migrate env names.
     "env": {
         "LLM_GATEWAY_URL": gateway_url,
         "LLM_GATEWAY_API_KEY": api_key,
@@ -70,6 +71,7 @@ settings["mcpServers"][entry_name] = {
 
 # Hooks: SessionStart auto-indexes the cwd's git repo; UserPromptSubmit injects
 # top-K relevant chunks into the prompt. Both shell out to the same plugin CLI.
+# TODO: add LITELLMCTL_* to hook_env when we migrate env names.
 hook_env = {
     "LLM_GATEWAY_URL": gateway_url,
     "LLM_GATEWAY_API_KEY": api_key,

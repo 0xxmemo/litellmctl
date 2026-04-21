@@ -21,7 +21,7 @@ All notable changes to litellmctl are documented here.
 
 ### New Commands / Flags
 
-- `litellmctl start/stop/restart/status/logs gateway` - manage LLM API Gateway UI (unified with the other features)
+- `litellmctl start/stop/restart/status/logs gateway` - manage LitellmCTL UI (unified with the other features)
 - `litellmctl install --with-protonmail / --without-protonmail` flag
 - ProtonMail (hydroxide) install/uninstall support
 

@@ -157,7 +157,7 @@ export function AuthPage() {
               <Zap className="h-6 w-6 text-primary-foreground" />
             </div>
           </div>
-          <CardTitle className="text-2xl">LLM API Gateway</CardTitle>
+          <CardTitle className="text-2xl">LitellmCTL</CardTitle>
           <CardDescription>
             {step === 'email' ? 'Enter your email to sign in' : 'Enter the OTP sent to your email'}
           </CardDescription>

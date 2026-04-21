@@ -255,7 +255,7 @@ export function Console() {
         <p className="text-sm text-muted-foreground">
           The admin console is disabled on this deployment.
           Set <code>GATEWAY_CONSOLE_ENABLED=true</code> and ensure{' '}
-          <code>node-pty</code> is built, then restart the gateway.
+          <code>node-pty</code> is built, then restart LitellmCTL.
         </p>
       </div>
     )

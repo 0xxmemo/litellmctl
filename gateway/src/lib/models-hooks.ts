@@ -57,12 +57,31 @@ export type UseExtendedModelsReturn = ReturnType<typeof useExtendedModels>
 
 // ─── LocalStorage helpers ─────────────────────────────────────────────────────
 
-const LS_MODEL_PREFIX = 'llm-gateway-model:'
+const LS_MODEL_PREFIX = 'litellmctl-model:'
+const LS_MODEL_PREFIX_LEGACY = 'llm-gateway-model:'
 
 export function getStoredModel(endpointPath: string): string | null {
-  try { return localStorage.getItem(LS_MODEL_PREFIX + endpointPath) } catch { return null }
+  try {
+    const k = LS_MODEL_PREFIX + endpointPath
+    let v = localStorage.getItem(k)
+    if (!v) {
+      v = localStorage.getItem(LS_MODEL_PREFIX_LEGACY + endpointPath)
+      if (v) {
+        localStorage.setItem(k, v)
+        localStorage.removeItem(LS_MODEL_PREFIX_LEGACY + endpointPath)
+      }
+    }
+    return v
+  } catch {
+    return null
+  }
 }
 
 export function storeModel(endpointPath: string, model: string): void {
-  try { localStorage.setItem(LS_MODEL_PREFIX + endpointPath, model) } catch {}
+  try {
+    localStorage.setItem(LS_MODEL_PREFIX + endpointPath, model)
+    localStorage.removeItem(LS_MODEL_PREFIX_LEGACY + endpointPath)
+  } catch {
+    /* ignore */
+  }
 }

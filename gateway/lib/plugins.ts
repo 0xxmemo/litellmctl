@@ -217,7 +217,7 @@ echo "${slug} plugin installed successfully!"
 echo ""
 echo "  Plugin dir:      \${PLUGIN_DIR}"
 echo "  Settings dir:    \${SETTINGS_DIR}"
-echo "  Gateway URL:     \${GATEWAY_ORIGIN}"
+echo "  LitellmCTL URL:  \${GATEWAY_ORIGIN}"
 `;
 }
 
