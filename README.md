@@ -10,13 +10,13 @@ curl -fsSL https://raw.githubusercontent.com/0xxmemo/litellmctl/main/install.sh 
 
 Works on **macOS** and **Ubuntu/Debian**. Safe to re-run.
 
-For AWS deployments see [`docs/docker.md`](docs/docker.md). One GitHub Actions
-pipeline provisions an ARM Graviton EC2 instance, builds the image, pushes to
-ECR, and rolls it out via SSM — roughly 10 minutes of one-time setup, zero
-AWS knowledge assumed. Ollama / SearXNG / faster-whisper run as public-image
-sidecars; the main container ships LiteLLM proxy, Bun gateway, and Caddy
-(auto-HTTPS). An in-UI admin PTY replaces shell access for ops like running
-the wizard or logging into OAuth providers.
+For AWS deployments see [`docs/aws.md`](docs/aws.md). One GitHub Actions
+pipeline provisions an ARM Graviton EC2 instance, user-data runs
+`install.sh` the same way a laptop does, and subsequent deploys are a
+`git pull && litellmctl restart` one-liner executed via SSM. No Docker,
+no image builds. Caddy fronts the gateway for auto-HTTPS; an in-UI
+admin PTY replaces SSH for ops like running the wizard or logging into
+OAuth providers.
 
 ```bash
 source ~/.zshrc              # or ~/.bashrc

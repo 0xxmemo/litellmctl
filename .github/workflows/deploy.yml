@@ -1,9 +1,8 @@
 name: deploy
 
 on:
-  # Deploy on published GitHub Releases — cut a release to ship to prod.
-  # Pushes to any branch are intentionally NOT a trigger; iterate locally
-  # and use `workflow_dispatch` for ad-hoc test deploys.
+  # Deploy on published GitHub Releases cut from `main` — the prod path.
+  # Pushes to any branch are NOT a trigger. Use workflow_dispatch for ad-hoc.
   release:
     types: [published]
   workflow_dispatch:
@@ -21,16 +20,8 @@ concurrency:
   group: deploy-${{ github.ref }}
   cancel-in-progress: false
 
-# Note: the Node deprecation warnings you might see in the logs come from
-# third-party JS actions (aws-actions/*, actions/checkout, docker/*) which
-# GHA runs on the runner's Node. We don't run any JS ourselves — we use
-# Bun, installed below, for anything script-shaped.
-
 jobs:
   deploy:
-    # Release events: only deploy releases cut from `main`. Manual
-    # workflow_dispatch runs are unrestricted (useful for first-time
-    # bootstrap + ad-hoc test deploys).
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'release' && github.event.release.target_commitish == 'main')
@@ -39,35 +30,29 @@ jobs:
       APP_NAME: ${{ secrets.APP_NAME }}
       AWS_REGION: ${{ secrets.AWS_REGION }}
       STACK_NAME: ${{ secrets.APP_NAME }}
+      GITHUB_ORG: ${{ secrets.GITHUB_ORG }}
+      GITHUB_REPO: ${{ secrets.GITHUB_REPO }}
+
     steps:
-      - name: Checkout (with submodules)
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
-      - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-
-      # Validate required secrets look right BEFORE the OIDC step so we fail
-      # with an actionable message instead of "Source Account ID is needed".
       - name: Validate required secrets
         env:
           ROLE_ARN: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
-          REGION: ${{ secrets.AWS_REGION }}
-          APP: ${{ secrets.APP_NAME }}
         run: |
           fail=0
           if [ -z "$ROLE_ARN" ]; then
-            echo "::error::secret AWS_DEPLOY_ROLE_ARN is empty. Re-run 'litellmctl deploy aws' locally."
+            echo "::error::secret AWS_DEPLOY_ROLE_ARN is empty. Re-run 'litellmctl deploy aws'."
             fail=1
           elif ! printf '%s' "$ROLE_ARN" | grep -Eq '^arn:aws:iam::[0-9]{12}:role/[A-Za-z0-9_+=,.@-]+$'; then
-            echo "::error::secret AWS_DEPLOY_ROLE_ARN is not a valid IAM role ARN (length=${#ROLE_ARN}). Expected: arn:aws:iam::<account>:role/<name>. Re-run 'litellmctl deploy aws'."
+            echo "::error::AWS_DEPLOY_ROLE_ARN is not a valid IAM role ARN."
             fail=1
           fi
-          [ -n "$REGION" ] || { echo "::error::secret AWS_REGION is empty."; fail=1; }
-          [ -n "$APP" ]    || { echo "::error::secret APP_NAME is empty."; fail=1; }
+          [ -n "$AWS_REGION" ]   || { echo "::error::AWS_REGION empty.";   fail=1; }
+          [ -n "$APP_NAME" ]     || { echo "::error::APP_NAME empty.";     fail=1; }
+          [ -n "$GITHUB_ORG" ]   || { echo "::error::GITHUB_ORG empty.";   fail=1; }
+          [ -n "$GITHUB_REPO" ]  || { echo "::error::GITHUB_REPO empty.";  fail=1; }
           exit $fail
 
       - name: Configure AWS credentials (OIDC)
@@ -76,18 +61,14 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      # ── Stack (creates ECR, EC2, EIP, SG, IAM on first run; updates otherwise) ──
-      # Self-heals the classic CFN footgun: an initial CREATE that failed
-      # leaves the stack in ROLLBACK_COMPLETE, and `deploy` can't move it out
-      # of that state — the stack has to be deleted and re-created.
+      # Self-heals a stack wedged in a terminal failure state — CFN deploy
+      # can't move out of these on its own.
       - name: Recover wedged stack if needed
         run: |
           status=$(aws cloudformation describe-stacks \
             --stack-name "${STACK_NAME}" \
             --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo MISSING)
           echo "stack=${STACK_NAME} status=${status}"
-          # Terminal / semi-wedged states that `cloudformation deploy` cannot
-          # move out of. We delete and let the next step re-create.
           case "$status" in
             ROLLBACK_COMPLETE|CREATE_FAILED|REVIEW_IN_PROGRESS|ROLLBACK_FAILED|DELETE_FAILED)
               echo "::warning::stack is in $status — deleting so we can re-create"
@@ -96,9 +77,8 @@ jobs:
               ;;
           esac
 
-      # When the stack already exists and nothing in the template or parameters
-      # changed, this is a true no-op. The per-SHA image roll happens in the
-      # SSM step below, not via CFN.
+      # Creates EC2 + EIP + EBS + SG + IAM on first run. Subsequent runs
+      # are no-ops when no parameters changed (--no-fail-on-empty-changeset).
       - name: Deploy CloudFormation stack
         run: |
           aws cloudformation deploy \
@@ -108,6 +88,9 @@ jobs:
             --no-fail-on-empty-changeset \
             --parameter-overrides \
               AppName="${APP_NAME}" \
+              GithubOrg="${GITHUB_ORG}" \
+              GithubRepo="${GITHUB_REPO}" \
+              GithubBranch="${{ github.ref_type == 'tag' && 'main' || github.ref_name }}" \
               InstanceType="${{ inputs.instance_type || 'c7g.xlarge' }}" \
               AdminEmails="${{ secrets.GATEWAY_ADMIN_EMAILS }}" \
               LitellmMasterKey="${{ secrets.LITELLM_MASTER_KEY }}" \
@@ -119,7 +102,7 @@ jobs:
       - name: On-failure stack diagnostics
         if: failure()
         run: |
-          echo "### Last 20 stack events" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Last failed stack events" >> "$GITHUB_STEP_SUMMARY"
           aws cloudformation describe-stack-events \
             --stack-name "${STACK_NAME}" \
             --query 'StackEvents[?ResourceStatus==`CREATE_FAILED` || ResourceStatus==`UPDATE_FAILED`].[LogicalResourceId,ResourceStatus,ResourceStatusReason]' \
@@ -128,88 +111,42 @@ jobs:
       - name: Capture stack outputs
         id: stack
         run: |
-          # ECR repo lives in the long-lived OIDC/bootstrap stack; everything
-          # else is in the main (recreatable) stack.
-          ecr_out=$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}-oidc" \
+          out=$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" \
             --query 'Stacks[0].Outputs' --output json)
-          main_out=$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" \
-            --query 'Stacks[0].Outputs' --output json)
-          echo "ecr_uri=$(echo "$ecr_out" | jq -r '.[] | select(.OutputKey=="EcrRepositoryUri") | .OutputValue')" >> "$GITHUB_OUTPUT"
-          echo "instance_id=$(echo "$main_out" | jq -r '.[] | select(.OutputKey=="InstanceId") | .OutputValue')" >> "$GITHUB_OUTPUT"
-          echo "public_ip=$(echo "$main_out" | jq -r '.[] | select(.OutputKey=="PublicIp") | .OutputValue')" >> "$GITHUB_OUTPUT"
+          echo "instance_id=$(echo "$out" | jq -r '.[] | select(.OutputKey=="InstanceId") | .OutputValue')" >> "$GITHUB_OUTPUT"
+          echo "public_ip=$(echo "$out"   | jq -r '.[] | select(.OutputKey=="PublicIp")   | .OutputValue')" >> "$GITHUB_OUTPUT"
 
-      # ── Build + push ARM64 image ──────────────────────────────────────────
-      - name: Log in to ECR
-        uses: aws-actions/amazon-ecr-login@v2
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Compute image tags
-        id: tags
-        env:
-          ECR: ${{ steps.stack.outputs.ecr_uri }}
-          REF: ${{ github.ref_name }}
-          SHA: ${{ github.sha }}
-        run: |
-          # Docker image tags don't allow `/` — fold branch refs like
-          # feat/ec2-express into feat-ec2-express.
-          sanitized=${REF//\//-}
-          {
-            echo "list<<EOF"
-            echo "${ECR}:${SHA}"
-            echo "${ECR}:${sanitized}"
-            echo "${ECR}:latest"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
-
-      - name: Build and push
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: ./Dockerfile
-          platforms: linux/arm64
-          push: true
-          tags: ${{ steps.tags.outputs.list }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          provenance: false
-
-      # ── Trigger in-place update on the instance via SSM ───────────────────
-      - name: Tell the instance to pull + up
+      # In-place update. The instance already has the repo + venv + systemd
+      # services — just fetch the new commit and restart.
+      - name: SSM — git pull && litellmctl restart
         id: ssm
         run: |
-          IMAGE="${{ steps.stack.outputs.ecr_uri }}:${{ github.sha }}"
           INSTANCE="${{ steps.stack.outputs.instance_id }}"
+          REF="${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}"
 
-          # The SendCommand API wraps command lists under Parameters.commands,
-          # NOT a top-level `commands` key. Use --parameters (not --cli-input-json)
-          # to avoid the "Unknown parameter in input: 'commands'" error.
+          # Build a shell script and submit it as a SendCommand parameter.
+          # (Top-level `commands` is not accepted by --cli-input-json; the API
+          # wraps it under Parameters, so we use --parameters file://).
           cat > /tmp/runme.sh <<SCRIPT
           set -eux
-          cd /opt/litellm
-          sed -i "s|^LITELLM_IMAGE=.*|LITELLM_IMAGE=${IMAGE}|" .env
-          aws ecr get-login-password --region ${{ env.AWS_REGION }} \
-            | docker login --username AWS --password-stdin ${{ steps.stack.outputs.ecr_uri }}
-          docker pull "${IMAGE}"
-          container=\$(docker create "${IMAGE}")
-          docker cp "\$container":/app/docker/compose.yml /opt/litellm/compose.yml
-          docker rm -v "\$container"
-          docker compose -f /opt/litellm/compose.yml --env-file /opt/litellm/.env pull
-          docker compose -f /opt/litellm/compose.yml --env-file /opt/litellm/.env up -d --remove-orphans
-          docker image prune -f
+          cd /home/ec2-user/.litellm
+          sudo -u ec2-user -H git fetch --tags origin
+          sudo -u ec2-user -H git checkout "${REF}"
+          sudo -u ec2-user -H git pull --ff-only origin "${REF}" || true   # tags can't pull
+          sudo -u ec2-user -H git submodule update --init --recursive
+          sudo -u ec2-user -H bash -lc "cd /home/ec2-user/.litellm && bash install.sh" || true
+          sudo -u ec2-user -H bash -lc "cd /home/ec2-user/.litellm && ./bin/litellmctl restart proxy gateway" || true
           SCRIPT
 
-          # Build the Parameters JSON with python (safely quotes the script)
           python3 -c "
           import json
-          with open('/tmp/runme.sh') as f: script = f.read()
-          print(json.dumps({'commands': [script]}))
+          with open('/tmp/runme.sh') as f: s = f.read()
+          print(json.dumps({'commands': [s]}))
           " > /tmp/params.json
 
           CMD_ID=$(aws ssm send-command \
             --document-name AWS-RunShellScript \
-            --instance-ids "${INSTANCE}" \
+            --instance-ids "$INSTANCE" \
             --parameters file:///tmp/params.json \
             --query Command.CommandId --output text)
           echo "cmd_id=${CMD_ID}" >> "$GITHUB_OUTPUT"
@@ -225,32 +162,37 @@ jobs:
             echo "[$i] status=$status"
             case "$status" in
               Success) exit 0 ;;
-              Failed|Cancelled|TimedOut) aws ssm get-command-invocation --command-id "$CMD" --instance-id "$INSTANCE" ; exit 1 ;;
+              Failed|Cancelled|TimedOut)
+                aws ssm get-command-invocation --command-id "$CMD" --instance-id "$INSTANCE"
+                exit 1 ;;
             esac
             sleep 5
           done
-          echo "SSM command did not finish within 5 min" ; exit 1
+          echo "SSM command did not finish within 5 min"
+          exit 1
 
-      # ── Post-deploy smoke test ────────────────────────────────────────────
       - name: Smoke-test /api/health
         run: |
           URL="http://${{ steps.stack.outputs.public_ip }}:14041/api/health"
           echo "Probing $URL"
-          for i in 1 2 3 4 5 6 7 8 9 10; do
+          for i in 1 2 3 4 5 6 7 8 9 10 11 12; do
             if curl -fsS --max-time 5 "$URL" > /tmp/health.json; then
               cat /tmp/health.json
               exit 0
             fi
-            sleep 6
+            sleep 10
           done
-          echo "health check failed after ~60s" ; exit 1
+          echo "::error::health check failed after ~2 min"
+          exit 1
 
       - name: Summary
         run: |
           {
             echo "## Deployed"
             echo ""
-            echo "- Image: \`${{ steps.stack.outputs.ecr_uri }}:${{ github.sha }}\`"
+            echo "- Ref: \`${{ github.event_name == 'release' && github.event.release.tag_name || github.ref_name }}\`"
+            echo "- Instance: \`${{ steps.stack.outputs.instance_id }}\`"
             echo "- Public IP: \`${{ steps.stack.outputs.public_ip }}\`"
-            echo "- Admin console: http://${{ steps.stack.outputs.public_ip }}:14041"
+            echo "- Gateway: http://${{ steps.stack.outputs.public_ip }}:14041"
+            echo "- Caddy (HTTP): http://${{ steps.stack.outputs.public_ip }}/"
           } >> "$GITHUB_STEP_SUMMARY"

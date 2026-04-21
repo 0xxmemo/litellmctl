@@ -1,9 +1,10 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
   LiteLLM Gateway — single-host ARM64 deployment. Provisions an EC2
-  instance, 120GB EBS data volume, 32GB swap file, security group,
-  Elastic IP, and ECR repository. Idempotent — re-deploy to update
-  the instance's user-data or size.
+  instance, a 120 GB EBS data volume, a 32 GB swap file, a security
+  group, and an Elastic IP. On first boot, user-data clones the repo
+  onto the data volume and runs install.sh — the same script used for
+  VPC / laptop installs. No Docker, no image registry, no build step.
 
 Parameters:
   AppName:
@@ -11,14 +12,28 @@ Parameters:
     Default: litellm-gateway
     Description: Prefix for all created resources.
 
+  GithubOrg:
+    Type: String
+    Description: GitHub org or user that owns the fork (e.g. "0xxmemo").
+
+  GithubRepo:
+    Type: String
+    Default: litellmctl
+    Description: Repository name.
+
+  GithubBranch:
+    Type: String
+    Default: main
+    Description: Branch to check out on the instance. Deploys = `git pull` on this branch.
+
   InstanceType:
     Type: String
     Default: c7g.xlarge
     AllowedValues:
-      - c7g.xlarge       # 4 vCPU / 8 GB   (default — matches spec)
+      - c7g.xlarge       # 4 vCPU / 8 GB  (default, matches spec)
       - c7g.2xlarge      # 8 vCPU / 16 GB
-      - m7g.xlarge       # 4 vCPU / 16 GB  (more RAM if needed)
-      - t4g.xlarge       # 4 vCPU / 16 GB  burstable (cheaper when idle)
+      - m7g.xlarge       # 4 vCPU / 16 GB (more RAM)
+      - t4g.xlarge       # 4 vCPU / 16 GB burstable (cheaper when idle)
     Description: Graviton (ARM64) instance. c7g.xlarge matches the 4 vCPU / 8 GB spec.
 
   DataVolumeSizeGb:
@@ -33,42 +48,37 @@ Parameters:
     MinValue: 0
     MaxValue: 128
 
-  # ImageTag deliberately not a parameter: referencing a per-deploy SHA in
-  # UserData would force CFN to replace the EC2 instance on every release.
-  # Instead, UserData pulls `:latest` on first boot, and the workflow's
-  # post-CFN SSM step rolls the instance to the specific SHA without
-  # touching the EC2 resource.
-
   AdminEmails:
     Type: String
     Default: ""
-    Description: Comma-separated admin emails — seeds GATEWAY_ADMIN_EMAILS.
+    Description: Comma-separated admin emails — seeds GATEWAY_ADMIN_EMAILS in the gateway .env.
 
   LitellmMasterKey:
     Type: String
     NoEcho: true
     Default: ""
     Description: >
-      Master key for the LiteLLM proxy (used by the gateway to authenticate
-      its requests to the proxy). Generate with `openssl rand -hex 24` and
-      prefix with `sk-`. Leave blank to auto-generate on first boot.
+      Master key for the LiteLLM proxy. Generate with `openssl rand -hex 24`
+      and prefix with `sk-`. Leave blank to auto-generate on first boot.
 
-  # Optional: ProtonMail credentials for OTP email delivery via hydroxide SMTP
-  # bridge. If left blank, the gateway logs OTP codes to the container stdout —
-  # admins can read them with `docker compose logs main | grep -i 'otp code'`.
+  # Optional ProtonMail SMTP credentials. If set, user-data seeds them into
+  # the gateway .env; an admin `litellmctl auth protonmail` on the instance
+  # then runs the non-interactive pty auth flow that saves the bridge
+  # password back to .env. If blank, the gateway logs OTP codes to stdout
+  # instead (readable via the admin web console).
   ProtonEmail:
     Type: String
     Default: ""
-    Description: "Optional — your ProtonMail address (used as From header)."
+    Description: "Optional — ProtonMail address (From header)."
   ProtonUsername:
     Type: String
     Default: ""
-    Description: "Optional — ProtonMail username (used for SMTP auth)."
+    Description: "Optional — ProtonMail username (SMTP auth)."
   ProtonPassword:
     Type: String
     NoEcho: true
     Default: ""
-    Description: "Optional — ProtonMail account password."
+    Description: "Optional — ProtonMail password."
   Proton2faSecret:
     Type: String
     NoEcho: true
@@ -78,29 +88,27 @@ Parameters:
   SshKeyName:
     Type: String
     Default: ""
-    Description: (Optional) EC2 key pair name. Leave blank to disable SSH entirely — admin console inside the UI is the intended access path.
+    Description: (Optional) EC2 key-pair name. Leave blank — SSM Session Manager + the in-UI web console are the intended access paths.
 
   AllowSshFromCidr:
     Type: String
     Default: "0.0.0.0/0"
     Description: CIDR allowed to reach :22. Ignored if SshKeyName is blank.
 
-  # Resolved at stack-create time by SSM Parameter Store — always the
-  # latest Amazon Linux 2023 ARM64 AMI in the active region. No per-region
-  # mapping to rot, no yearly maintenance.
   LatestAmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+    Description: Resolved at stack-create time — always the latest AL2023 ARM64.
+
+  CaddyVersion:
+    Type: String
+    Default: "2.8.4"
 
 Conditions:
   HasSshKey: !Not [!Equals [!Ref SshKeyName, ""]]
 
 Resources:
-  # Note: the ECR repo lives in the OIDC bootstrap stack (aws/bootstrap-github-oidc.yml)
-  # so it survives re-creates of THIS stack. Recreating the main stack on a
-  # retained ECR would hit "Resource already exists" here otherwise.
-
-  # ── Security group: 80/443/14041 open; 22 conditional ────────────────────
+  # ── Security group ────────────────────────────────────────────────────────
   Sg:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -129,7 +137,7 @@ Resources:
       ToPort: 22
       CidrIp: !Ref AllowSshFromCidr
 
-  # ── IAM: instance profile with ECR pull + SSM Session Manager ────────────
+  # ── IAM: instance profile for SSM Session Manager ─────────────────────────
   InstanceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -141,14 +149,13 @@ Resources:
             Action: sts:AssumeRole
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-        - arn:aws:iam::aws:policy/AmazonEC2ContainerRegistryReadOnly
 
   InstanceProfile:
     Type: AWS::IAM::InstanceProfile
     Properties:
       Roles: [!Ref InstanceRole]
 
-  # ── Elastic IP (stable address across reboots/re-deploys) ────────────────
+  # ── Elastic IP (stable public address across reboots) ─────────────────────
   Eip:
     Type: AWS::EC2::EIP
     Properties:
@@ -161,10 +168,6 @@ Resources:
       EIP: !Ref Eip
 
   # ── EC2 instance ─────────────────────────────────────────────────────────
-  # No CreationPolicy / cfn-signal — Amazon Linux 2023 doesn't ship
-  # aws-cfn-bootstrap, so a signal-based create policy would just time out
-  # after 15 min with no useful feedback. The workflow's post-deploy
-  # `Smoke-test /api/health` step is the real "is it up?" check instead.
   Instance:
     Type: AWS::EC2::Instance
     Properties:
@@ -174,9 +177,9 @@ Resources:
       KeyName: !If [HasSshKey, !Ref SshKeyName, !Ref "AWS::NoValue"]
       SecurityGroupIds: [!Ref Sg]
       BlockDeviceMappings:
-        - DeviceName: /dev/xvda           # root volume
-          Ebs: { VolumeType: gp3, VolumeSize: 20, DeleteOnTermination: true }
-        - DeviceName: /dev/xvdf           # dedicated data volume, survives instance replacement
+        - DeviceName: /dev/xvda
+          Ebs: { VolumeType: gp3, VolumeSize: 40, DeleteOnTermination: true }   # room for apt + swap
+        - DeviceName: /dev/xvdf
           Ebs:
             VolumeType: gp3
             VolumeSize: !Ref DataVolumeSizeGb
@@ -189,17 +192,16 @@ Resources:
           set -euxo pipefail
           exec > >(tee /var/log/user-data.log) 2>&1
 
-          dnf install -y docker aws-cli jq amazon-cloudwatch-agent
+          # ── System packages ──────────────────────────────────────────────
+          dnf install -y \
+            git curl jq tar gzip unzip \
+            python3 python3-pip python3-devel \
+            gcc gcc-c++ make \
+            sqlite sqlite-devel \
+            golang \
+            awscli-2 amazon-cloudwatch-agent
 
-          # Docker + compose plugin
-          systemctl enable --now docker
-          usermod -aG docker ec2-user
-          mkdir -p /usr/libexec/docker/cli-plugins
-          curl -fsSL https://github.com/docker/compose/releases/latest/download/docker-compose-linux-aarch64 \
-            -o /usr/libexec/docker/cli-plugins/docker-compose
-          chmod +x /usr/libexec/docker/cli-plugins/docker-compose
-
-          # Swap file
+          # ── 32 GB swap on root volume ────────────────────────────────────
           if [ ! -f /swapfile ]; then
             dd if=/dev/zero of=/swapfile bs=1M count=$((${SwapSizeGb} * 1024)) status=progress
             chmod 600 /swapfile
@@ -208,50 +210,126 @@ Resources:
             echo '/swapfile none swap sw 0 0' >> /etc/fstab
           fi
 
-          # Format + mount data volume (idempotent: only format if blank)
-          DEV=/dev/nvme1n1   # second EBS on Nitro == nvme1n1
+          # ── Mount data volume at ~ec2-user/.litellm ──────────────────────
+          DEV=/dev/nvme1n1
           [ -b "$DEV" ] || DEV=/dev/xvdf
           if ! blkid "$DEV"; then mkfs.ext4 -L litellm-data "$DEV"; fi
-          mkdir -p /opt/litellm/data
+          mkdir -p /home/ec2-user/.litellm
           grep -q litellm-data /etc/fstab || \
-            echo 'LABEL=litellm-data /opt/litellm/data ext4 defaults,nofail 0 2' >> /etc/fstab
+            echo 'LABEL=litellm-data /home/ec2-user/.litellm ext4 defaults,nofail 0 2' >> /etc/fstab
           mount -a
+          chown -R ec2-user:ec2-user /home/ec2-user/.litellm
 
-          # First-boot bootstrap only. The deploy workflow re-writes .env
-          # with a specific image SHA via SSM on every release — this initial
-          # `:latest` pull is just to get something running before that.
-          cd /opt/litellm
-          IMAGE_BASE=${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${AppName}
-          cat > .env <<ENV
-          LITELLM_IMAGE=${!IMAGE_BASE}:latest
-          LITELLM_DATA_DIR=/opt/litellm/data
-          LITELLM_MASTER_KEY=${LitellmMasterKey}
-          GATEWAY_ADMIN_EMAILS=${AdminEmails}
-          GATEWAY_PROTON_EMAIL=${ProtonEmail}
-          GATEWAY_PROTON_USERNAME=${ProtonUsername}
-          GATEWAY_PROTON_PASSWORD=${ProtonPassword}
-          GATEWAY_PROTON_2FA_SECRET=${Proton2faSecret}
-          ENV
-          chmod 600 .env
+          # ── Caddy (static ARM64 binary) ──────────────────────────────────
+          if ! command -v caddy >/dev/null 2>&1; then
+            curl -fsSL "https://github.com/caddyserver/caddy/releases/download/v${CaddyVersion}/caddy_${CaddyVersion}_linux_arm64.tar.gz" \
+              | tar -C /usr/local/bin -xz caddy
+            chmod +x /usr/local/bin/caddy
+          fi
 
-          aws ecr get-login-password --region ${AWS::Region} \
-            | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+          # ── Clone the repo onto the EBS volume (idempotent) ──────────────
+          REPO_URL="https://github.com/${GithubOrg}/${GithubRepo}.git"
+          if [ ! -d /home/ec2-user/.litellm/.git ]; then
+            sudo -u ec2-user -H git clone --branch "${GithubBranch}" "$REPO_URL" /home/ec2-user/.litellm
+          else
+            sudo -u ec2-user -H git -C /home/ec2-user/.litellm fetch origin
+            sudo -u ec2-user -H git -C /home/ec2-user/.litellm checkout "${GithubBranch}"
+            sudo -u ec2-user -H git -C /home/ec2-user/.litellm pull --ff-only
+          fi
 
-          docker pull "${!IMAGE_BASE}:latest"
-          container=$(docker create "${!IMAGE_BASE}:latest")
-          docker cp $container:/app/docker/compose.yml /opt/litellm/compose.yml || true
-          docker rm -v $container
+          # ── Run install.sh (creates venv, pip-installs litellm[proxy], etc.) ─
+          # install.sh is idempotent: re-runs just update the submodule +
+          # re-install deps.
+          sudo -u ec2-user -H bash -lc "cd /home/ec2-user/.litellm && bash install.sh" || true
 
-          docker compose -f /opt/litellm/compose.yml --env-file /opt/litellm/.env pull
-          docker compose -f /opt/litellm/compose.yml --env-file /opt/litellm/.env up -d
+          # Bun (install.sh doesn't pull bun; the gateway needs it)
+          sudo -u ec2-user -H bash -lc 'command -v bun || curl -fsSL https://bun.sh/install | bash'
 
-          # Write a breadcrumb so SSM-session operators can `cat` this to
-          # confirm user-data ran to completion.
+          # Claude Code CLI (native ARM64 binary)
+          sudo -u ec2-user -H bash -lc 'command -v claude || curl -fsSL https://claude.ai/install.sh | bash'
+
+          # ── Seed .env from CFN parameters ────────────────────────────────
+          ENV_FILE=/home/ec2-user/.litellm/.env
+          touch "$ENV_FILE"
+          chown ec2-user:ec2-user "$ENV_FILE"
+
+          upsert() {
+            local k="$1" v="$2"
+            [ -z "$v" ] && return
+            if grep -q "^${!k}=" "$ENV_FILE"; then
+              sed -i "s|^${!k}=.*|${!k}=${!v}|" "$ENV_FILE"
+            else
+              echo "${!k}=${!v}" >> "$ENV_FILE"
+            fi
+          }
+
+          upsert LITELLM_MASTER_KEY        "${LitellmMasterKey}"
+          upsert GATEWAY_ADMIN_EMAILS      "${AdminEmails}"
+          upsert GATEWAY_PROTON_EMAIL      "${ProtonEmail}"
+          upsert GATEWAY_PROTON_USERNAME   "${ProtonUsername}"
+          upsert GATEWAY_PROTON_PASSWORD   "${ProtonPassword}"
+          upsert GATEWAY_PROTON_2FA_SECRET "${Proton2faSecret}"
+          upsert GATEWAY_CONSOLE_ENABLED   "true"
+
+          # Generate GATEWAY_SESSION_SECRET if absent
+          if ! grep -q "^GATEWAY_SESSION_SECRET=.\+" "$ENV_FILE"; then
+            secret="$(head -c 48 /dev/urandom | base64 | tr -d '=+/' | head -c 48)"
+            upsert GATEWAY_SESSION_SECRET "$secret"
+          fi
+
+          # ── Install features + start services (via litellmctl) ───────────
+          sudo -u ec2-user -H bash -lc "cd /home/ec2-user/.litellm && ./bin/litellmctl install --with-gateway --with-protonmail" || true
+
+          # Auto-auth hydroxide if Proton creds are set (non-interactive pty flow)
+          if [ -n "${ProtonPassword}" ]; then
+            sudo -u ec2-user -H bash -lc "cd /home/ec2-user/.litellm && ./bin/litellmctl auth protonmail" || true
+          fi
+
+          # Start proxy + gateway + protonmail bridge (systemd user units)
+          sudo -u ec2-user -H bash -lc "cd /home/ec2-user/.litellm && ./bin/litellmctl start proxy" || true
+          sudo -u ec2-user -H bash -lc "cd /home/ec2-user/.litellm && ./bin/litellmctl start gateway" || true
+          sudo -u ec2-user -H bash -lc "cd /home/ec2-user/.litellm && ./bin/litellmctl start protonmail" || true
+
+          # ── Caddy: default Caddyfile + systemd unit (runs as ec2-user) ───
+          CADDYFILE=/home/ec2-user/.litellm/Caddyfile
+          if [ ! -f "$CADDYFILE" ]; then
+            cat > "$CADDYFILE" <<'CADDY'
+          # Default Caddyfile — proxies all :80 traffic to the gateway.
+          # Replace the :80 block with `your.domain.com { reverse_proxy localhost:14041 }`
+          # to enable automatic HTTPS via Let's Encrypt, then:
+          #   sudo systemctl reload caddy
+          :80 {
+            reverse_proxy localhost:14041
+          }
+          CADDY
+            chown ec2-user:ec2-user "$CADDYFILE"
+          fi
+
+          cat > /etc/systemd/system/caddy.service <<UNIT
+          [Unit]
+          Description=Caddy reverse proxy
+          After=network.target
+
+          [Service]
+          User=ec2-user
+          AmbientCapabilities=CAP_NET_BIND_SERVICE
+          ExecStart=/usr/local/bin/caddy run --config /home/ec2-user/.litellm/Caddyfile --adapter caddyfile
+          ExecReload=/usr/local/bin/caddy reload --config /home/ec2-user/.litellm/Caddyfile --adapter caddyfile
+          Restart=on-failure
+          RestartSec=5
+
+          [Install]
+          WantedBy=multi-user.target
+          UNIT
+          systemctl daemon-reload
+          systemctl enable --now caddy.service
+
+          # Breadcrumb so SSM-session operators can confirm user-data finished.
           date -u +%FT%TZ > /var/log/user-data-done
 
 Outputs:
   PublicIp:
-    Description: "Connect to http://<PublicIp>:14041 initially, then configure Caddy."
+    Description: "Connect to http://<PublicIp>:14041 initially, then configure Caddy for a domain."
     Value: !Ref Eip
   InstanceId:
     Value: !Ref Instance

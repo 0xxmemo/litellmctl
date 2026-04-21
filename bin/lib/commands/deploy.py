@@ -255,9 +255,8 @@ def _aws_deploy() -> None:
     admin_emails = ask("Admin email(s), comma-separated", default=git_email or "you@example.com")
 
     # ── Optional: ProtonMail SMTP for OTP delivery ───────────────────────
-    # If skipped, the gateway logs OTP codes to stdout (readable via
-    # `docker compose logs main` or the admin web console). That's enough
-    # for the first admin login.
+    # If skipped, the gateway logs OTP codes to journalctl (readable from
+    # the admin web console: `journalctl --user -u litellm-gateway -f`).
     proton_email = proton_user = proton_pass = proton_totp = ""
     if confirm("Wire ProtonMail SMTP for OTP emails? (say no to read OTPs from container logs instead)", default=False):
         # Try to seed from /data/.env on the local machine if present.
@@ -384,6 +383,8 @@ def _aws_deploy() -> None:
     set_secret("AWS_DEPLOY_ROLE_ARN", role_arn)
     set_secret("AWS_REGION", region)
     set_secret("APP_NAME", app_name)
+    set_secret("GITHUB_ORG", gh_org)
+    set_secret("GITHUB_REPO", gh_repo)
     set_secret("GATEWAY_ADMIN_EMAILS", admin_emails)
     if not reuse_key:
         set_secret("LITELLM_MASTER_KEY", master_key)
@@ -464,12 +465,11 @@ def _aws_deploy() -> None:
         )
 
     info("Done")
-    console.print(f"  [dim]First deploy takes ~8 min (EC2 launch + initial image pulls).[/]")
-    console.print(f"  [dim]Auto deploy:  cut a release from `main` — `gh release create vX.Y.Z --generate-notes`[/]")
-    console.print(f"  [dim]Manual:       gh workflow run deploy.yml -R {repo} -r <branch>  (any branch with the workflow file)[/]")
+    console.print(f"  [dim]First deploy takes ~5 min (EC2 launch + install.sh + systemd services).[/]")
+    console.print(f"  [dim]Auto deploy:  publish a release from `main` — `gh release create vX.Y.Z --generate-notes`[/]")
+    console.print(f"  [dim]Manual:       gh workflow run deploy.yml -R {repo} -r <branch>[/]")
     console.print(f"  [dim]Tear main:    aws cloudformation delete-stack --stack-name {app_name} --region {region}[/]")
-    console.print(f"  [dim]Tear OIDC:    aws cloudformation delete-stack --stack-name {oidc_stack} --region {region}  (also destroys ECR + images)[/]")
-    console.print(f"  [dim]              aws ecr delete-repository --repository-name {app_name} --region {region} --force  # needed if ECR isn't empty[/]")
+    console.print(f"  [dim]Tear OIDC:    aws cloudformation delete-stack --stack-name {oidc_stack} --region {region}[/]")
 
 
 # ── Dispatcher ───────────────────────────────────────────────────────────────

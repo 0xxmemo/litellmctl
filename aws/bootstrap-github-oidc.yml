@@ -1,11 +1,12 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  One-time bootstrap: creates the GitHub Actions OIDC identity provider and
-  the deploy role that GHA assumes via OIDC. Deploy this ONCE per AWS
-  account before pushing to the repo.
+  One-time bootstrap — creates the GitHub Actions OIDC provider and the
+  deploy role that the `deploy.yml` workflow assumes via OIDC.
 
-  The role ARN this stack outputs is what you paste into the GitHub secret
-  `AWS_DEPLOY_ROLE_ARN` — everything else is automatic.
+  Deploy this ONCE per AWS account. The role ARN it outputs is the only
+  thing you need to paste into GitHub as AWS_DEPLOY_ROLE_ARN — everything
+  else (EC2, EBS, EIP, etc.) is created by the main stack via
+  aws/cloudformation.yml.
 
 Parameters:
   GithubOrg:
@@ -26,16 +27,14 @@ Parameters:
     Default: ""
     Description: >
       ARN of an existing `token.actions.githubusercontent.com` OIDC provider
-      in this AWS account. Leave blank to create a new one. The deploy.sh
-      onboarding script detects this automatically.
+      in this account. Leave blank to create one. The `litellmctl deploy aws`
+      onboarding CLI detects this automatically.
 
 Conditions:
   CreateOidcProvider: !Equals [!Ref ExistingOidcProviderArn, ""]
 
 Resources:
-  # OIDC provider (shared across any GHA role in this account).
-  # Only created if ExistingOidcProviderArn is blank — AWS only allows one
-  # provider per issuer URL per account.
+  # OIDC provider (one per issuer URL per account).
   GithubOidcProvider:
     Type: AWS::IAM::OIDCProvider
     Condition: CreateOidcProvider
@@ -46,22 +45,6 @@ Resources:
       ThumbprintList:
         - 6938fd4d98bab03faadb97b34396831e3780aea1
         - 1c58a3a8518e8759bf075b76b750d4f2df264fcd
-
-  # ── ECR repo — long-lived image store ──────────────────────────────────
-  # Lives in the bootstrap stack (not the main stack) so recreating the
-  # main stack doesn't collide with a retained repo and so ECR images
-  # survive tear-downs of the EC2 infrastructure.
-  EcrRepo:
-    Type: AWS::ECR::Repository
-    DeletionPolicy: Retain
-    UpdateReplacePolicy: Retain
-    Properties:
-      RepositoryName: !Ref AppName
-      ImageTagMutability: MUTABLE
-      ImageScanningConfiguration: { ScanOnPush: true }
-      LifecyclePolicy:
-        LifecyclePolicyText: |
-          {"rules":[{"rulePriority":1,"description":"Keep last 10 images","selection":{"tagStatus":"any","countType":"imageCountMoreThan","countNumber":10},"action":{"type":"expire"}}]}
 
   DeployRole:
     Type: AWS::IAM::Role
@@ -80,11 +63,9 @@ Resources:
             Condition:
               StringEquals:
                 "token.actions.githubusercontent.com:aud": sts.amazonaws.com
-              # Trust boundary is the repo. Any workflow in this repo — push,
-              # pull_request, workflow_dispatch, tag — can assume this role.
-              # The role only has deploy permissions; restrict branches further
-              # via GitHub's own branch protection / environment rules if you
-              # need tighter control (see docs/docker.md).
+              # Trust boundary is the repo. Tighten to specific branches or
+              # environments via GitHub's own branch-protection / Actions
+              # Environment rules if needed.
               StringLike:
                 "token.actions.githubusercontent.com:sub":
                   - !Sub "repo:${GithubOrg}/${GithubRepo}:*"
@@ -93,22 +74,14 @@ Resources:
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
-              # ECR — repo create/update + image push. ecr:* is broad but matches
-              # the ec2:*/iam:* scope already granted below; tighten once the
-              # resource tree stabilises.
-              - Effect: Allow
-                Resource: "*"
-                Action:
-                  - ecr:*
-              # CloudFormation: deploy the main stack
+              # CloudFormation — deploy the main stack (EC2 + EBS + EIP + SG + IAM).
               - Effect: Allow
                 Resource: "*"
                 Action:
                   - cloudformation:*
-              # EC2 / IAM / SSM / logs — permissive in V1, tighten once the
-              # resource tree stabilises. ssm:* covers both SendCommand (for
-              # the in-place deploy step) AND GetParameters (which CFN calls
-              # during change-set validation to resolve the AMI lookup).
+              # EC2 / IAM / SSM / logs — permissive in V1 to keep the
+              # onboarding frictionless; tighten later via a scoped policy
+              # generated from CloudTrail actual-usage.
               - Effect: Allow
                 Resource: "*"
                 Action:
@@ -121,16 +94,16 @@ Outputs:
   RoleArn:
     Description: "Paste this into GitHub secret AWS_DEPLOY_ROLE_ARN"
     Value: !GetAtt DeployRole.Arn
-  EcrRepositoryUri:
-    Description: "Docker image destination — consumed by the deploy workflow"
-    Value: !GetAtt EcrRepo.RepositoryUri
-    Export: { Name: !Sub "${AppName}-ecr-uri" }
   Instructions:
     Value: !Sub |
-      Now set these GitHub Actions secrets on your repo:
-        AWS_DEPLOY_ROLE_ARN = ${DeployRole.Arn}
-        AWS_REGION          = <your region, e.g. us-east-1>
-        APP_NAME            = ${AppName}
-        LITELLM_MASTER_KEY  = sk-$(openssl rand -hex 24)    # any long secret
-        GATEWAY_ADMIN_EMAILS= you@example.com,...
-      Then push to main — the build and deploy workflows do the rest.
+      GitHub Actions secrets to set on your repo:
+        AWS_DEPLOY_ROLE_ARN  = ${DeployRole.Arn}
+        AWS_REGION           = <your region, e.g. us-east-1>
+        APP_NAME             = ${AppName}
+        GITHUB_ORG           = ${GithubOrg}
+        GITHUB_REPO          = ${GithubRepo}
+        LITELLM_MASTER_KEY   = sk-$(openssl rand -hex 24)   # any long secret
+        GATEWAY_ADMIN_EMAILS = you@example.com,...
+      Optional ProtonMail SMTP secrets for OTP delivery:
+        GATEWAY_PROTON_EMAIL, GATEWAY_PROTON_USERNAME,
+        GATEWAY_PROTON_PASSWORD, GATEWAY_PROTON_2FA_SECRET

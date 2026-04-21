@@ -39,8 +39,15 @@ function loadPty(): PtyLib | null {
 }
 
 export function consoleEnabled(): boolean {
-  if (process.env.LITELLM_HARNESS !== "docker") return false;
+  // Explicit opt-out always wins.
   if (process.env.GATEWAY_CONSOLE_ENABLED === "false") return false;
+  // Opt-in either by setting GATEWAY_CONSOLE_ENABLED=true OR by running
+  // under a known managed harness (docker container, CFN-provisioned EC2).
+  const enabled =
+    process.env.GATEWAY_CONSOLE_ENABLED === "true" ||
+    process.env.LITELLM_HARNESS === "docker" ||
+    process.env.LITELLM_HARNESS === "ec2";
+  if (!enabled) return false;
   return loadPty() !== null;
 }
 
