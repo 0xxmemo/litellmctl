@@ -109,11 +109,24 @@ export function spawnConsole(cols = 80, rows = 24): PtyHandle {
     env,
   });
 
+  // Bun's Subprocess.stdin is a FileSink — `.write()` only buffers, the
+  // bytes don't leave the gateway until `.flush()` is called. For a PTY
+  // where we push tiny frames (one per keystroke), we MUST flush after
+  // every write or the child sees nothing until a buffer threshold is hit.
+  const pushFrame = (frame: Uint8Array): void => {
+    try {
+      proc.stdin.write(frame);
+      // flush() returns a promise; fire-and-forget, errors go to stderr log.
+      const maybe = (proc.stdin as unknown as { flush?: () => unknown }).flush;
+      if (typeof maybe === "function") {
+        try { (maybe.call(proc.stdin) as Promise<unknown>)?.catch?.(() => {}); } catch {}
+      }
+    } catch {}
+  };
+
   // Send the initial window size straight away so bash's first prompt is
   // rendered at the right width. The proxy sets a default 24x80 otherwise.
-  try {
-    proc.stdin.write(frameResize(cols, rows));
-  } catch {}
+  pushFrame(frameResize(cols, rows));
 
   const dataSubscribers: ((d: string) => void)[] = [];
   const exitSubscribers: ((code: number) => void)[] = [];
@@ -164,15 +177,15 @@ export function spawnConsole(cols = 80, rows = 24): PtyHandle {
   return {
     write: (d) => {
       if (exited) return;
-      try { proc.stdin.write(frameInput(d)); } catch {}
+      pushFrame(frameInput(d));
     },
     resize: (c, r) => {
       if (exited) return;
-      try { proc.stdin.write(frameResize(c, r)); } catch {}
+      pushFrame(frameResize(c, r));
     },
     kill: () => {
       if (exited) return;
-      try { proc.stdin.write(KILL_FRAME); } catch {}
+      pushFrame(KILL_FRAME);
       try { proc.kill(); } catch {}
     },
     onData: (cb) => { dataSubscribers.push(cb); },
