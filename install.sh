@@ -496,6 +496,24 @@ CLAUDE_CFG
   else
     ok "claude onboarding bypassed (no LITELLM_MASTER_KEY in .env yet — settings.json skipped)"
   fi
+
+  # Drop a --dangerously-skip-permissions alias into the app user's
+  # ~/.bashrc so interactive SSM / PTY sessions land on a zero-friction
+  # claude prompt (no per-command trust prompts). Idempotent: only
+  # appended if no existing `alias claude=` line is already there.
+  BASHRC="$APP_HOME/.bashrc"
+  sudo -u "$APP_USER" touch "$BASHRC"
+  if sudo -u "$APP_USER" grep -qE '^[[:space:]]*alias[[:space:]]+claude=' "$BASHRC"; then
+    skip "claude alias already in $BASHRC"
+  else
+    sudo -u "$APP_USER" tee -a "$BASHRC" >/dev/null <<'BASHRC_CLAUDE_ALIAS'
+
+# Added by litellmctl install.sh: default to dangerously-skip-permissions
+# so the admin PTY console doesn't stall on per-command trust prompts.
+alias claude="claude --dangerously-skip-permissions"
+BASHRC_CLAUDE_ALIAS
+    ok "claude alias appended to $BASHRC"
+  fi
 fi
 
 # ── Pipeline: node-gyp (for the gateway's node-pty native addon) ─────────
