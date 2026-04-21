@@ -450,9 +450,14 @@ if [ "$WITH_CLAUDE" = 1 ]; then
     CC_MASTER_KEY="$(grep -E '^LITELLM_MASTER_KEY=' "$INSTALL_DIR/.env" | head -1 | cut -d= -f2- | sed -e 's/^["'"'"']//' -e 's/["'"'"']$//')"
   fi
 
-  info "Configuring Claude Code (onboarding bypass + gateway wiring) ..."
+  # On-host claude talks directly to the underlying LiteLLM proxy (port
+  # 4040) — NOT the gateway at :14041. The gateway is a consumer-facing
+  # layer that validates per-user API keys; the admin console on this
+  # box bypasses that layer and authenticates to litellm natively with
+  # LITELLM_MASTER_KEY as ANTHROPIC_API_KEY (no AUTH_TOKEN).
+  info "Configuring Claude Code (onboarding bypass + direct litellm wiring) ..."
   sudo -u "$APP_USER" -H \
-    env _CC_KEY="$CC_MASTER_KEY" _CC_URL="http://127.0.0.1:14041/v1" _CC_HOME="$APP_HOME" \
+    env _CC_KEY="$CC_MASTER_KEY" _CC_URL="http://127.0.0.1:4040" _CC_HOME="$APP_HOME" \
     bash <<'CLAUDE_CFG'
 set -eu
 command -v jq >/dev/null || { echo "jq not found — skipping claude config"; exit 0; }
@@ -475,20 +480,22 @@ if [ -n "${_CC_KEY:-}" ]; then
   CS="$_CC_HOME/.claude/settings.json"
   [ -f "$CS" ] || echo '{}' > "$CS"
   tmp=$(mktemp)
+  # Upsert the direct-litellm env. del() clears any stale
+  # ANTHROPIC_AUTH_TOKEN from a prior deploy that wired through the gateway.
   jq --arg key "$_CC_KEY" --arg url "$_CC_URL" '
     .env.ANTHROPIC_BASE_URL = $url |
-    .env.ANTHROPIC_AUTH_TOKEN = $key |
     .env.ANTHROPIC_API_KEY = $key |
     .env.ANTHROPIC_DEFAULT_OPUS_MODEL = "ultra" |
     .env.ANTHROPIC_DEFAULT_SONNET_MODEL = "plus" |
-    .env.ANTHROPIC_DEFAULT_HAIKU_MODEL = "lite"
+    .env.ANTHROPIC_DEFAULT_HAIKU_MODEL = "lite" |
+    del(.env.ANTHROPIC_AUTH_TOKEN)
   ' "$CS" > "$tmp" && mv "$tmp" "$CS"
   chmod 600 "$CS"
 fi
 CLAUDE_CFG
 
   if [ -n "$CC_MASTER_KEY" ]; then
-    ok "claude configured (onboarding bypassed, wired to http://127.0.0.1:14041/v1)"
+    ok "claude configured (onboarding bypassed, wired directly to litellm on :4040)"
   else
     ok "claude onboarding bypassed (no LITELLM_MASTER_KEY in .env yet — settings.json skipped)"
   fi
