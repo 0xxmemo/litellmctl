@@ -112,6 +112,27 @@ async function runCli(argv: string[]): Promise<void> {
         }
       }
 
+      // Signal handlers: flip the job to "failed" on clean termination so the
+      // next run isn't blocked waiting for the gateway's staleness reaper.
+      const collection = collectionName(identity.codebaseId);
+      let interrupted = false;
+      const markFailed = (reason: string): void => {
+        if (interrupted) return;
+        interrupted = true;
+        gatewayPost(config, "/api/plugins/claude-context/jobs", {
+          codebaseId: identity.codebaseId,
+          branch: identity.branch,
+          collection,
+          status: "failed",
+          error: reason,
+        })
+          .catch(() => {})
+          .finally(() => process.exit(130));
+      };
+      const onSignal = (sig: NodeJS.Signals): void => markFailed(`interrupted by ${sig}`);
+      process.on("SIGTERM", onSignal);
+      process.on("SIGINT", onSignal);
+
       try {
         const result = await runSync(config, absPath, identity);
         if (result.shortCircuit) {

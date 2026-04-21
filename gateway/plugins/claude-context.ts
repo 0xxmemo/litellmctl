@@ -96,6 +96,24 @@ export interface IndexingJob {
   updated_at: number;
 }
 
+// Any job stuck in "indexing" with no heartbeat for this long is assumed dead
+// (client killed mid-run). Reaper flips it to "failed" lazily on read, so the
+// next index attempt isn't blocked by a ghost.
+const STALE_JOB_MS = 120_000;
+
+function reapIfStale(job: IndexingJob): IndexingJob {
+  if (job.status !== "indexing") return job;
+  const now = Date.now();
+  if (now - job.updated_at <= STALE_JOB_MS) return job;
+  const error = "heartbeat timeout";
+  db.prepare(
+    `UPDATE plugin_indexing_jobs
+        SET status = 'failed', error = ?, updated_at = ?
+      WHERE codebase_id = ? AND branch = ?`,
+  ).run(error, now, job.codebase_id, job.branch);
+  return { ...job, status: "failed", error, updated_at: now };
+}
+
 // ── Route handlers ────────────────────────────────────────────────────────────
 
 // POST /jobs — upsert by (codebase_id, branch).
@@ -172,22 +190,22 @@ async function handleGetJobs(req: Request): Promise<Response> {
       )
       .get(codebaseId, branch) as IndexingJob | undefined;
     if (!job) return Response.json({ status: "not_found" }, { status: 404 });
-    return Response.json(job);
+    return Response.json(reapIfStale(job));
   }
 
   if (codebaseId) {
     if (!isValidCodebaseId(codebaseId)) return errJson("invalid codebaseId");
-    const jobs = db
+    const jobs = (db
       .prepare(
         "SELECT * FROM plugin_indexing_jobs WHERE codebase_id = ? ORDER BY updated_at DESC",
       )
-      .all(codebaseId) as IndexingJob[];
+      .all(codebaseId) as IndexingJob[]).map(reapIfStale);
     return Response.json({ jobs });
   }
 
-  const jobs = db
+  const jobs = (db
     .prepare("SELECT * FROM plugin_indexing_jobs ORDER BY updated_at DESC")
-    .all() as IndexingJob[];
+    .all() as IndexingJob[]).map(reapIfStale);
   return Response.json({ jobs });
 }
 
@@ -335,12 +353,13 @@ async function handleSearch(req: Request): Promise<Response> {
 
   const row = db
     .prepare(
-      "SELECT collection, status FROM plugin_indexing_jobs WHERE codebase_id = ? AND branch = ?",
+      "SELECT * FROM plugin_indexing_jobs WHERE codebase_id = ? AND branch = ?",
     )
-    .get(codebaseId, branch) as { collection: string; status: string } | undefined;
+    .get(codebaseId, branch) as IndexingJob | undefined;
 
   if (!row) return Response.json({ error: "not_indexed" }, { status: 404 });
-  if (!hasCollection(row.collection)) {
+  const job = reapIfStale(row);
+  if (!hasCollection(job.collection)) {
     return Response.json({ error: "collection_missing" }, { status: 404 });
   }
 
@@ -352,13 +371,13 @@ async function handleSearch(req: Request): Promise<Response> {
   }
 
   const results = searchVectors(
-    row.collection,
+    job.collection,
     queryVector,
     Math.min(limit, 50),
     null,
     buildRefId(codebaseId as string, branch as string),
   );
-  const indexing = row.status === "indexing";
+  const indexing = job.status === "indexing";
 
   return Response.json({ results, indexing });
 }
