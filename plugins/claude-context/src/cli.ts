@@ -10,6 +10,7 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 import { Context } from './core/context';
@@ -48,7 +49,11 @@ function parseArgs(argv: string[]): ParsedArgs {
     return out;
 }
 
-function buildContext(): { context: Context; snapshot: SnapshotManager } {
+function buildContext(): {
+    context: Context;
+    snapshot: SnapshotManager;
+    vectorDatabase: GatewayVectorDatabase;
+} {
     const baseUrl = process.env.LLM_GATEWAY_URL;
     const apiKey = process.env.LLM_GATEWAY_API_KEY;
     if (!baseUrl || !apiKey) {
@@ -71,7 +76,55 @@ function buildContext(): { context: Context; snapshot: SnapshotManager } {
     });
     const snapshot = new SnapshotManager();
     snapshot.loadCodebaseSnapshot();
-    return { context, snapshot };
+    return { context, snapshot, vectorDatabase };
+}
+
+function resolveStateDir(): string {
+    return (
+        process.env.CLAUDE_CONTEXT_STATE_DIR ||
+        path.join(os.homedir(), '.litellm', 'plugin-state', 'claude-context')
+    );
+}
+
+/**
+ * PID-file lock for concurrent index runs on the same codebase. Returns a
+ * release callback if acquired, or null if another live process holds it.
+ */
+function acquireIndexLock(lockPath: string): (() => void) | null {
+    try {
+        if (fs.existsSync(lockPath)) {
+            const raw = fs.readFileSync(lockPath, 'utf8').trim();
+            const pid = parseInt(raw, 10);
+            if (Number.isFinite(pid) && pid > 0) {
+                try {
+                    process.kill(pid, 0);
+                    return null; // holder is alive
+                } catch {
+                    // stale — fall through to overwrite
+                }
+            }
+        }
+        fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+        fs.writeFileSync(lockPath, String(process.pid));
+    } catch (err) {
+        log(`index-lock: unable to acquire (${err instanceof Error ? err.message : String(err)}) — proceeding without`);
+        return () => {};
+    }
+
+    let released = false;
+    const release = () => {
+        if (released) return;
+        released = true;
+        try {
+            const raw = fs.readFileSync(lockPath, 'utf8').trim();
+            if (parseInt(raw, 10) === process.pid) fs.unlinkSync(lockPath);
+        } catch { /* already gone */ }
+    };
+    const onExit = () => release();
+    process.on('exit', onExit);
+    process.on('SIGINT', () => { release(); process.exit(130); });
+    process.on('SIGTERM', () => { release(); process.exit(143); });
+    return release;
 }
 
 function isOnAutoIndexBlocklist(absPath: string): boolean {
@@ -98,32 +151,94 @@ async function cmdIndex(args: ParsedArgs): Promise<number> {
     }
 
     const { context, snapshot } = buildContext();
-    const isIndexed = snapshot.getIndexedCodebases().includes(absPath);
-    const vectorHasIndex = await context.hasIndex(absPath);
-
-    // Incremental path: snapshot says indexed and the collection still exists.
-    if (isIndexed && vectorHasIndex && !args.force) {
-        log(`reindexByChange ${absPath}`);
-        const stats = await context.reindexByChange(absPath, (p) =>
-            log(`${p.phase} (${p.percentage}%)`),
-        );
-        process.stdout.write(JSON.stringify({ mode: 'incremental', ...stats }) + '\n');
+    const collectionName = context.getCollectionName(absPath);
+    const lockPath = path.join(resolveStateDir(), `index-${collectionName}.lock`);
+    const release = acquireIndexLock(lockPath);
+    if (release === null) {
+        const holder = (() => {
+            try { return parseInt(fs.readFileSync(lockPath, 'utf8').trim(), 10); }
+            catch { return 0; }
+        })();
+        log(`index-lock: another indexer holds ${lockPath} (pid=${holder}) — skipping`);
+        process.stdout.write(JSON.stringify({ skipped: true, reason: 'already_indexing', pid: holder }) + '\n');
         return 0;
     }
 
-    // Full index path.
-    log(`indexCodebase ${absPath}${args.force ? ' (force)' : ''}`);
-    const stats = await context.indexCodebase(
-        absPath,
-        (p) => log(`${p.phase} (${p.percentage}%)`),
-        args.force === true,
-    );
-    if (stats.indexedFiles > 0 || stats.totalChunks > 0) {
-        snapshot.setCodebaseIndexed(absPath, stats);
-        snapshot.saveCodebaseSnapshot();
+    // Throttle progress saves to at most once per 2s so the snapshot lock
+    // isn't hammered when processFiles fires the callback per file.
+    let lastSaveMs = 0;
+    let lastPct = 0;
+    const persistProgress = (pct: number, force = false) => {
+        lastPct = pct;
+        const now = Date.now();
+        if (!force && now - lastSaveMs < 2000) return;
+        lastSaveMs = now;
+        try {
+            snapshot.setCodebaseIndexing(absPath, pct);
+            snapshot.saveCodebaseSnapshot();
+        } catch (err) {
+            log(`snapshot: progress save failed (${err instanceof Error ? err.message : String(err)})`);
+        }
+    };
+
+    try {
+        const isIndexed = snapshot.getIndexedCodebases().includes(absPath);
+        const vectorHasIndex = await context.hasIndex(absPath);
+
+        // Incremental path: snapshot says indexed and the collection still exists.
+        if (isIndexed && vectorHasIndex && !args.force) {
+            log(`reindexByChange ${absPath}`);
+            persistProgress(0, true);
+            const stats = await context.reindexByChange(absPath, (p) => {
+                log(`${p.phase} (${p.percentage}%)`);
+                persistProgress(p.percentage);
+            });
+            // Restore the indexed record with unchanged file/chunk counts from
+            // the prior snapshot (reindexByChange returns deltas, not totals).
+            const prior = snapshot.getCodebaseInfo(absPath);
+            const priorFiles = prior && prior.status === 'indexed' ? prior.indexedFiles : 0;
+            const priorChunks = prior && prior.status === 'indexed' ? prior.totalChunks : 0;
+            if (priorFiles > 0 || priorChunks > 0) {
+                snapshot.setCodebaseIndexed(absPath, {
+                    indexedFiles: priorFiles,
+                    totalChunks: priorChunks,
+                    status: 'completed',
+                });
+                snapshot.saveCodebaseSnapshot();
+            }
+            process.stdout.write(JSON.stringify({ mode: 'incremental', ...stats }) + '\n');
+            return 0;
+        }
+
+        // Full index path.
+        log(`indexCodebase ${absPath}${args.force ? ' (force)' : ''}`);
+        persistProgress(0, true);
+        const stats = await context.indexCodebase(
+            absPath,
+            (p) => {
+                log(`${p.phase} (${p.percentage}%)`);
+                persistProgress(p.percentage);
+            },
+            args.force === true,
+        );
+        if (stats.indexedFiles > 0 || stats.totalChunks > 0) {
+            snapshot.setCodebaseIndexed(absPath, stats);
+            snapshot.saveCodebaseSnapshot();
+        }
+        process.stdout.write(JSON.stringify({ mode: 'full', ...stats }) + '\n');
+        return 0;
+    } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        try {
+            snapshot.setCodebaseIndexFailed(absPath, msg, lastPct);
+            snapshot.saveCodebaseSnapshot();
+        } catch (saveErr) {
+            log(`snapshot: failure record save failed (${saveErr instanceof Error ? saveErr.message : String(saveErr)})`);
+        }
+        throw err;
+    } finally {
+        release();
     }
-    process.stdout.write(JSON.stringify({ mode: 'full', ...stats }) + '\n');
-    return 0;
 }
 
 async function cmdSearch(args: ParsedArgs): Promise<number> {
@@ -165,11 +280,32 @@ async function cmdSearch(args: ParsedArgs): Promise<number> {
 async function cmdStatus(args: ParsedArgs): Promise<number> {
     if (!args.path) die(1, 'status: --path is required');
     const absPath = ensureAbsolutePath(args.path!);
-    const { snapshot } = buildContext();
+    const { context, snapshot, vectorDatabase } = buildContext();
     const status = snapshot.getCodebaseStatus(absPath);
     const progress = snapshot.getIndexingProgress(absPath);
     const info = snapshot.getCodebaseInfo(absPath);
-    process.stdout.write(JSON.stringify({ path: absPath, status, progress, info }) + '\n');
+
+    const collectionName = context.getCollectionName(absPath);
+    let collectionPresent = false;
+    let collectionRowCount = -1;
+    try {
+        collectionRowCount = await vectorDatabase.getCollectionRowCount(collectionName);
+        collectionPresent = collectionRowCount >= 0;
+    } catch (err) {
+        log(`status: row-count probe failed (${err instanceof Error ? err.message : String(err)})`);
+    }
+
+    process.stdout.write(
+        JSON.stringify({
+            path: absPath,
+            status,
+            progress,
+            info,
+            collectionName,
+            collectionPresent,
+            collectionRowCount,
+        }) + '\n',
+    );
     return 0;
 }
 
