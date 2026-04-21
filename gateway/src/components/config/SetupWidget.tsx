@@ -39,7 +39,7 @@ export function SetupWidget({ apiKey, baseUrl }: SetupWidgetProps) {
             <select
               value={selectedOption}
               onChange={(e) => setSelectedOption(e.target.value)}
-              className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="glass glass--outline gateway-select"
             >
               {options.map((option) => (
                 <option key={option.id} value={option.id}>
@@ -58,7 +58,7 @@ export function SetupWidget({ apiKey, baseUrl }: SetupWidgetProps) {
             return (
               <div key={option.id} className="space-y-3">
                 {/* Command */}
-                <div className="rounded-md border bg-muted/40 p-4">
+                <div className="rounded-lg border border-border/50 bg-muted/35 p-4 backdrop-blur-md dark:border-white/5">
                   <div className="flex items-center justify-between gap-4">
                     <code className="text-xs break-all font-mono text-muted-foreground select-all">
                       {installCmd}

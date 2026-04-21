@@ -40,7 +40,7 @@ export function SkillsInstall({ apiKey, baseUrl }: SkillsInstallProps) {
               <select
                 value={selectedTarget}
                 onChange={(e) => setSelectedTarget(e.target.value)}
-                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="glass glass--outline gateway-select"
               >
                 {targets.map((target) => (
                   <option key={target.id} value={target.id}>
@@ -66,7 +66,7 @@ export function SkillsInstall({ apiKey, baseUrl }: SkillsInstallProps) {
               const isUninstallVisible = showUninstall[skill.slug] ?? false;
 
               return (
-                <div key={skill.slug} className="rounded-md border bg-muted/40 p-4 space-y-3">
+                <div key={skill.slug} className="space-y-3 rounded-lg border border-border/50 bg-muted/35 p-4 backdrop-blur-md dark:border-white/5">
                   <div className="flex items-start justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <h4 className="text-sm font-semibold">{skill.name}</h4>

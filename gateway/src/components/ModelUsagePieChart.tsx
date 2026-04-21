@@ -148,7 +148,7 @@ export function ModelUsagePieChart({ data }: ModelUsagePieChartProps) {
         <div className="mt-4 -mx-1">
           <div className="max-h-64 sm:max-h-80 overflow-y-auto overflow-x-auto rounded-sm">
           <Table className="text-xs min-w-[340px]">
-            <TableHeader className="sticky top-0 bg-card z-10">
+            <TableHeader className="glass glass--muted sticky top-0 z-10 shadow-none">
               <TableRow className="h-7">
                 <TableHead className="py-1.5 pl-2 pr-1 w-auto">Model</TableHead>
                 <TableHead className="py-1.5 px-2 w-16 text-right hidden sm:table-cell">Reqs</TableHead>

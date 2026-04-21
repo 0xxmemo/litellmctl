@@ -175,8 +175,8 @@ export function Admin() {
 
       {/* Add User Modal */}
       {showAddModal && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-card border rounded-xl w-full max-w-md shadow-2xl my-8">
+        <div className="glass-overlay fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-3 sm:p-4">
+          <div className="glass glass--muted my-8 w-full max-w-md rounded-xl text-card-foreground shadow-none">
             <div className="p-4 sm:p-6">
               <h2 className="text-lg sm:text-xl font-bold mb-4">Add New User</h2>
               <form onSubmit={handleAddUser} className="space-y-4">
@@ -200,7 +200,7 @@ export function Admin() {
                   <select
                     value={newUserRole}
                     onChange={e => setNewUserRole(e.target.value as 'user' | 'admin')}
-                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+                    className="glass glass--outline gateway-select"
                   >
                     <option value="user">User</option>
                     <option value="admin">Admin</option>
@@ -252,8 +252,8 @@ export function Admin() {
 
       {/* Delete Confirmation Modal */}
       {deleteTarget && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-3 sm:p-4 overflow-y-auto">
-          <div className="bg-card border rounded-xl w-full max-w-sm shadow-2xl my-8">
+        <div className="glass-overlay fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-3 sm:p-4">
+          <div className="glass glass--muted my-8 w-full max-w-sm rounded-xl text-card-foreground shadow-none">
             <div className="p-4 sm:p-6">
               <h2 className="text-lg sm:text-xl font-bold mb-2">Remove User?</h2>
               <p className="text-muted-foreground text-sm mb-6 break-words">
@@ -323,7 +323,7 @@ export function Admin() {
                 {pendingUsers.map(user => (
                   <div
                     key={user.email}
-                    className="flex items-center justify-between gap-3 p-4 border rounded-lg hover:bg-muted/50 transition-colors"
+                    className="flex items-center justify-between gap-3 rounded-lg border border-border/50 p-4 backdrop-blur-sm transition-colors hover:bg-muted/40 dark:border-white/5"
                   >
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -492,8 +492,8 @@ export function Admin() {
 
       {/* Disapprove All Confirmation Dialog */}
       {showDisapproveConfirm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-card border border-red-500/30 rounded-xl w-full max-w-md shadow-2xl">
+        <div className="glass-overlay fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="glass glass--muted w-full max-w-md rounded-xl text-card-foreground shadow-none ring-1 ring-red-500/40">
             <div className="p-6">
               <div className="flex items-center gap-2 mb-4">
                 <AlertTriangle className="h-6 w-6 text-red-500" />
@@ -539,8 +539,8 @@ export function Admin() {
 
       {/* Revoke All Keys Confirmation Dialog */}
       {showRevokeAllConfirm && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-          <div className="bg-card border border-red-500/30 rounded-xl w-full max-w-md shadow-2xl">
+        <div className="glass-overlay fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="glass glass--muted w-full max-w-md rounded-xl text-card-foreground shadow-none ring-1 ring-red-500/40">
             <div className="p-6">
               <div className="flex items-center gap-2 mb-4">
                 <AlertTriangle className="h-6 w-6 text-red-500" />

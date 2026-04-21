@@ -58,7 +58,7 @@ export function TopBar({ auth, onLogout }: TopBarProps) {
               <Button
                 variant="ghost"
                 size="sm"
-                className="w-full justify-start text-red-500 hover:text-red-600 hover:bg-red-50"
+                className="w-full justify-start text-red-500 hover:bg-red-500/10 hover:text-red-600 dark:hover:bg-red-950/40"
                 onClick={onLogout}
               >
                 <LogOut className="w-4 h-4 mr-2" />

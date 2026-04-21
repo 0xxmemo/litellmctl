@@ -283,7 +283,7 @@ export function Console() {
       }
     >
       {/* Toolbar */}
-      <div className="flex items-center justify-between gap-3 px-4 py-2 border-b border-border bg-card/40">
+      <div className="glass glass--muted flex items-center justify-between gap-3 border-b border-border/40 px-4 py-2 shadow-none">
         <div className="flex items-center gap-3 min-w-0">
           <h1 className="text-sm font-semibold tracking-tight">Admin Console</h1>
           <span
@@ -330,7 +330,7 @@ export function Console() {
 
       {/* Search bar */}
       {searchOpen && (
-        <div className="flex items-center gap-2 px-4 py-1.5 border-b border-border bg-card/20">
+        <div className="glass glass--muted-dim flex items-center gap-2 border-b border-border/40 px-4 py-1.5 shadow-none">
           <Search className="w-3.5 h-3.5 text-muted-foreground" />
           <input
             autoFocus
@@ -362,7 +362,7 @@ export function Console() {
 
       {/* Hint bar */}
       {!fullscreen && (
-        <div className="px-4 py-1 text-[11px] text-muted-foreground/70 border-t border-border bg-card/20 flex items-center gap-4">
+        <div className="glass glass--muted-dim flex items-center gap-4 border-t border-border/40 px-4 py-1 text-[11px] text-muted-foreground/70 shadow-none">
           <span>
             <kbd className="px-1 rounded bg-muted text-muted-foreground">litellmctl</kbd>{' '}
             <kbd className="px-1 rounded bg-muted text-muted-foreground">claude</kbd>{' '}

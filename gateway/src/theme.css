@@ -1,0 +1,168 @@
+/* Semantic UI tokens (--ui-*, layout, brand aliases) for glass + components.
+ * Base palette: `src/index.css` @theme (--color-*). Ported from ref/opentrade theme-semantic.css. */
+
+:root {
+  --max-width: 1024px;
+  --nav-height: 72px;
+
+  --bg-base: var(--color-background);
+  --text-primary: var(--color-foreground);
+  --text-secondary: var(--color-muted-foreground);
+  --text-muted: var(--color-muted-foreground);
+  --text-code: var(--color-foreground);
+  --bg-card: var(--color-card);
+  --bg-border: var(--color-border);
+  --bg-surface: var(--color-secondary);
+  --bg-hover: var(--color-accent);
+
+  --brand-orange: var(--color-primary);
+  --brand-orange-deep: color-mix(in srgb, var(--color-primary) 85%, black 15%);
+  --brand-orange-glow: color-mix(in srgb, var(--color-primary) 65%, white 35%);
+  --brand-orange-soft: color-mix(in srgb, var(--color-primary) 20%, transparent);
+  --brand-orange-surface: color-mix(
+    in srgb,
+    var(--color-primary) 14%,
+    var(--color-secondary)
+  );
+  --brand-orange-surface-muted: color-mix(
+    in srgb,
+    var(--color-primary) 8%,
+    var(--color-background)
+  );
+  --brand-orange-border: color-mix(in srgb, var(--color-primary) 42%, transparent);
+  --brand-orange-text-muted: color-mix(
+    in srgb,
+    var(--color-primary) 38%,
+    var(--color-muted-foreground) 62%
+  );
+
+  --btn-primary-bg: var(--color-primary);
+  --btn-primary-fg: var(--color-primary-foreground);
+  --btn-primary-border: color-mix(
+    in srgb,
+    var(--color-primary) 72%,
+    var(--color-border) 28%
+  );
+  --btn-primary-hover-bg: color-mix(in srgb, var(--color-primary) 88%, black 12%);
+
+  --green: var(--color-chart-2);
+  --cyan: var(--color-chart-5);
+  --yellow: var(--color-chart-4);
+  --purple: var(--color-chart-3);
+  --pink: color-mix(in srgb, var(--color-chart-4) 65%, var(--color-muted) 35%);
+  --orange: var(--color-primary);
+  --red: var(--color-destructive);
+
+  --ui-success-fg: color-mix(in srgb, var(--color-foreground) 86%, var(--green) 14%);
+  --ui-success-bg: color-mix(in srgb, var(--green) 18%, var(--color-background));
+  --ui-success-border: color-mix(in srgb, var(--green) 40%, var(--color-border));
+
+  --ui-warning-fg: color-mix(in srgb, var(--color-foreground) 84%, var(--yellow) 16%);
+  --ui-warning-bg: color-mix(in srgb, var(--yellow) 16%, var(--color-background));
+  --ui-warning-border: color-mix(in srgb, var(--yellow) 38%, transparent);
+
+  --ui-danger-fg: color-mix(in srgb, var(--color-foreground) 82%, var(--red) 18%);
+  --ui-danger-bg: color-mix(in srgb, var(--red) 18%, var(--color-background));
+  --ui-danger-border: color-mix(in srgb, var(--red) 42%, transparent);
+
+  --ui-danger-soft-bg: color-mix(in srgb, var(--red) 12%, var(--color-background));
+  --ui-danger-soft-border: color-mix(in srgb, var(--red) 32%, transparent);
+
+  --ui-danger-badge-bg: color-mix(in srgb, var(--red) 26%, var(--color-background));
+  --ui-danger-badge-fg: color-mix(in srgb, var(--color-foreground) 92%, var(--red) 8%);
+
+  --ui-info-fg: color-mix(in srgb, var(--color-foreground) 82%, var(--cyan) 18%);
+  --ui-info-bg: color-mix(in srgb, var(--cyan) 14%, var(--color-background));
+  --ui-info-border: color-mix(in srgb, var(--cyan) 34%, transparent);
+
+  --ui-info-muted-bg: color-mix(in srgb, var(--cyan) 10%, var(--color-background));
+  --ui-info-muted-fg: color-mix(in srgb, var(--color-foreground) 78%, var(--cyan) 22%);
+
+  --ui-accent-fg: color-mix(in srgb, var(--color-foreground) 82%, var(--purple) 18%);
+  --ui-accent-bg: color-mix(in srgb, var(--purple) 16%, var(--color-background));
+  --ui-accent-border: color-mix(in srgb, var(--purple) 38%, transparent);
+
+  --ui-brand-fg: color-mix(in srgb, var(--color-foreground) 80%, var(--orange) 20%);
+  --ui-brand-bg: color-mix(in srgb, var(--orange) 16%, var(--color-background));
+  --ui-brand-border: color-mix(in srgb, var(--orange) 38%, transparent);
+
+  --ui-cover-fg: color-mix(in srgb, var(--color-foreground) 82%, var(--pink) 18%);
+  --ui-cover-bg: color-mix(in srgb, var(--pink) 14%, var(--color-background));
+  --ui-cover-border: color-mix(in srgb, var(--pink) 32%, transparent);
+
+  --ui-pass-fg: color-mix(in srgb, var(--color-foreground) 84%, var(--yellow) 16%);
+  --ui-pass-bg: color-mix(in srgb, var(--yellow) 14%, var(--color-background));
+  --ui-pass-border: color-mix(in srgb, var(--yellow) 30%, transparent);
+
+  --ui-link-fg: var(--color-primary);
+  --ui-link-hover-fg: var(--color-foreground);
+
+  --ui-long-fg: color-mix(in srgb, var(--green) 75%, var(--color-foreground) 25%);
+  --ui-short-fg: color-mix(in srgb, var(--purple) 75%, var(--color-foreground) 25%);
+
+  --ui-positive-fg: var(--ui-success-fg);
+  --ui-negative-fg: var(--ui-danger-fg);
+
+  --ui-cta-warn: var(--yellow);
+  --ui-cta-warn-hover: color-mix(in srgb, var(--yellow) 85%, black 15%);
+  --ui-cta-warn-fg: var(--color-foreground);
+
+  --ui-cta-ok: var(--green);
+  --ui-cta-ok-hover: color-mix(in srgb, var(--green) 82%, black 18%);
+  --ui-cta-ok-fg: var(--color-foreground);
+
+  --ui-cta-danger: var(--red);
+  --ui-cta-danger-hover: color-mix(in srgb, var(--red) 88%, black 12%);
+  --ui-cta-danger-fg: var(--color-foreground);
+
+  --ui-cta-danger-strong: color-mix(in srgb, var(--red) 65%, black 35%);
+  --ui-cta-danger-strong-hover: color-mix(in srgb, var(--red) 55%, black 45%);
+
+  --ui-edge-warning: var(--ui-warning-fg);
+}
+
+html.light {
+  --ui-success-fg: color-mix(in srgb, var(--color-foreground) 90%, var(--green) 10%);
+  --ui-success-bg: color-mix(in srgb, var(--green) 12%, var(--color-card));
+  --ui-success-border: color-mix(in srgb, var(--green) 32%, var(--color-border));
+
+  --ui-warning-fg: color-mix(in srgb, var(--color-foreground) 88%, var(--yellow) 12%);
+  --ui-warning-bg: color-mix(in srgb, var(--yellow) 12%, var(--color-card));
+  --ui-warning-border: color-mix(in srgb, var(--yellow) 30%, transparent);
+
+  --ui-danger-fg: color-mix(in srgb, var(--color-foreground) 90%, var(--red) 10%);
+  --ui-danger-bg: color-mix(in srgb, var(--red) 12%, var(--color-card));
+  --ui-danger-border: color-mix(in srgb, var(--red) 32%, transparent);
+
+  --ui-danger-soft-bg: color-mix(in srgb, var(--red) 8%, var(--color-card));
+  --ui-danger-soft-border: color-mix(in srgb, var(--red) 26%, transparent);
+
+  --ui-danger-badge-bg: color-mix(in srgb, var(--red) 18%, var(--color-card));
+  --ui-danger-badge-fg: color-mix(in srgb, var(--color-foreground) 92%, var(--red) 8%);
+
+  --ui-info-fg: color-mix(in srgb, var(--color-foreground) 88%, var(--cyan) 12%);
+  --ui-info-bg: color-mix(in srgb, var(--cyan) 10%, var(--color-card));
+  --ui-info-border: color-mix(in srgb, var(--cyan) 28%, transparent);
+
+  --ui-info-muted-bg: color-mix(in srgb, var(--cyan) 6%, var(--color-card));
+  --ui-info-muted-fg: color-mix(in srgb, var(--color-foreground) 84%, var(--cyan) 16%);
+
+  --ui-accent-fg: color-mix(in srgb, var(--color-foreground) 88%, var(--purple) 12%);
+  --ui-accent-bg: color-mix(in srgb, var(--purple) 12%, var(--color-card));
+  --ui-accent-border: color-mix(in srgb, var(--purple) 32%, transparent);
+
+  --ui-brand-fg: color-mix(in srgb, var(--color-foreground) 86%, var(--orange) 14%);
+  --ui-brand-bg: color-mix(in srgb, var(--orange) 12%, var(--color-card));
+  --ui-brand-border: color-mix(in srgb, var(--orange) 34%, transparent);
+
+  --ui-cover-fg: color-mix(in srgb, var(--color-foreground) 88%, var(--pink) 12%);
+  --ui-cover-bg: color-mix(in srgb, var(--pink) 10%, var(--color-card));
+  --ui-cover-border: color-mix(in srgb, var(--pink) 28%, transparent);
+
+  --ui-pass-fg: color-mix(in srgb, var(--color-foreground) 86%, var(--yellow) 14%);
+  --ui-pass-bg: color-mix(in srgb, var(--yellow) 10%, var(--color-card));
+  --ui-pass-border: color-mix(in srgb, var(--yellow) 26%, transparent);
+
+  --ui-long-fg: color-mix(in srgb, var(--green) 55%, var(--color-foreground) 45%);
+  --ui-short-fg: color-mix(in srgb, var(--purple) 55%, var(--color-foreground) 45%);
+}

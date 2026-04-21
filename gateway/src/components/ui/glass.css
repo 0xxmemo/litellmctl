@@ -1,0 +1,202 @@
+/* Ported from ref/opentrade/gateway/app/components/ui/glass.css — uses Tailwind @theme tokens (--color-*) */
+
+.glass {
+  -webkit-backdrop-filter: blur(80px) saturate(1.6) brightness(1.1);
+  backdrop-filter: blur(80px) saturate(1.6) brightness(1.1);
+  border: 1px solid color-mix(in srgb, white 18%, transparent);
+  box-shadow: inset 0 1px 0 0 color-mix(in srgb, white 14%, transparent), inset
+    0 -1px 0 0 color-mix(in srgb, white 6%, transparent), 0 1px 3px
+    color-mix(in srgb, black 8%, transparent);
+}
+
+html.light .glass {
+  -webkit-backdrop-filter: blur(80px) saturate(1.6) brightness(1.06);
+  backdrop-filter: blur(80px) saturate(1.6) brightness(1.06);
+  border-color: color-mix(in srgb, black 8%, transparent);
+  box-shadow: inset 0 1px 0 0 color-mix(in srgb, white 40%, transparent), inset
+    0 -1px 0 0 color-mix(in srgb, white 20%, transparent), 0 1px 3px
+    color-mix(in srgb, black 6%, transparent);
+}
+
+.glass--primary {
+  background: color-mix(in srgb, var(--color-primary) 35%, transparent);
+  color: var(--color-primary-foreground);
+}
+
+html.light .glass--primary {
+  background: color-mix(in srgb, var(--color-primary) 30%, transparent);
+  color: var(--color-primary-foreground);
+}
+
+.glass--primary:hover {
+  background: color-mix(in srgb, var(--color-primary) 45%, transparent);
+}
+
+.glass--secondary {
+  background: color-mix(in srgb, var(--color-secondary) 30%, transparent);
+  color: var(--color-secondary-foreground);
+}
+
+html.light .glass--secondary {
+  background: color-mix(in srgb, var(--color-secondary) 25%, transparent);
+  color: var(--color-secondary-foreground);
+}
+
+.glass--secondary:hover {
+  background: color-mix(in srgb, var(--color-secondary) 40%, transparent);
+}
+
+.glass--destructive {
+  background: color-mix(in srgb, var(--color-destructive) 28%, transparent);
+  color: var(--color-destructive-foreground);
+}
+
+html.light .glass--destructive {
+  background: color-mix(in srgb, var(--color-destructive) 22%, transparent);
+  color: var(--color-destructive-foreground);
+}
+
+.glass--destructive:hover {
+  background: color-mix(in srgb, var(--color-destructive) 38%, transparent);
+}
+
+.glass--muted {
+  background: color-mix(in srgb, var(--color-muted) 32%, transparent);
+  color: var(--color-foreground);
+}
+
+html.light .glass--muted {
+  background: color-mix(in srgb, var(--color-muted) 28%, transparent);
+  color: var(--color-foreground);
+}
+
+.glass--muted:hover {
+  background: color-mix(in srgb, var(--color-muted) 40%, transparent);
+}
+
+.glass--outline {
+  background: color-mix(in srgb, var(--color-foreground) 8%, transparent);
+  color: var(--color-foreground);
+  border-color: var(--color-border);
+}
+
+html.light .glass--outline {
+  background: color-mix(in srgb, var(--color-foreground) 5%, transparent);
+  color: var(--color-foreground);
+}
+
+.glass--outline:hover {
+  background: color-mix(in srgb, var(--color-muted) 22%, transparent);
+}
+
+/* Semantic pills (badges, chips) */
+.glass--success {
+  background: color-mix(in srgb, var(--ui-success-bg) 44%, transparent);
+  color: var(--ui-success-fg);
+  border-color: color-mix(in srgb, var(--ui-success-border) 58%, transparent);
+}
+
+html.light .glass--success {
+  background: color-mix(in srgb, var(--ui-success-bg) 36%, transparent);
+  border-color: color-mix(in srgb, var(--ui-success-border) 45%, transparent);
+}
+
+.glass--warning {
+  background: color-mix(in srgb, var(--ui-warning-bg) 44%, transparent);
+  color: var(--ui-warning-fg);
+  border-color: color-mix(in srgb, var(--ui-warning-border) 55%, transparent);
+}
+
+html.light .glass--warning {
+  background: color-mix(in srgb, var(--ui-warning-bg) 34%, transparent);
+}
+
+.glass--ui-danger {
+  background: color-mix(in srgb, var(--ui-danger-bg) 42%, transparent);
+  color: var(--ui-danger-fg);
+  border-color: color-mix(in srgb, var(--ui-danger-border) 52%, transparent);
+}
+
+html.light .glass--ui-danger {
+  background: color-mix(in srgb, var(--ui-danger-bg) 32%, transparent);
+}
+
+.glass--accent {
+  background: color-mix(in srgb, var(--ui-accent-bg) 42%, transparent);
+  color: var(--ui-accent-fg);
+  border-color: color-mix(in srgb, var(--ui-accent-border) 52%, transparent);
+}
+
+html.light .glass--accent {
+  background: color-mix(in srgb, var(--ui-accent-bg) 32%, transparent);
+}
+
+.glass--cover {
+  background: color-mix(in srgb, var(--ui-cover-bg) 42%, transparent);
+  color: var(--ui-cover-fg);
+  border-color: color-mix(in srgb, var(--ui-cover-border) 50%, transparent);
+}
+
+html.light .glass--cover {
+  background: color-mix(in srgb, var(--ui-cover-bg) 30%, transparent);
+}
+
+.glass--pass {
+  background: color-mix(in srgb, var(--ui-pass-bg) 42%, transparent);
+  color: var(--ui-pass-fg);
+  border-color: color-mix(in srgb, var(--ui-pass-border) 48%, transparent);
+}
+
+html.light .glass--pass {
+  background: color-mix(in srgb, var(--ui-pass-bg) 30%, transparent);
+}
+
+.glass--brand {
+  background: color-mix(in srgb, var(--ui-brand-bg) 42%, transparent);
+  color: var(--ui-brand-fg);
+  border-color: color-mix(in srgb, var(--ui-brand-border) 52%, transparent);
+}
+
+html.light .glass--brand {
+  background: color-mix(in srgb, var(--ui-brand-bg) 30%, transparent);
+}
+
+.glass--info {
+  background: color-mix(in srgb, var(--ui-info-bg) 44%, transparent);
+  color: var(--ui-info-fg);
+  border-color: color-mix(in srgb, var(--ui-info-border) 52%, transparent);
+}
+
+html.light .glass--info {
+  background: color-mix(in srgb, var(--ui-info-bg) 32%, transparent);
+}
+
+.glass--info-muted {
+  background: color-mix(in srgb, var(--ui-info-muted-bg) 48%, transparent);
+  color: var(--ui-info-muted-fg);
+  border-color: color-mix(in srgb, var(--ui-info-border) 42%, transparent);
+}
+
+html.light .glass--info-muted {
+  background: color-mix(in srgb, var(--ui-info-muted-bg) 34%, transparent);
+}
+
+.glass--danger-badge {
+  background: color-mix(in srgb, var(--ui-danger-badge-bg) 46%, transparent);
+  color: var(--ui-danger-badge-fg);
+  border-color: color-mix(in srgb, var(--ui-danger-border) 48%, transparent);
+}
+
+html.light .glass--danger-badge {
+  background: color-mix(in srgb, var(--ui-danger-badge-bg) 34%, transparent);
+}
+
+.glass--muted-dim {
+  background: color-mix(in srgb, var(--color-muted) 26%, transparent);
+  color: var(--color-muted-foreground);
+  border-color: color-mix(in srgb, var(--color-border) 40%, transparent);
+}
+
+html.light .glass--muted-dim {
+  background: color-mix(in srgb, var(--color-muted) 22%, transparent);
+}

@@ -65,7 +65,7 @@ export function AdminSection({ user }: AdminSectionProps) {
               {pendingUsers.map((userRecord) => (
                 <div
                   key={userRecord.email}
-                  className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 border rounded-lg"
+                  className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 rounded-lg border border-border/50 p-4 backdrop-blur-sm dark:border-white/5"
                 >
                   <div className="flex-1">
                     <p className="font-medium">{userRecord.email}</p>

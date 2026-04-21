@@ -105,7 +105,7 @@ export function AuthPage() {
 
   if (step === 'pending') {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-4">
+      <div className="gateway-bg flex min-h-screen items-center justify-center p-4">
         <Card className="w-full max-w-md">
           <CardHeader className="text-center">
             <div className="flex justify-center mb-4">
@@ -119,7 +119,7 @@ export function AuthPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="rounded-lg bg-muted p-4 text-sm text-muted-foreground">
+            <div className="rounded-lg border border-border/40 bg-muted/45 p-4 text-sm text-muted-foreground backdrop-blur-md">
               <p>Email <strong>{email || user?.email}</strong> verified</p>
               <p className="mt-2">An admin will review your request. Click below to check status.</p>
             </div>
@@ -149,7 +149,7 @@ export function AuthPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
+    <div className="gateway-bg flex min-h-screen items-center justify-center p-4">
       <Card className="w-full max-w-md">
         <CardHeader className="text-center">
           <div className="flex justify-center mb-4">

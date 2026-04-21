@@ -4,6 +4,9 @@
 @plugin "@tailwindcss/forms";
 @plugin "@tailwindcss/typography";
 
+@import "./theme.css";
+@import "./components/ui/glass.css";
+
 @theme {
   --color-border: hsl(214.3 31.8% 91.4%);
   --color-input: hsl(214.3 31.8% 91.4%);
@@ -24,6 +27,13 @@
   --color-popover-foreground: hsl(222.2 47.4% 11.2%);
   --color-card: hsl(0 0% 100%);
   --color-card-foreground: hsl(222.2 47.4% 11.2%);
+
+  /* Chart / accent bases (ref/opentrade palette, light) */
+  --color-chart-1: rgb(96, 96, 96);
+  --color-chart-2: rgb(71, 102, 102);
+  --color-chart-3: rgb(144, 144, 144);
+  --color-chart-4: rgb(168, 168, 168);
+  --color-chart-5: rgb(192, 192, 192);
   
   --radius-lg: 0.5rem;
   --radius-md: calc(0.5rem - 2px);
@@ -50,9 +60,35 @@
   --color-popover-foreground: hsl(210 40% 98%);
   --color-card: hsl(222.2 84% 4.9%);
   --color-card-foreground: hsl(210 40% 98%);
+
+  --color-chart-1: rgb(160, 160, 160);
+  --color-chart-2: rgb(126, 156, 160);
+  --color-chart-3: rgb(112, 112, 112);
+  --color-chart-4: rgb(88, 88, 88);
+  --color-chart-5: rgb(64, 64, 64);
 }
 
 @layer base {
+  /* HSL triplets for hsl(var(--*)) — matches @theme colors; used by charts & overlays */
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 47.4% 11.2%;
+    --card: 0 0% 100%;
+    --popover: 0 0% 100%;
+    --border: 214.3 31.8% 91.4%;
+    --muted: 210 40% 96.1%;
+    --primary: 222.2 47.4% 11.2%;
+  }
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --popover: 222.2 84% 4.9%;
+    --border: 217.2 32.6% 17.5%;
+    --muted: 217.2 32.6% 17.5%;
+    --primary: 210 40% 98%;
+  }
+
   * {
     @apply border-border;
   }
@@ -108,5 +144,60 @@
   .table-scroll table {
     min-width: 100%;
     white-space: nowrap;
+  }
+
+  /** App shell: soft mesh behind glass panels */
+  .gateway-bg {
+    @apply bg-background;
+    background-image:
+      radial-gradient(ellipse 110% 85% at 0% -15%, hsl(217 91% 60% / 0.11), transparent 52%),
+      radial-gradient(ellipse 90% 55% at 100% 0%, hsl(280 55% 55% / 0.08), transparent 48%),
+      radial-gradient(ellipse 80% 60% at 45% 105%, hsl(200 70% 45% / 0.07), transparent 55%);
+  }
+  .dark .gateway-bg {
+    background-image:
+      radial-gradient(ellipse 110% 85% at 0% -15%, hsl(217 91% 60% / 0.18), transparent 52%),
+      radial-gradient(ellipse 90% 55% at 100% 0%, hsl(280 60% 50% / 0.12), transparent 48%),
+      radial-gradient(ellipse 80% 60% at 45% 105%, hsl(199 80% 45% / 0.1), transparent 55%);
+  }
+
+  /** Native selects — pair with `glass glass--outline` (ref/opentrade pattern) */
+  .gateway-select {
+    @apply flex h-9 w-full rounded-md px-3 py-1 text-sm shadow-none;
+    @apply focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring;
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /** Modal stack */
+  .glass-overlay {
+    @apply bg-black/45 backdrop-blur-[3px];
+  }
+
+  /** From ref/opentrade/gateway/app/index.css */
+  .overflow-y-auto::-webkit-scrollbar {
+    width: 8px;
+  }
+  .overflow-y-auto::-webkit-scrollbar-track {
+    background: color-mix(in srgb, var(--color-muted) 40%, transparent);
+    border-radius: 4px;
+  }
+  .overflow-y-auto::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--color-muted-foreground) 35%, transparent);
+    border-radius: 4px;
+  }
+  .overflow-y-auto::-webkit-scrollbar-thumb:hover {
+    background: color-mix(in srgb, var(--color-muted-foreground) 55%, transparent);
+  }
+
+  @keyframes gateway-flash {
+    0% {
+      background-color: color-mix(in srgb, var(--color-primary) 25%, transparent);
+    }
+    100% {
+      background-color: transparent;
+    }
+  }
+  .event-new {
+    animation: gateway-flash 1s ease-out;
   }
 }

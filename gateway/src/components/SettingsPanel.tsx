@@ -218,7 +218,7 @@ export function SettingsPanel({ auth, modelOverrides, tierAliases, saveModelOver
 
           {/* Current email display */}
           {!loading && user?.email && (
-            <div className="flex items-center gap-2 px-3 py-2 bg-muted rounded-md text-sm">
+            <div className="flex items-center gap-2 rounded-md border border-border/40 bg-muted/45 px-3 py-2 text-sm backdrop-blur-md dark:border-white/5">
               <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
               <span className="font-medium">{user.email}</span>
             </div>

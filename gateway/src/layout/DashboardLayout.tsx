@@ -3,6 +3,8 @@ import { useState, useEffect } from 'react'
 import { Outlet } from '@tanstack/react-router'
 import { Sidebar } from '@/components/Sidebar'
 import { TopBar } from '@/components/TopBar'
+import { Button } from '@/components/ui/button'
+import { Menu } from 'lucide-react'
 import { Toaster } from 'sonner'
 import { useAuth, useLogout } from '@/hooks/useAuth'
 
@@ -43,12 +45,12 @@ export function DashboardLayout() {
 
   return (
     <>
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex h-screen overflow-hidden gateway-bg">
 
       {/* Desktop Sidebar */}
       <div className="hidden md:flex md:flex-shrink-0">
-        <div className="w-56 lg:w-64 border-r bg-card">
-          <div className="flex h-14 items-center border-b px-4">
+        <div className="glass glass--secondary w-56 shrink-0 border-r-0 shadow-none lg:w-64">
+          <div className="flex h-14 items-center border-b border-border/40 px-4">
             <a
               href="/"
               className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
@@ -74,11 +76,11 @@ export function DashboardLayout() {
       {mobileSidebarOpen && (
         <div className="md:hidden fixed inset-0 z-40 flex">
           <div
-            className="fixed inset-0 bg-black/60"
+            className="glass-overlay fixed inset-0"
             onClick={() => setMobileSidebarOpen(false)}
           />
-          <div className="relative z-50 w-64 max-w-[80vw] bg-card border-r flex flex-col">
-            <div className="flex h-14 items-center border-b px-4">
+          <div className="glass glass--secondary relative z-50 flex w-64 max-w-[80vw] flex-col border-r-0 shadow-none">
+            <div className="flex h-14 items-center border-b border-border/40 px-4">
               <a
                 href="/"
                 className="flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"
@@ -105,17 +107,18 @@ export function DashboardLayout() {
       <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
 
         {/* Top bar */}
-        <div className="border-b bg-card h-14 flex-shrink-0 flex items-center justify-between px-3 sm:px-4 gap-2">
+        <div className="glass flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border/40 px-3 shadow-none sm:px-4">
           <div className="flex items-center gap-2 min-w-0">
-            <button
-              className="md:hidden p-2 rounded-md hover:bg-accent transition-colors flex-shrink-0"
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="md:hidden flex-shrink-0"
               onClick={() => setMobileSidebarOpen(!mobileSidebarOpen)}
               aria-label="Toggle menu"
             >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
-              </svg>
-            </button>
+              <Menu className="h-5 w-5" />
+            </Button>
             <a
               href="/"
               className="md:hidden flex items-center gap-2 min-w-0 hover:opacity-80 transition-opacity"

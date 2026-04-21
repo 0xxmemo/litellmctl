@@ -155,8 +155,8 @@ export function TeamsPanel() {
       </Card>
 
       {showCreate && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-card border rounded-xl w-full max-w-md shadow-2xl my-8">
+        <div className="glass-overlay fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4">
+          <div className="glass glass--muted my-8 w-full max-w-md rounded-xl text-card-foreground shadow-none">
             <div className="p-6">
               <h2 className="text-lg font-bold mb-4">Create Team</h2>
               <form onSubmit={handleCreate} className="space-y-4">
@@ -194,8 +194,8 @@ export function TeamsPanel() {
       )}
 
       {deleteTarget && (
-        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-card border border-red-500/30 rounded-xl w-full max-w-md shadow-2xl">
+        <div className="glass-overlay fixed inset-0 z-50 flex items-center justify-center overflow-y-auto p-4">
+          <div className="glass glass--muted w-full max-w-md rounded-xl text-card-foreground shadow-none ring-1 ring-red-500/40">
             <div className="p-6">
               <div className="flex items-center gap-2 mb-4">
                 <AlertTriangle className="h-6 w-6 text-red-500" />
@@ -270,7 +270,7 @@ function TeamMembersEditor({ teamId, teamName }: { teamId: string; teamName: str
         <select
           value={picked}
           onChange={(e) => setPicked(e.target.value)}
-          className="flex-1 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus:outline-none focus:ring-2 focus:ring-ring"
+          className="glass glass--outline gateway-select min-w-0 flex-1"
         >
           <option value="">Select a user to add…</option>
           {eligible.map((u) => (
@@ -293,7 +293,7 @@ function TeamMembersEditor({ teamId, teamName }: { teamId: string; teamName: str
       ) : (
         <ul className="space-y-1">
           {members.map((email) => (
-            <li key={email} className="flex items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-sm">
+            <li key={email} className="flex items-center justify-between gap-3 rounded-md border border-border/50 bg-background/50 px-3 py-2 text-sm backdrop-blur-md dark:border-white/5 dark:bg-background/35">
               <span className="flex items-center gap-2">
                 <CheckCircle className="w-4 h-4 text-green-500" />
                 {email}
