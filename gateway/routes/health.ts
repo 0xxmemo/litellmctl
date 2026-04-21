@@ -1,5 +1,6 @@
 import { dbHealthy } from "../lib/db";
 import { consoleEnabled } from "../lib/pty";
+import { imageGenerationHealthy } from "../lib/features";
 
 /** Try an HTTP probe, return true if response is ok within timeout. */
 async function httpProbe(url: string, timeoutMs = 1000): Promise<boolean> {
@@ -53,11 +54,20 @@ async function healthHandler() {
     tcpProbe(protonHost, protonPort),
   ]);
   const database = dbProbe();
+  const image = imageGenerationHealthy();
 
   return Response.json({
     status: "ok",
     uptime: process.uptime(),
-    features: { search, embedding, transcription, proton, database, console: consoleEnabled() },
+    features: {
+      search,
+      embedding,
+      transcription,
+      image,
+      proton,
+      database,
+      console: consoleEnabled(),
+    },
   });
 }
 

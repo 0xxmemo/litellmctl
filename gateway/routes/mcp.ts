@@ -15,39 +15,47 @@ import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
 import { errorMessage } from "../lib/errors";
 import { extractApiKey } from "../lib/auth";
 import { requireUser, validateApiKey, trackUsage } from "../lib/db";
+import { imageGenerationHealthy } from "../lib/features";
 
 const PROTOCOL_VERSION = "2025-06-18";
 const SERVER_INFO = { name: "litellm-gateway", version: "1.0.0" };
 
-const TOOLS = [
-  {
-    name: "generate_image",
-    description:
-      "Generate an image from a text prompt using Google's Nano Banana (Gemini) image models. Returns the image inline as base64. Use this when the user asks for an illustration, icon, banner, photo, diagram, or any other visual.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        prompt: {
-          type: "string",
-          description: "Detailed description of the image to generate.",
-        },
-        model: {
-          type: "string",
-          enum: ["nano-banana-pro", "nano-banana"],
-          description:
-            "nano-banana-pro = gemini-3-pro-image-preview (higher quality, landscape JPEG ~1408x768). nano-banana = gemini-2.5-flash-image (faster, square PNG 1024x1024). Defaults to nano-banana-pro.",
-        },
-        n: {
-          type: "integer",
-          minimum: 1,
-          maximum: 4,
-          description: "Number of images to generate. Default 1.",
-        },
+const GENERATE_IMAGE_TOOL = {
+  name: "generate_image",
+  description:
+    "Generate an image from a text prompt using Google's Nano Banana (Gemini) image models. Returns the image inline as base64. Use this when the user asks for an illustration, icon, banner, photo, diagram, or any other visual.",
+  inputSchema: {
+    type: "object",
+    properties: {
+      prompt: {
+        type: "string",
+        description: "Detailed description of the image to generate.",
       },
-      required: ["prompt"],
+      model: {
+        type: "string",
+        enum: ["nano-banana-pro", "nano-banana"],
+        description:
+          "nano-banana-pro = gemini-3-pro-image-preview (higher quality, landscape JPEG ~1408x768). nano-banana = gemini-2.5-flash-image (faster, square PNG 1024x1024). Defaults to nano-banana-pro.",
+      },
+      n: {
+        type: "integer",
+        minimum: 1,
+        maximum: 4,
+        description: "Number of images to generate. Default 1.",
+      },
     },
+    required: ["prompt"],
   },
-];
+};
+
+/** Tools list, filtered by feature health. Evaluated per-request so toggling
+ *  GOOGLE_AI_API_KEY in .env takes effect on the next restart without a code
+ *  change — and a feature outage hides the tool instead of returning errors. */
+function availableTools() {
+  const tools = [];
+  if (imageGenerationHealthy()) tools.push(GENERATE_IMAGE_TOOL);
+  return tools;
+}
 
 const MODEL_MAP: Record<string, string> = {
   "nano-banana-pro": "google/nano-banana-pro",
@@ -205,20 +213,31 @@ async function dispatch(
       return rpcResult(id, {});
 
     case "tools/list":
-      return rpcResult(id, { tools: TOOLS });
+      return rpcResult(id, { tools: availableTools() });
 
     case "tools/call": {
       const name = rpc.params?.name;
       const args = (rpc.params?.arguments ?? {}) as Record<string, unknown>;
-      if (name !== "generate_image") {
-        return rpcError(id, -32602, `Unknown tool: ${name}`);
+      if (name === "generate_image") {
+        if (!imageGenerationHealthy()) {
+          return rpcResult(id, {
+            content: [
+              {
+                type: "text",
+                text: "generate_image is unavailable: GOOGLE_AI_API_KEY is not configured. Set it in .env and restart the gateway.",
+              },
+            ],
+            isError: true,
+          });
+        }
+        try {
+          const result = await callGenerateImage(args as any, email, keyHash);
+          return rpcResult(id, result);
+        } catch (err) {
+          return rpcError(id, -32603, `Internal error: ${errorMessage(err)}`);
+        }
       }
-      try {
-        const result = await callGenerateImage(args as any, email, keyHash);
-        return rpcResult(id, result);
-      } catch (err) {
-        return rpcError(id, -32603, `Internal error: ${errorMessage(err)}`);
-      }
+      return rpcError(id, -32602, `Unknown tool: ${name}`);
     }
 
     default:
