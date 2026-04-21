@@ -295,13 +295,75 @@ function* walkDir(
   }
 }
 
+const SCOPE_TREE_MAX_DEPTH = 4;
+const SCOPE_TREE_PER_DIR_CAP = 60;
+const SCOPE_TREE_MAX_BYTES = 16 * 1024;
+
+function buildScopeTree(rootPath: string): string {
+  const lines: string[] = [];
+  let byteBudget = SCOPE_TREE_MAX_BYTES;
+
+  const walk = (dirPath: string, relPath: string, depth: number): void => {
+    if (depth > SCOPE_TREE_MAX_DEPTH || byteBudget <= 0) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dirPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    const dirs = entries
+      .filter((e) => e.isDirectory() && !e.name.startsWith(".") && !shouldIgnore(
+        relPath ? path.posix.join(relPath, e.name) : e.name,
+        e.name,
+        DEFAULT_IGNORES,
+      ))
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .slice(0, SCOPE_TREE_PER_DIR_CAP);
+
+    const fileCount = entries.filter((e) => e.isFile()).length;
+
+    for (const d of dirs) {
+      const childRel = relPath ? path.posix.join(relPath, d.name) : d.name;
+      const childAbs = path.join(dirPath, d.name);
+      let childEntries = 0;
+      try {
+        childEntries = fs.readdirSync(childAbs).length;
+      } catch {
+        // ignore
+      }
+      const indent = "  ".repeat(depth);
+      const line = `${indent}${childRel}/  (${childEntries} entries)\n`;
+      if (line.length > byteBudget) {
+        byteBudget = 0;
+        return;
+      }
+      lines.push(line);
+      byteBudget -= line.length;
+      walk(childAbs, childRel, depth + 1);
+      if (byteBudget <= 0) return;
+    }
+
+    if (depth === 0 && fileCount > 0) {
+      const line = `(root has ${fileCount} top-level files)\n`;
+      if (line.length <= byteBudget) {
+        lines.push(line);
+        byteBudget -= line.length;
+      }
+    }
+  };
+
+  walk(rootPath, "", 0);
+  return lines.join("");
+}
+
 async function getAgentExclusions(
   config: GatewayConfig,
   rootPath: string,
 ): Promise<string[]> {
   try {
-    const entries = fs.readdirSync(rootPath, { withFileTypes: true });
-    const tree = entries.map((e) => `${e.isDirectory() ? "d" : "f"}  ${e.name}`).join("\n");
+    const tree = buildScopeTree(rootPath);
+    if (!tree) return [];
 
     const res = await gatewayFetch(config, "POST", "/v1/chat/completions", {
       model: "lite",
@@ -309,13 +371,17 @@ async function getAgentExclusions(
         {
           role: "user",
           content:
-            `Top-level entries of a codebase to be indexed for semantic code search:\n\n${tree}\n\n` +
-            `Return a JSON array of directory/file name patterns to EXCLUDE (build artifacts, ` +
-            `generated files, dependencies, large data files, test fixtures with binary data). ` +
-            `Only the JSON array, no other text.`,
+            `Directory tree (up to depth ${SCOPE_TREE_MAX_DEPTH}) of a codebase to be indexed ` +
+            `for semantic code search. Entry counts are shown to help spot large subtrees:\n\n${tree}\n` +
+            `Return a JSON array of patterns to EXCLUDE from indexing. Exclude: build artifacts, ` +
+            `generated code, vendored dependencies, large data/fixture dirs, docs/cookbook/examples ` +
+            `that aren't source, and any deep subtrees that look like test fixtures or experimental ` +
+            `scratch code. Patterns can be a base name (e.g. "cookbook") OR a path prefix ` +
+            `(e.g. "litellm/tests", "litellm/docs"). Prefer path prefixes when excluding a specific ` +
+            `subtree inside a larger source dir. Only the JSON array, no other text.`,
         },
       ],
-      max_tokens: 300,
+      max_tokens: 800,
     });
 
     if (!res.ok) return [];
