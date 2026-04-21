@@ -143,6 +143,12 @@ export async function connectDB(): Promise<void> {
 
   tryLoadVec();
   console.log(`✅ SQLite connected (${path})`);
+
+  // Promote every email in GATEWAY_ADMIN_EMAILS to admin at startup.
+  // Idempotent: existing admins stay admin, existing guests upgrade,
+  // brand-new admins get seeded with approved_at set. Lets a deploy
+  // rotate the admin list via .env without anyone having to re-login.
+  promoteConfiguredAdmins();
 }
 
 export function dbHealthy(): boolean {
@@ -247,8 +253,68 @@ export function validateApiKey(apiKey: string): ApiKeyRecord | null {
 // USERS
 // ============================================================================
 
+/**
+ * Promote every email in GATEWAY_ADMIN_EMAILS to admin. Called once at
+ * startup from connectDB(). Also safe to call from elsewhere.
+ *
+ * Idempotent semantics (same as upsertGuestIfMissing's admin branch):
+ *   - email not in DB → inserted as admin with approved_at = now
+ *   - email is a guest → upgraded to admin
+ *   - email is a user or admin → unchanged (never downgrade)
+ */
+export function promoteConfiguredAdmins(): void {
+  const admins = adminEmailsFromEnv();
+  if (admins.size === 0) return;
+  const now = Date.now();
+  const stmt = db.prepare(
+    `INSERT INTO validated_users (email, role, created_at, approved_at)
+       VALUES (?, 'admin', ?, ?)
+     ON CONFLICT(email) DO UPDATE SET
+       role = CASE WHEN validated_users.role = 'guest' THEN 'admin' ELSE validated_users.role END,
+       approved_at = COALESCE(validated_users.approved_at, excluded.approved_at)`,
+  );
+  for (const email of admins) {
+    stmt.run(email, now, now);
+    userProfileCache.delete(email);
+  }
+  console.log(`✅ promoted ${admins.size} admin email(s) from GATEWAY_ADMIN_EMAILS`);
+}
+
+/**
+ * Parse GATEWAY_ADMIN_EMAILS into a lowercase Set. Empty/unset → empty set.
+ * The env var is read on every call (not cached) so admin list changes
+ * via `.env` edits take effect without a gateway restart.
+ */
+function adminEmailsFromEnv(): Set<string> {
+  const raw = process.env.GATEWAY_ADMIN_EMAILS || "";
+  return new Set(
+    raw
+      .split(/[,\s]+/)
+      .map((s) => s.trim().toLowerCase())
+      .filter((s) => s.includes("@")),
+  );
+}
+
 export function upsertGuestIfMissing(email: string): void {
   const e = email.toLowerCase();
+  const admins = adminEmailsFromEnv();
+
+  if (admins.has(e)) {
+    // Email is on the configured admin list. Seed as admin on first sight;
+    // upgrade an existing guest row; never downgrade an existing user/admin.
+    // Idempotent either way.
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO validated_users (email, role, created_at, approved_at)
+         VALUES (?, 'admin', ?, ?)
+       ON CONFLICT(email) DO UPDATE SET
+         role = CASE WHEN validated_users.role = 'guest' THEN 'admin' ELSE validated_users.role END,
+         approved_at = COALESCE(validated_users.approved_at, excluded.approved_at)`,
+    ).run(e, now, now);
+    userProfileCache.delete(e);
+    return;
+  }
+
   db.prepare(
     `INSERT INTO validated_users (email, role, created_at)
      VALUES (?, 'guest', ?)
