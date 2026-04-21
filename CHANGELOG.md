@@ -2,6 +2,12 @@
 
 All notable changes to litellmctl are documented here.
 
+## [1.5.7] - 2026-04-21
+
+### Fixes
+
+- **Gateway boot crash on pre-v2 DB.** `connectDB()` dropped legacy `plugin_chunks_vec_*` virtual tables before `tryLoadVec()` ran, so SQLite raised `no such module: vec0` and the bun process exited ~120ms after startup — leaving port 14041 dark and v1.5.6 releases failing the deploy smoke test. The vec0 extension is now loaded up front, and the DROP is wrapped in a fallback that clears `sqlite_master` directly if vec0 is unavailable so startup never crashes on legacy data.
+
 ## [1.5.6] - 2026-04-21
 
 ### Features

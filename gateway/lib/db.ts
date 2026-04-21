@@ -48,6 +48,12 @@ export async function connectDB(): Promise<void> {
   db.run("PRAGMA foreign_keys=ON;");
   db.run("PRAGMA busy_timeout=5000;");
 
+  // Load the vec0 extension up front so legacy cleanup (below) can DROP the
+  // old `plugin_chunks_vec_*` virtual tables. Dropping a vec0 virtual table
+  // requires the module to be registered on the connection; otherwise SQLite
+  // raises `no such module: vec0` and kills the startup.
+  tryLoadVec();
+
   const schema = `
     CREATE TABLE IF NOT EXISTS validated_users (
       email TEXT PRIMARY KEY,
@@ -179,7 +185,21 @@ export async function connectDB(): Promise<void> {
         "SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'plugin_chunks_vec_%'",
       )
       .all() as { name: string }[];
-    for (const t of vecTables) db.run(`DROP TABLE IF EXISTS ${t.name}`);
+    for (const t of vecTables) {
+      try {
+        db.run(`DROP TABLE IF EXISTS ${t.name}`);
+      } catch (err) {
+        // Machines without sqlite-vec installed can't drop a vec0 virtual
+        // table cleanly. Fall back to deleting the sqlite_master row so the
+        // next boot (with vec0 loaded) or a manual VACUUM reclaims the
+        // storage. This keeps startup resilient instead of crashing the
+        // process with an uncaught SQLiteError.
+        console.warn(`[db] could not DROP ${t.name} (${errorMessage(err)}); removing from sqlite_master`);
+        db.run("PRAGMA writable_schema=ON;");
+        db.run("DELETE FROM sqlite_master WHERE name=?", [t.name]);
+        db.run("PRAGMA writable_schema=OFF;");
+      }
+    }
   }
 
   for (const stmt of schema.split(";")) {
@@ -187,7 +207,6 @@ export async function connectDB(): Promise<void> {
     if (trimmed) db.run(trimmed);
   }
 
-  tryLoadVec();
   console.log(`✅ SQLite connected (${path})`);
 
   // Promote every email in GATEWAY_ADMIN_EMAILS to admin at startup.
