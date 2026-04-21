@@ -165,10 +165,15 @@ export function Console() {
       // canvas fallback is automatic
     }
 
-    fit.fit()
     termRef.current = term
     fitRef.current = fit
     searchRef.current = search
+    // Defer fit until the container has real dimensions — calling fit
+    // synchronously right after term.open() yields 0×0 on first paint and
+    // xterm renders into a collapsed viewport ("connected but invisible").
+    requestAnimationFrame(() => {
+      try { fit.fit() } catch {}
+    })
 
     const onData = term.onData((data) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
@@ -264,10 +269,10 @@ export function Console() {
   return (
     <div
       className={
-        'flex flex-col min-h-0 ' +
+        'flex flex-col min-h-0 border border-border rounded-lg overflow-hidden bg-[#0a0a0b] ' +
         (fullscreen
-          ? 'fixed inset-0 z-50 bg-[#0a0a0b]'
-          : 'h-full')
+          ? 'fixed inset-0 z-50 rounded-none border-0'
+          : 'h-[calc(100vh-7rem)]')
       }
     >
       {/* Toolbar */}
@@ -345,8 +350,7 @@ export function Console() {
       {/* Terminal */}
       <div
         ref={containerRef}
-        className="flex-1 min-h-0 p-2 bg-[#0a0a0b]"
-        style={{ contain: 'strict' }}
+        className="flex-1 min-h-0 p-2 bg-[#0a0a0b] overflow-hidden"
       />
 
       {/* Hint bar */}
