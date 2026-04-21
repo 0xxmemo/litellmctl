@@ -28,7 +28,7 @@ import { setupRoutes } from "./routes/setup";
 import { skillsRoutes } from "./routes/skills";
 import { vectorDbRoutes, handleVectorDbByName } from "./routes/vectordb";
 import { pluginsRoutes } from "./routes/plugins";
-import { pluginStatsRoutes } from "./routes/pluginStats";
+import { pluginStatsRoutes } from "./routes/plugin-stats";
 import { consoleRoutes } from "./routes/console";
 import {
   attachPty,

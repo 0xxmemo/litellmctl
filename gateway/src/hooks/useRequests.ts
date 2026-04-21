@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { queryKeys } from '@/lib/query-keys'
-import type { GroupedRequest } from '@/components/StackedRequestItem'
+import type { GroupedRequest } from '@/components/stacked-request-item'
 
 // ── Types ────────────────────────────────────────────────────────────────────
 

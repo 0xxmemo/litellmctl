@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { cn, errorMessage } from '@/lib/utils'
-import { ModelSelector } from '@/components/ModelSelector'
+import { ModelSelector } from '@/components/model-selector'
 import type { UseAuthReturn, UseLogoutReturn } from '@/hooks/useAuth'
 import type { UseModelOverridesReturn, UseTierAliasesReturn, UseSaveModelOverridesReturn, UseSaveProfileReturn } from '@/hooks/useSettings'
 import {

@@ -88,7 +88,7 @@ export function useCreateKey() {
 ```
 
 ```tsx
-// src/components/KeyManager.tsx — NO react-query imports
+// src/components/key-manager.tsx — NO react-query imports
 import { useKeys, useCreateKey } from '@/hooks/useKeys'
 
 export function KeyManager() {
@@ -116,15 +116,15 @@ Pages and layout components call hooks and pass data down as props. Components N
 export function useKeys() { return useQuery(...) }
 export type UseKeysReturn = ReturnType<typeof useKeys>
 
-// src/pages/ApiKeys.tsx
+// src/pages/api-keys.tsx
 import { useKeys } from '@/hooks/useKeys'
-import { KeysList } from '@/components/KeysList'
+import { KeysList } from '@/components/keys-list'
 export function ApiKeys() {
   const keysQuery = useKeys()
   return <KeysList keysQuery={keysQuery} />
 }
 
-// src/components/KeysList.tsx — NO hook imports
+// src/components/keys-list.tsx — NO hook imports
 import type { UseKeysReturn } from '@/hooks/useKeys'
 interface Props { keysQuery: UseKeysReturn }
 export function KeysList({ keysQuery }: Props) {
@@ -135,7 +135,7 @@ export function KeysList({ keysQuery }: Props) {
 
 ### Exceptions (document here if any)
 
-- `useModels()` in `ModelSelector.tsx` sub-components: generic reusable dropdown that requires models. These call the hook internally. When the parent has already fetched models, pass via the `models` prop to skip the internal fetch.
+- `useModels()` in `model-selector.tsx` sub-components: generic reusable dropdown that requires models. These call the hook internally. When the parent has already fetched models, pass via the `models` prop to skip the internal fetch.
 
 ## Auth Gates
 

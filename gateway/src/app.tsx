@@ -2,14 +2,14 @@
 
 import { useState, useEffect } from 'react';
 import { Toaster } from 'sonner';
-import { AuthPage } from './pages/AuthPage';
-import { DashboardLayout } from './layout/DashboardLayout';
-import { ApiKeys as ApiKeysPage } from './pages/ApiKeys';
-import { Overview } from './pages/Overview';
-import { Settings } from './pages/Settings';
-import { Admin } from './pages/Admin';
-import { Console } from './pages/Console';
-import { Docs } from './pages/Docs';
+import { AuthPage } from './pages/auth-page';
+import { DashboardLayout } from './layout/dashboard-layout';
+import { ApiKeys as ApiKeysPage } from './pages/api-keys';
+import { Overview } from './pages/overview';
+import { Settings } from './pages/settings';
+import { Admin } from './pages/admin';
+import { Console } from './pages/console';
+import { Docs } from './pages/docs';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAuth } from './hooks/useAuth';
 import {

@@ -9,7 +9,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { Activity, Loader2, ChevronDown } from 'lucide-react'
-import { StackedRequestItem } from '@/components/StackedRequestItem'
+import { StackedRequestItem } from '@/components/stacked-request-item'
 import type { UseRequestsTableReturn } from '@/hooks/useRequests'
 
 interface RequestsTableProps {

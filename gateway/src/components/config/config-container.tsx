@@ -1,11 +1,11 @@
 import { useState } from "react";
 import { Key, Download, Puzzle } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ApiKeyInput, useApiKey } from "@/components/EndpointTryCard";
+import { ApiKeyInput, useApiKey } from "@/components/endpoint-try-card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { SetupWidget } from "./SetupWidget";
-import { SkillsInstall } from "./SkillsInstall";
-import { PluginsInstall } from "./PluginsInstall";
+import { SetupWidget } from "./setup-widget";
+import { SkillsInstall } from "./skills-install";
+import { PluginsInstall } from "./plugins-install";
 
 function getBaseUrl(): string {
   if (typeof window === "undefined") return "http://localhost:14041";

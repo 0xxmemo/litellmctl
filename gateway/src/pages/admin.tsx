@@ -17,11 +17,11 @@ import {
   useDisapproveAll,
   useRevokeAllKeys,
 } from '@/hooks/useAdmin'
-import { AdminErrorBoundary } from '@/components/AdminErrorBoundary'
-import { TeamsPanel } from '@/components/TeamsPanel'
+import { AdminErrorBoundary } from '@/components/admin-error-boundary'
+import { TeamsPanel } from '@/components/teams-panel'
 import { toast } from 'sonner'
-import { PrettyDate } from '@/components/PrettyDate'
-import { PrettyAmount } from '@/components/PrettyAmount'
+import { PrettyDate } from '@/components/pretty-date'
+import { PrettyAmount } from '@/components/pretty-amount'
 import { errorMessage } from '@/lib/utils'
 export function Admin() {
   const { user: currentUser } = useAuth()

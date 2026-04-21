@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { FolderTree, Brain } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ClaudeContextStats } from "./ClaudeContextStats";
-import { SupermemoryStats } from "./SupermemoryStats";
+import { ClaudeContextStats } from "./claude-context-stats";
+import { SupermemoryStats } from "./supermemory-stats";
 import { useClaudeContextUsage, useSupermemoryUsage } from "@/hooks/usePlugins";
 
 interface Props {

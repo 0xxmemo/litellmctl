@@ -6,8 +6,8 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { EndpointTryCard, useApiKey } from "@/components/EndpointTryCard";
-import { ModelsList } from "@/components/ModelsList";
+import { EndpointTryCard, useApiKey } from "@/components/endpoint-try-card";
+import { ModelsList } from "@/components/models-list";
 import { useExtendedModels } from "@/lib/models-hooks";
 import { ConfigContainer } from "@/components/config";
 

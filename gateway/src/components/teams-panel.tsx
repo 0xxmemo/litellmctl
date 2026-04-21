@@ -17,7 +17,7 @@ import {
   type TeamRecord,
 } from '@/hooks/useAdmin'
 import { toast } from 'sonner'
-import { PrettyDate } from '@/components/PrettyDate'
+import { PrettyDate } from '@/components/pretty-date'
 import { errorMessage } from '@/lib/utils'
 
 export function TeamsPanel() {

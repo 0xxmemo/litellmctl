@@ -6,8 +6,8 @@ import {
   TableCell,
   TableRow,
 } from '@/components/ui/table'
-import { PrettyAmount } from '@/components/PrettyAmount'
-import { PrettyDate } from '@/components/PrettyDate'
+import { PrettyAmount } from '@/components/pretty-amount'
+import { PrettyDate } from '@/components/pretty-date'
 import { ChevronDown, ChevronRight, Loader2, Layers } from 'lucide-react'
 import {
   getDisplayName,

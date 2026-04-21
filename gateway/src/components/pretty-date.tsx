@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { cn } from '@/lib/utils'
-import type { PrettyAmountSize } from './PrettyAmount'
+import type { PrettyAmountSize } from './pretty-amount'
 
 type PrettyDateFormat = 'date' | 'time' | 'datetime' | 'countdown' | 'relative'
 

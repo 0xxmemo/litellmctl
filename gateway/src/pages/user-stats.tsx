@@ -3,7 +3,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Activity, Key, TrendingUp, RefreshCw } from 'lucide-react'
-import { PrettyAmount } from '@/components/PrettyAmount'
+import { PrettyAmount } from '@/components/pretty-amount'
 import { useUserStats } from '@/hooks/useStats'
 
 /** Shows "Updated Xs ago" with spinning icon during background refetch */

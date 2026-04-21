@@ -25,7 +25,7 @@ import {
   ChevronRight,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import { PrettyDate } from '@/components/PrettyDate'
+import { PrettyDate } from '@/components/pretty-date'
 import { useKeys, useCreateKey, useUpdateKey, useRevokeKey } from '@/hooks/useKeys'
 import { errorMessage } from '@/lib/utils'
 

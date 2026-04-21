@@ -1,7 +1,7 @@
 import { Brain, Sparkles } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { StatCard } from "@/components/StatCard";
-import { PrettyAmount } from "@/components/PrettyAmount";
+import { StatCard } from "@/components/stat-card";
+import { PrettyAmount } from "@/components/pretty-amount";
 import type { UseSupermemoryUsageReturn } from "@/hooks/usePlugins";
 
 interface Props {

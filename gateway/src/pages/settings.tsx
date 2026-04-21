@@ -1,6 +1,6 @@
 import { useAuth, useLogout } from '@/hooks/useAuth'
 import { useModelOverrides, useSaveModelOverrides, useTierAliases, useSaveProfile } from '@/hooks/useSettings'
-import { SettingsPanel } from '@/components/SettingsPanel'
+import { SettingsPanel } from '@/components/settings-panel'
 
 export function Settings() {
   const auth = useAuth()

@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { ModelSelector } from '@/components/ModelSelector'
+import { ModelSelector } from '@/components/model-selector'
 
 const LS_KEY = 'llm-gateway-api-key'
 

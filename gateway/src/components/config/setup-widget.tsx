@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { Check } from "lucide-react";
-import { CopyButton } from "./CopyButton";
+import { CopyButton } from "./copy-button";
 import { useSetupOptions } from "@/hooks/useSetup";
 
 const KEY_PLACEHOLDER = "YOUR_API_KEY";
