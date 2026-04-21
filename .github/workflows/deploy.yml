@@ -92,6 +92,7 @@ jobs:
               GithubRepo="${REPO_NAME}" \
               GithubBranch="${{ github.ref_type == 'tag' && 'main' || github.ref_name }}" \
               InstanceType="${{ inputs.instance_type || 'c7g.xlarge' }}" \
+              AppDomain="${{ secrets.APP_DOMAIN }}" \
               AdminEmails="${{ secrets.GATEWAY_ADMIN_EMAILS }}" \
               LitellmMasterKey="${{ secrets.LITELLM_MASTER_KEY }}" \
               ProtonEmail="${{ secrets.GATEWAY_PROTON_EMAIL }}" \
@@ -139,6 +140,7 @@ jobs:
           put GATEWAY_PROTON_USERNAME   "${{ secrets.GATEWAY_PROTON_USERNAME }}"
           put GATEWAY_PROTON_PASSWORD   "${{ secrets.GATEWAY_PROTON_PASSWORD }}"
           put GATEWAY_PROTON_2FA_SECRET "${{ secrets.GATEWAY_PROTON_2FA_SECRET }}"
+          put APP_DOMAIN                "${{ secrets.APP_DOMAIN }}"
 
       # In-place update. The instance already has the repo + venv + systemd
       # services — just fetch the new commit, sync .env from SSM, and run
@@ -207,7 +209,8 @@ jobs:
 
           for key in LITELLM_MASTER_KEY GATEWAY_ADMIN_EMAILS \\
                      GATEWAY_PROTON_EMAIL GATEWAY_PROTON_USERNAME \\
-                     GATEWAY_PROTON_PASSWORD GATEWAY_PROTON_2FA_SECRET; do
+                     GATEWAY_PROTON_PASSWORD GATEWAY_PROTON_2FA_SECRET \\
+                     APP_DOMAIN; do
             seed_if_absent "\$key" "\$(fetch_param \$key)"
           done
           seed_if_absent GATEWAY_CONSOLE_ENABLED true
@@ -215,9 +218,10 @@ jobs:
             echo "GATEWAY_SESSION_SECRET=\$(head -c 48 /dev/urandom | base64 | tr -d '=+/' | head -c 48)" >> "\$ENV_FILE"
 
           # Idempotent install — --pipeline does the EC2 bootstrap bundle
-          # (swap, EBS mount, caddy, bun, claude, gateway, protonmail,
-          # services). --fingerprint is implicit: skips every step when
-          # HEAD + .env + this script are unchanged and services healthy.
+          # (swap, caddy, bun, claude, gateway, protonmail, detached
+          # embedding/transcription/searxng, services). --fingerprint is
+          # implicit: skips every step when HEAD + .env + this script are
+          # unchanged and services healthy.
           bash /home/ec2-user/.litellm/install.sh --pipeline
           SCRIPT
 
@@ -281,5 +285,9 @@ jobs:
             echo "- Instance: \`${{ steps.stack.outputs.instance_id }}\`"
             echo "- Public IP: \`${{ steps.stack.outputs.public_ip }}\`"
             echo "- Gateway: http://${{ steps.stack.outputs.public_ip }}:14041"
-            echo "- Caddy (HTTP): http://${{ steps.stack.outputs.public_ip }}/"
+            if [ -n "${{ secrets.APP_DOMAIN }}" ]; then
+              echo "- Domain: https://${{ secrets.APP_DOMAIN }}/"
+            else
+              echo "- Caddy (HTTP): http://${{ steps.stack.outputs.public_ip }}/"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"

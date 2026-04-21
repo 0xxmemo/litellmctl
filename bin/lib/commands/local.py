@@ -258,18 +258,37 @@ def install_transcription() -> None:
             os.environ["PATH"] = f"{os.path.expanduser('~/.local/bin')}:{os.path.expanduser('~/.cargo/bin')}:{os.environ.get('PATH', '')}"
 
         if shutil.which("uv"):
-            # Single supported stack: speaches (actively maintained OpenAI-compatible server)
-            info("Installing speaches (transcription server) ...")
-            ret = subprocess.call(["uv", "tool", "install", "speaches"])
+            # speaches is distributed only via git + Docker — it's NOT on PyPI,
+            # so plain `uv tool install speaches` fails with "not found in the
+            # package registry". Install direct from the git repo instead.
+            info("Installing speaches (transcription server) from git ...")
+            ret = subprocess.call([
+                "uv", "tool", "install",
+                "--from", "git+https://github.com/speaches-ai/speaches",
+                "speaches",
+            ])
             if ret == 0:
                 _speaches_patch_pyproject()
                 transcr_bin = _find_transcription_bin()
-            if not transcr_bin:
-                warn("speaches install failed or no working binary — see https://github.com/speaches-ai/speaches")
+            if not transcr_bin and shutil.which("docker"):
+                # Git install failed (network? build toolchain missing?).
+                # Fall through to the Docker container — same project,
+                # just wrapped.
+                warn("uv install of speaches failed — falling back to Docker image ...")
+                subprocess.call([
+                    "docker", "run", "-d", "--restart=unless-stopped",
+                    "--name", "faster-whisper",
+                    "-p", "10300:8000",
+                    "-e", "WHISPER__MODEL=Systran/faster-whisper-large-v3-turbo",
+                    "ghcr.io/speaches-ai/speaches:latest-cpu",
+                ])
+            elif not transcr_bin:
+                warn("speaches install failed and no docker available — see https://github.com/speaches-ai/speaches")
         elif shutil.which("docker"):
             info("Starting transcription server via Docker ...")
             subprocess.call([
-                "docker", "run", "-d", "--name", "faster-whisper",
+                "docker", "run", "-d", "--restart=unless-stopped",
+                "--name", "faster-whisper",
                 "-p", "10300:8000",
                 "-e", "WHISPER__MODEL=Systran/faster-whisper-large-v3-turbo",
                 "ghcr.io/speaches-ai/speaches:latest-cpu",
@@ -277,7 +296,7 @@ def install_transcription() -> None:
         else:
             warn("No uv or docker found — install uv to enable transcription:")
             warn("  curl -LsSf https://astral.sh/uv/install.sh | sh")
-            warn("  uv tool install speaches")
+            warn("  uv tool install --from git+https://github.com/speaches-ai/speaches speaches")
 
     if transcr_bin:
         if _transcription_is_running(transcr_base):

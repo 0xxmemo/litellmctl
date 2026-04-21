@@ -1,10 +1,11 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >
-  LiteLLM Gateway — single-host ARM64 deployment. Provisions an EC2
-  instance, a 120 GB EBS data volume, a 32 GB swap file, a security
-  group, and an Elastic IP. On first boot, user-data clones the repo
-  onto the data volume and runs install.sh — the same script used for
-  VPC / laptop installs. No Docker, no image registry, no build step.
+  LiteLLM Gateway — single-host ARM64 deploy. One EC2 instance with a
+  single 120 GB gp3 root volume (DeleteOnTermination=false), 32 GB swap
+  file, security group, and Elastic IP (DeletionPolicy: Retain). Grow
+  root online with `aws ec2 modify-volume` + reboot — avoids forced
+  instance replacement. Changing VolumeSize in the template DOES force
+  replacement; snapshot first, then restore via RootSnapshotId.
 
 Parameters:
   AppName:
@@ -36,12 +37,6 @@ Parameters:
       - t4g.xlarge       # 4 vCPU / 16 GB burstable (cheaper when idle)
     Description: Graviton (ARM64) instance. c7g.xlarge matches the 4 vCPU / 8 GB spec.
 
-  DataVolumeSizeGb:
-    Type: Number
-    Default: 120
-    MinValue: 40
-    MaxValue: 1000
-
   SwapSizeGb:
     Type: Number
     Default: 32
@@ -50,17 +45,34 @@ Parameters:
 
   RootVolumeSizeGb:
     Type: Number
-    Default: 80
-    MinValue: 40
-    MaxValue: 500
+    Default: 120
+    MinValue: 60
+    MaxValue: 2000
     Description: >
-      Intended root EBS volume size (GB). Holds OS + /swapfile + docker
-      images + ollama/whisper models. 40 GB is NOT enough once --pipeline
-      pulls embedding/transcription models (ollama nomic ≈ 1.2 GB, whisper
-      large-v3-turbo ≈ 1.5 GB) on top of a 32 GB /swapfile — first run
-      fills root to 100% and wedges the SSM agent. Currently not wired to
-      the Instance resource (see BlockDeviceMappings comment below) — grow
-      the live volume with `aws ec2 modify-volume --size 80` then reboot.
+      Root EBS volume size (GB). This is the *only* volume — it holds OS
+      + /swapfile (32 GB default) + repo + sqlite + docker images +
+      ollama nomic ≈ 1.2 GB + whisper large-v3-turbo ≈ 1.5 GB + Caddy
+      certs + room to grow. 120 GB gives comfortable headroom. Growing
+      this value in the template forces instance replacement — prefer
+      `aws ec2 modify-volume` out of band.
+
+  RootSnapshotId:
+    Type: String
+    Default: ""
+    AllowedPattern: "^(snap-[0-9a-f]+)?$"
+    Description: >
+      Optional EBS snapshot ID to seed the root volume from on stack
+      create (disaster recovery / migration path). Leave blank for a
+      fresh install.
+
+  AppDomain:
+    Type: String
+    Default: ""
+    Description: >
+      Optional FQDN to front the gateway with (e.g. llm.example.com).
+      If set, user-data seeds it into .env and install.sh generates a
+      TLS-enabled Caddyfile; Caddy handles Let's Encrypt issuance and
+      renewal automatically. Leave blank to serve plaintext :80 only.
 
   AdminEmails:
     Type: String
@@ -120,6 +132,7 @@ Parameters:
 
 Conditions:
   HasSshKey: !Not [!Equals [!Ref SshKeyName, ""]]
+  HasRootSnapshot: !Not [!Equals [!Ref RootSnapshotId, ""]]
 
 Resources:
   # ── Security group ────────────────────────────────────────────────────────
@@ -189,9 +202,15 @@ Resources:
     Properties:
       Roles: [!Ref InstanceRole]
 
-  # ── Elastic IP (stable public address across reboots) ─────────────────────
+  # ── Elastic IP (stable public address across reboots + stack rebuilds) ──
+  # DeletionPolicy: Retain keeps the IP allocated to the account if the
+  # stack is deleted, so the DNS A record that points at it doesn't need
+  # to be rotated. On the next stack create, pass the existing EIP via a
+  # separate parameter or re-import it — the A record stays valid.
   Eip:
     Type: AWS::EC2::EIP
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
     Properties:
       Domain: vpc
 
@@ -201,7 +220,7 @@ Resources:
       InstanceId: !Ref Instance
       EIP: !Ref Eip
 
-  # ── EC2 instance ─────────────────────────────────────────────────────────
+  # ── EC2 instance (single 120 GB root volume, no data-volume split) ───────
   Instance:
     Type: AWS::EC2::Instance
     Properties:
@@ -210,76 +229,55 @@ Resources:
       IamInstanceProfile: !Ref InstanceProfile
       KeyName: !If [HasSshKey, !Ref SshKeyName, !Ref "AWS::NoValue"]
       SecurityGroupIds: [!Ref Sg]
-      # NOTE: the root volume size is deliberately hardcoded at 40 GB here
-      # even though RootVolumeSizeGb defaults to 80. Reason: the data volume
-      # below is declared in the same BlockDeviceMappings block, and CFN
-      # treats any BDM change as Immutable — bumping VolumeSize would force
-      # the Instance to be replaced, which would spin up a *fresh* 120 GB
-      # data volume and orphan the old one (with all .env + sqlite state).
-      # Until the data volume is refactored into a separate AWS::EC2::Volume
-      # + AWS::EC2::VolumeAttachment (so it survives instance replacement),
-      # the root is grown out-of-band via `aws ec2 modify-volume` + reboot.
-      # Fresh stacks start at 40 GB and should be bumped manually after
-      # creation until the refactor lands.
+      # Single-volume layout. DeleteOnTermination=false keeps the volume
+      # around as an orphan if CFN ever forces instance replacement
+      # (e.g. someone bumps VolumeSize in this template instead of using
+      # `aws ec2 modify-volume` out of band). The orphan can be
+      # snapshot-restored or reattached as /dev/xvdf for data migration.
       BlockDeviceMappings:
         - DeviceName: /dev/xvda
           Ebs:
             VolumeType: gp3
-            VolumeSize: 40
-            DeleteOnTermination: true
-        - DeviceName: /dev/xvdf
-          Ebs:
-            VolumeType: gp3
-            VolumeSize: !Ref DataVolumeSizeGb
+            VolumeSize: !Ref RootVolumeSizeGb
             DeleteOnTermination: false
+            SnapshotId: !If
+              - HasRootSnapshot
+              - !Ref RootSnapshotId
+              - !Ref AWS::NoValue
       Tags:
         - { Key: Name, Value: !Ref AppName }
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
-          # Minimal first-boot user-data. All the real provisioning lives
-          # in bin/bootstrap-instance.sh — an idempotent script in the
-          # repo that the SSM deploy step also runs. Fail-forward: if
-          # anything here breaks mid-flow, SSM in and re-run
-          # `bash ~/.litellm/bin/bootstrap-instance.sh` to finish setup —
-          # no stack teardown needed.
+          # Minimal first-boot user-data. If anything here fails, SSM in
+          # and re-run `bash ~/.litellm/install.sh --pipeline` — the
+          # script is idempotent and fast-exits via its fingerprint guard
+          # when nothing has changed.
           set -euxo pipefail
           exec > >(tee /var/log/user-data.log) 2>&1
 
           dnf install -y --allowerasing git
 
-          # Mount the EBS data volume at ~ec2-user/.litellm (the repo lives
-          # on it too, so it survives instance replacement).
-          DEV=/dev/nvme1n1
-          [ -b "$DEV" ] || DEV=/dev/xvdf
-          if ! blkid "$DEV" >/dev/null 2>&1; then
-            mkfs.ext4 -L litellm-data "$DEV"
-          fi
-          mkdir -p /home/ec2-user/.litellm
-          grep -q 'LABEL=litellm-data' /etc/fstab || \
-            echo 'LABEL=litellm-data /home/ec2-user/.litellm ext4 defaults,nofail 0 2' >> /etc/fstab
-          mountpoint -q /home/ec2-user/.litellm || mount -a
-          chown -R ec2-user:ec2-user /home/ec2-user/.litellm
-
-          # Clone (or pull) the repo onto the data volume.
-          #
-          # mkfs.ext4 creates a `lost+found` directory on the fresh EBS
-          # volume, which makes git refuse to clone into /home/ec2-user/.litellm
-          # ("destination path ... already exists and is not an empty directory").
-          # If there's no .git yet, wipe anything in the dir before cloning.
+          # Clone the repo into ec2-user's home. Everything — repo, .env,
+          # sqlite, models, caddy data — lives on the single root volume.
           REPO_URL="https://github.com/${GithubOrg}/${GithubRepo}.git"
-          if [ ! -d /home/ec2-user/.litellm/.git ]; then
-            find /home/ec2-user/.litellm -mindepth 1 -maxdepth 1 -exec rm -rf {} +
-            sudo -u ec2-user -H git clone --branch "${GithubBranch}" "$REPO_URL" /home/ec2-user/.litellm
+          INSTALL_DIR=/home/ec2-user/.litellm
+          mkdir -p "$INSTALL_DIR"
+          chown ec2-user:ec2-user "$INSTALL_DIR"
+          if [ ! -d "$INSTALL_DIR/.git" ]; then
+            find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
+            sudo -u ec2-user -H git clone --branch "${GithubBranch}" "$REPO_URL" "$INSTALL_DIR"
           else
-            sudo -u ec2-user -H git -C /home/ec2-user/.litellm fetch origin
-            sudo -u ec2-user -H git -C /home/ec2-user/.litellm checkout "${GithubBranch}"
-            sudo -u ec2-user -H git -C /home/ec2-user/.litellm pull --ff-only
+            sudo -u ec2-user -H git -C "$INSTALL_DIR" fetch origin
+            sudo -u ec2-user -H git -C "$INSTALL_DIR" checkout "${GithubBranch}"
+            sudo -u ec2-user -H git -C "$INSTALL_DIR" pull --ff-only
           fi
 
-          # Seed .env from CloudFormation parameters (first boot only; user
-          # or admin manages it after that — edit via the console or SSM).
-          ENV_FILE=/home/ec2-user/.litellm/.env
+          # Seed .env from CloudFormation parameters on the very first
+          # boot only. After that it's managed in-place (admin console,
+          # SSM, or by the deploy workflow's secret-sync step which edits
+          # specific keys without clobbering the file).
+          ENV_FILE="$INSTALL_DIR/.env"
           if [ ! -f "$ENV_FILE" ]; then
             SESSION_SECRET="$(head -c 48 /dev/urandom | base64 | tr -d '=+/' | head -c 48)"
             cat > "$ENV_FILE" <<ENV
@@ -291,6 +289,7 @@ Resources:
           GATEWAY_PROTON_USERNAME=${ProtonUsername}
           GATEWAY_PROTON_PASSWORD=${ProtonPassword}
           GATEWAY_PROTON_2FA_SECRET=${Proton2faSecret}
+          APP_DOMAIN=${AppDomain}
           SWAP_SIZE_GB=${SwapSizeGb}
           CADDY_VERSION=${CaddyVersion}
           ENV
@@ -298,18 +297,26 @@ Resources:
             chown ec2-user:ec2-user "$ENV_FILE"
           fi
 
-          # Hand off to install.sh --pipeline. The same script is used
-          # for laptop/VPC installs; --pipeline adds EC2-specific setup
-          # (swap, EBS mount, caddy systemd, bun, claude, node-gyp,
-          # gateway + protonmail via litellmctl, service start, fast-exit
-          # fingerprint). Fails here won't wreck the stack — `bash
-          # install.sh --pipeline` can be re-run any time via SSM.
-          bash /home/ec2-user/.litellm/install.sh --pipeline
+          # Hand off to install.sh --pipeline — same script used for
+          # laptop/VPC installs. --pipeline adds the EC2 bundle (swap,
+          # caddy systemd, bun, claude, node-gyp, gateway + protonmail,
+          # detached embedding/transcription/searxng, service start,
+          # fingerprint-based fast-exit on re-runs). Failures here don't
+          # wreck the stack — re-run via SSM with `bash ~/.litellm/install.sh --pipeline`.
+          bash "$INSTALL_DIR/install.sh" --pipeline
 
 Outputs:
   PublicIp:
-    Description: "Connect to http://<PublicIp>:14041 initially, then configure Caddy for a domain."
+    Description: "Elastic IP. Point your APP_DOMAIN A record here."
     Value: !Ref Eip
   InstanceId:
     Value: !Ref Instance
     Export: { Name: !Sub "${AppName}-instance-id" }
+  GrowVolumeCommand:
+    Description: >
+      Snippet to online-grow the single root volume without touching CFN.
+      Run once, then `aws ec2 reboot-instances --instance-ids <id>` so
+      cloud-init's growpart + resizefs extend the partition + filesystem.
+    Value: !Sub
+      - "VOL=$(aws ec2 describe-instances --instance-ids ${inst} --query 'Reservations[0].Instances[0].BlockDeviceMappings[?DeviceName==`/dev/xvda`].Ebs.VolumeId' --output text) && aws ec2 modify-volume --volume-id \"$VOL\" --size <NEW_SIZE_GB>"
+      - { inst: !Ref Instance }
