@@ -1,13 +1,21 @@
 /**
  * claude-context tools: index_codebase, search_code, get_indexing_status, clear_index.
  *
- * File I/O happens here (on the user's machine). All state — job status, chunk
- * vectors — is written directly to the gateway. No local snapshot files.
+ * Identity is derived from git on every invocation:
+ *   - codebaseId = normalized `git remote get-url origin` → one collection per repo,
+ *     shared across users/machines/checkouts.
+ *   - branch     = `git rev-parse --abbrev-ref HEAD`.
+ *   - The shared chunk store is overlaid with a per-branch ref in plugin_ref_chunks,
+ *     so search results are always scoped to the caller's current branch.
+ *
+ * File I/O happens here (on the user's machine). Embedding, chunk storage, and
+ * overlay state all live on the gateway.
  */
 
 import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
+import { execSync } from "child_process";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
@@ -16,6 +24,7 @@ const EMBEDDING_DIMENSIONS = 512;
 const CHUNK_LINES = 150;
 const CHUNK_OVERLAP = 30;
 const EMBED_BATCH_SIZE = 32;
+const EXISTS_BATCH_SIZE = 800;
 const PROGRESS_INTERVAL_MS = 2000;
 const MAX_FILE_BYTES = 512 * 1024; // skip files >512 KB
 
@@ -49,7 +58,7 @@ async function gatewayFetch(
   path: string,
   body?: unknown,
 ): Promise<Response> {
-  const res = await fetch(`${config.baseUrl}${path}`, {
+  return fetch(`${config.baseUrl}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${config.apiKey}`,
@@ -57,29 +66,26 @@ async function gatewayFetch(
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
-  return res;
 }
 
-async function upsertJob(
-  config: GatewayConfig,
-  job: {
-    path: string;
-    collection: string;
-    status: "indexing" | "indexed" | "failed";
-    percentage?: number;
-    error?: string;
-    total_files?: number;
-    indexed_files?: number;
-    total_chunks?: number;
-  },
-): Promise<void> {
+interface JobUpdate {
+  codebaseId: string;
+  branch: string;
+  collection: string;
+  status: "indexing" | "indexed" | "failed";
+  percentage?: number;
+  head_commit?: string | null;
+  error?: string;
+  total_files?: number;
+  indexed_files?: number;
+  total_chunks?: number;
+}
+
+async function upsertJob(config: GatewayConfig, job: JobUpdate): Promise<void> {
   await gatewayFetch(config, "POST", "/api/plugins/claude-context/jobs", job);
 }
 
-async function embedBatch(
-  config: GatewayConfig,
-  texts: string[],
-): Promise<number[][]> {
+async function embedBatch(config: GatewayConfig, texts: string[]): Promise<number[][]> {
   const res = await gatewayFetch(config, "POST", "/v1/embeddings", {
     model: EMBEDDING_MODEL,
     input: texts,
@@ -95,9 +101,28 @@ async function embedBatch(
   return data.data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
 }
 
+async function chunksExists(
+  config: GatewayConfig,
+  codebaseId: string,
+  chunkIds: string[],
+): Promise<Set<string>> {
+  const existing = new Set<string>();
+  for (let i = 0; i < chunkIds.length; i += EXISTS_BATCH_SIZE) {
+    const slice = chunkIds.slice(i, i + EXISTS_BATCH_SIZE);
+    const res = await gatewayFetch(config, "POST", "/api/plugins/claude-context/chunks/exists", {
+      codebaseId,
+      chunkIds: slice,
+    });
+    if (!res.ok) continue; // non-fatal — we'll just re-embed
+    const data = (await res.json()) as { existing: string[] };
+    for (const id of data.existing ?? []) existing.add(id);
+  }
+  return existing;
+}
+
 async function pushChunks(
   config: GatewayConfig,
-  absPath: string,
+  codebaseId: string,
   documents: Array<{
     id: string;
     vector: number[];
@@ -109,8 +134,9 @@ async function pushChunks(
     metadata: Record<string, unknown>;
   }>,
 ): Promise<void> {
+  if (documents.length === 0) return;
   const res = await gatewayFetch(config, "POST", "/api/plugins/claude-context/chunks", {
-    path: absPath,
+    codebaseId,
     documents,
   });
   if (!res.ok) {
@@ -119,45 +145,99 @@ async function pushChunks(
   }
 }
 
-// ── Smart path filtering via LLM ──────────────────────────────────────────────
-
-async function getAgentExclusions(
+async function setOverlay(
   config: GatewayConfig,
-  rootPath: string,
-): Promise<string[]> {
-  try {
-    const entries = fs.readdirSync(rootPath, { withFileTypes: true });
-    const tree = entries.map((e) => `${e.isDirectory() ? "d" : "f"}  ${e.name}`).join("\n");
-
-    const res = await gatewayFetch(config, "POST", "/v1/chat/completions", {
-      model: "lite",
-      messages: [
-        {
-          role: "user",
-          content:
-            `Top-level entries of a codebase to be indexed for semantic code search:\n\n${tree}\n\n` +
-            `Return a JSON array of directory/file name patterns to EXCLUDE (build artifacts, ` +
-            `generated files, dependencies, large data files, test fixtures with binary data). ` +
-            `Only the JSON array, no other text.`,
-        },
-      ],
-      max_tokens: 300,
-    });
-
-    if (!res.ok) return [];
-    const data = (await res.json()) as {
-      choices: Array<{ message: { content: string } }>;
-    };
-    const content = data.choices?.[0]?.message?.content ?? "";
-    const match = content.match(/\[[\s\S]*?\]/);
-    if (!match) return [];
-    const patterns = JSON.parse(match[0]);
-    return Array.isArray(patterns)
-      ? patterns.filter((p): p is string => typeof p === "string")
-      : [];
-  } catch {
-    return [];
+  codebaseId: string,
+  branch: string,
+  entries: Array<{ filePath: string; chunkIds: string[] }>,
+): Promise<void> {
+  const res = await gatewayFetch(config, "POST", "/api/plugins/claude-context/overlay", {
+    codebaseId,
+    branch,
+    entries,
+  });
+  if (!res.ok) {
+    const msg = await res.text().catch(() => "");
+    throw new Error(`Overlay update failed ${res.status}: ${msg}`);
   }
+}
+
+// ── Git identity resolution ────────────────────────────────────────────────────
+
+export interface GitIdentity {
+  codebaseId: string;
+  branch: string;
+  headCommit: string;
+  isDirty: boolean;
+}
+
+function gitCmd(repo: string, args: string[]): string | null {
+  try {
+    return execSync(`git ${args.map((a) => JSON.stringify(a)).join(" ")}`, {
+      cwd: repo,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Parse a git remote URL into a stable, lowercase `host/org/repo` identifier.
+ * Returns null for anything we don't recognize or that doesn't look safe.
+ *
+ * Examples:
+ *   git@github.com:org/repo.git        → github.com/org/repo
+ *   https://github.com/org/repo        → github.com/org/repo
+ *   https://user@gitlab.com/org/x.git  → gitlab.com/org/x
+ *   ssh://git@host:22/~user/repo.git   → host/user/repo
+ */
+export function normalizeOrigin(raw: string): string | null {
+  if (!raw) return null;
+  let s = raw.trim();
+
+  // scp-like: git@host:path  →  host/path
+  const scp = s.match(/^[^@:\s]+@([^:\s]+):(.+)$/);
+  if (scp) {
+    s = `${scp[1]}/${scp[2]}`;
+  } else {
+    s = s.replace(/^[a-z]+:\/\//i, ""); // strip scheme
+    s = s.replace(/^[^@\/\s]+@/, ""); // strip user@
+  }
+  s = s.replace(/:\d+\//, "/"); // strip :port
+  s = s.replace(/\.git\/?$/i, "");
+  s = s.replace(/\/+$/g, "");
+  s = s.replace(/~/g, "");
+  s = s.toLowerCase();
+
+  if (!/^[a-z0-9][a-z0-9._\/-]{2,199}$/.test(s)) return null;
+  return s;
+}
+
+export function resolveGitIdentity(absPath: string): GitIdentity | null {
+  const insideRepo = gitCmd(absPath, ["rev-parse", "--is-inside-work-tree"]);
+  if (insideRepo !== "true") return null;
+
+  const originRaw = gitCmd(absPath, ["remote", "get-url", "origin"]);
+  if (!originRaw) return null;
+  const codebaseId = normalizeOrigin(originRaw);
+  if (!codebaseId) return null;
+
+  const branchRaw = gitCmd(absPath, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const headCommit = gitCmd(absPath, ["rev-parse", "HEAD"]);
+  if (!headCommit) return null;
+
+  let branch = branchRaw ?? "detached";
+  if (branch === "HEAD" || branch === "detached") {
+    branch = `detached@${headCommit.slice(0, 12)}`;
+  }
+  if (!/^[A-Za-z0-9_:.\/@-]{1,128}$/.test(branch)) return null;
+
+  const dirty = gitCmd(absPath, ["status", "--porcelain"]);
+  const isDirty = dirty !== null && dirty.length > 0;
+
+  return { codebaseId, branch, headCommit, isDirty };
 }
 
 // ── File walking & chunking ────────────────────────────────────────────────────
@@ -215,158 +295,261 @@ function* walkDir(
   }
 }
 
-export function collectionName(absPath: string): string {
+async function getAgentExclusions(
+  config: GatewayConfig,
+  rootPath: string,
+): Promise<string[]> {
+  try {
+    const entries = fs.readdirSync(rootPath, { withFileTypes: true });
+    const tree = entries.map((e) => `${e.isDirectory() ? "d" : "f"}  ${e.name}`).join("\n");
+
+    const res = await gatewayFetch(config, "POST", "/v1/chat/completions", {
+      model: "lite",
+      messages: [
+        {
+          role: "user",
+          content:
+            `Top-level entries of a codebase to be indexed for semantic code search:\n\n${tree}\n\n` +
+            `Return a JSON array of directory/file name patterns to EXCLUDE (build artifacts, ` +
+            `generated files, dependencies, large data files, test fixtures with binary data). ` +
+            `Only the JSON array, no other text.`,
+        },
+      ],
+      max_tokens: 300,
+    });
+
+    if (!res.ok) return [];
+    const data = (await res.json()) as {
+      choices: Array<{ message: { content: string } }>;
+    };
+    const content = data.choices?.[0]?.message?.content ?? "";
+    const match = content.match(/\[[\s\S]*?\]/);
+    if (!match) return [];
+    const patterns = JSON.parse(match[0]);
+    return Array.isArray(patterns)
+      ? patterns.filter((p): p is string => typeof p === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+export function collectionName(codebaseId: string): string {
   const hash = crypto
     .createHash("sha256")
-    .update(absPath)
+    .update(codebaseId)
     .digest("hex")
     .slice(0, 16);
   return `code_chunks_${hash}`;
 }
 
-function chunkFile(
-  absPath: string,
-  relPath: string,
-  content: string,
-  ext: string,
-): Array<{
+interface PendingChunk {
   id: string;
   content: string;
   relativePath: string;
   startLine: number;
   endLine: number;
   extension: string;
-}> {
+}
+
+/**
+ * Content-addressed chunk IDs. Same content at the same rel-path+line yields
+ * the same ID across users, machines, and branches — so unchanged files reuse
+ * existing embeddings when switching branches.
+ */
+function chunkFile(
+  relPath: string,
+  content: string,
+  ext: string,
+): PendingChunk[] {
   const lines = content.split("\n");
-  const chunks: ReturnType<typeof chunkFile> = [];
+  const chunks: PendingChunk[] = [];
   for (let start = 0; start < lines.length; start += CHUNK_LINES - CHUNK_OVERLAP) {
     const end = Math.min(start + CHUNK_LINES, lines.length);
     const text = lines.slice(start, end).join("\n");
-    if (text.trim().length === 0) { if (end >= lines.length) break; continue; }
+    if (text.trim().length === 0) {
+      if (end >= lines.length) break;
+      continue;
+    }
     const id = crypto
       .createHash("sha256")
-      .update(`${absPath}|${relPath}|${start}`)
+      .update(`${relPath}|${start + 1}|${text}`)
       .digest("hex")
       .slice(0, 32);
-    chunks.push({ id, content: text, relativePath: relPath, startLine: start + 1, endLine: end, extension: ext });
+    chunks.push({
+      id,
+      content: text,
+      relativePath: relPath,
+      startLine: start + 1,
+      endLine: end,
+      extension: ext,
+    });
     if (end >= lines.length) break;
   }
   return chunks;
 }
 
-// ── Background indexing ────────────────────────────────────────────────────────
+// ── Sync (diff-based indexing) ─────────────────────────────────────────────────
 
-export async function runIndexing(
+export interface SyncResult {
+  shortCircuit: boolean;
+  totalChunks: number;
+  embeddedChunks: number;
+  reusedChunks: number;
+  totalFiles: number;
+}
+
+/**
+ * Diff-based sync. Walks the working tree, computes the desired chunk set,
+ * skips chunks that already live on the gateway, embeds only the missing
+ * ones, and replaces the branch's ref overlay with the full (file → chunkIds)
+ * map. Short-circuits when head_commit matches and the tree is clean.
+ */
+export async function runSync(
   config: GatewayConfig,
   absPath: string,
-  collection: string,
-): Promise<void> {
+  identity: GitIdentity,
+): Promise<SyncResult> {
+  const { codebaseId, branch, headCommit, isDirty } = identity;
+  const collection = collectionName(codebaseId);
   const now = () => Date.now();
 
-  async function updateJob(
-    fields: Partial<{
-      status: "indexing" | "indexed" | "failed";
-      percentage: number;
-      error: string;
-      total_files: number;
-      indexed_files: number;
-      total_chunks: number;
-    }>,
-  ): Promise<void> {
+  // Short-circuit: head hasn't moved and working tree is clean.
+  const existingJob = await gatewayFetch(
+    config,
+    "GET",
+    `/api/plugins/claude-context/jobs?codebaseId=${encodeURIComponent(codebaseId)}&branch=${encodeURIComponent(branch)}`,
+  );
+  if (existingJob.ok) {
+    const job = (await existingJob.json()) as { status?: string; head_commit?: string | null };
+    if (
+      job.status === "indexed" &&
+      job.head_commit === headCommit &&
+      !isDirty
+    ) {
+      return { shortCircuit: true, totalChunks: 0, embeddedChunks: 0, reusedChunks: 0, totalFiles: 0 };
+    }
+  }
+
+  async function updateJob(fields: Partial<JobUpdate>): Promise<void> {
     try {
-      await upsertJob(config, { path: absPath, collection, status: "indexing", ...fields } as Parameters<typeof upsertJob>[1]);
+      await upsertJob(config, {
+        codebaseId,
+        branch,
+        collection,
+        status: "indexing",
+        ...fields,
+      });
     } catch {
       // progress updates are best-effort
     }
   }
 
-  try {
-    const agentExclusions = await getAgentExclusions(config, absPath);
-    const ignorePatterns = loadIgnorePatterns(absPath, agentExclusions);
+  await updateJob({ percentage: 0 });
 
-    const files: string[] = [];
-    for (const f of walkDir(absPath, absPath, ignorePatterns)) files.push(f);
+  const agentExclusions = await getAgentExclusions(config, absPath);
+  const ignorePatterns = loadIgnorePatterns(absPath, agentExclusions);
 
-    await updateJob({ total_files: files.length });
+  const files: string[] = [];
+  for (const f of walkDir(absPath, absPath, ignorePatterns)) files.push(f);
 
-    let indexedFiles = 0;
-    let totalChunks = 0;
-    let lastSave = now();
+  await updateJob({ total_files: files.length });
 
-    const pendingContents: string[] = [];
-    const pendingMeta: Array<{
-      id: string;
-      relativePath: string;
-      startLine: number;
-      endLine: number;
-      extension: string;
-    }> = [];
+  // Walk + chunk everything up front. This gives us the desired overlay and
+  // lets us dedupe against the gateway in a single round-trip.
+  const allChunks: PendingChunk[] = [];
+  const overlayByFile = new Map<string, string[]>();
+  let indexedFiles = 0;
 
-    async function flush(): Promise<void> {
-      if (pendingContents.length === 0) return;
-      const vectors = await embedBatch(config, pendingContents);
-      const docs = pendingMeta.map((m, i) => ({
-        id: m.id,
-        vector: vectors[i],
-        content: pendingContents[i],
-        relativePath: m.relativePath,
-        startLine: m.startLine,
-        endLine: m.endLine,
-        fileExtension: m.extension,
-        metadata: { codebasePath: absPath },
-      }));
-      await pushChunks(config, absPath, docs);
-      totalChunks += docs.length;
-      pendingContents.length = 0;
-      pendingMeta.length = 0;
+  for (const filePath of files) {
+    const relPath = path.relative(absPath, filePath);
+    const ext = path.extname(filePath);
+    try {
+      const stat = fs.statSync(filePath);
+      if (stat.size > MAX_FILE_BYTES) continue;
+      const content = fs.readFileSync(filePath, "utf-8");
+      const chunks = chunkFile(relPath, content, ext);
+      if (chunks.length === 0) continue;
+      for (const c of chunks) allChunks.push(c);
+      overlayByFile.set(
+        relPath,
+        chunks.map((c) => c.id),
+      );
+      indexedFiles++;
+    } catch {
+      // skip unreadable files
     }
-
-    for (let i = 0; i < files.length; i++) {
-      const filePath = files[i];
-      const relPath = path.relative(absPath, filePath);
-      const ext = path.extname(filePath);
-
-      try {
-        const stat = fs.statSync(filePath);
-        if (stat.size > MAX_FILE_BYTES) continue;
-        const content = fs.readFileSync(filePath, "utf-8");
-        const chunks = chunkFile(absPath, relPath, content, ext);
-        for (const chunk of chunks) {
-          pendingContents.push(chunk.content);
-          pendingMeta.push(chunk);
-          if (pendingContents.length >= EMBED_BATCH_SIZE) await flush();
-        }
-        indexedFiles++;
-      } catch {
-        // skip unreadable files
-      }
-
-      const t = now();
-      if (t - lastSave >= PROGRESS_INTERVAL_MS) {
-        await flush();
-        const pct = Math.round(((i + 1) / files.length) * 95);
-        await updateJob({ percentage: pct, indexed_files: indexedFiles });
-        lastSave = t;
-      }
-    }
-
-    await flush();
-    await upsertJob(config, {
-      path: absPath,
-      collection,
-      status: "indexed",
-      percentage: 100,
-      indexed_files: indexedFiles,
-      total_chunks: totalChunks,
-    });
-  } catch (err: any) {
-    await upsertJob(config, {
-      path: absPath,
-      collection,
-      status: "failed",
-      error: err?.message ?? String(err),
-    }).catch(() => {});
   }
+
+  // Dedupe: ask the gateway which chunk IDs it already has.
+  const existing = await chunksExists(
+    config,
+    codebaseId,
+    allChunks.map((c) => c.id),
+  );
+  const missing = allChunks.filter((c) => !existing.has(c.id));
+  const reused = allChunks.length - missing.length;
+
+  await updateJob({
+    indexed_files: indexedFiles,
+    total_chunks: allChunks.length,
+    percentage: missing.length === 0 ? 90 : 10,
+  });
+
+  // Embed + upload only the missing chunks.
+  let embedded = 0;
+  let lastProgress = now();
+  for (let i = 0; i < missing.length; i += EMBED_BATCH_SIZE) {
+    const batch = missing.slice(i, i + EMBED_BATCH_SIZE);
+    const vectors = await embedBatch(config, batch.map((c) => c.content));
+    const docs = batch.map((c, idx) => ({
+      id: c.id,
+      vector: vectors[idx],
+      content: c.content,
+      relativePath: c.relativePath,
+      startLine: c.startLine,
+      endLine: c.endLine,
+      fileExtension: c.extension,
+      metadata: {},
+    }));
+    await pushChunks(config, codebaseId, docs);
+    embedded += batch.length;
+
+    const t = now();
+    if (t - lastProgress >= PROGRESS_INTERVAL_MS) {
+      const pct = Math.round(10 + (embedded / Math.max(missing.length, 1)) * 80);
+      await updateJob({ percentage: pct });
+      lastProgress = t;
+    }
+  }
+
+  // Atomically replace the overlay for this (codebase, branch). Files that
+  // disappeared from the working tree drop out automatically.
+  const overlayEntries = Array.from(overlayByFile.entries()).map(([filePath, chunkIds]) => ({
+    filePath,
+    chunkIds,
+  }));
+  await setOverlay(config, codebaseId, branch, overlayEntries);
+
+  await upsertJob(config, {
+    codebaseId,
+    branch,
+    collection,
+    status: "indexed",
+    percentage: 100,
+    head_commit: headCommit,
+    indexed_files: indexedFiles,
+    total_chunks: allChunks.length,
+    total_files: files.length,
+  });
+
+  return {
+    shortCircuit: false,
+    totalChunks: allChunks.length,
+    embeddedChunks: embedded,
+    reusedChunks: reused,
+    totalFiles: files.length,
+  };
 }
 
 // ── Tool definitions ──────────────────────────────────────────────────────────
@@ -375,13 +558,21 @@ export const claudeContextToolDefs = [
   {
     name: "index_codebase",
     description:
-      "Index a local codebase directory for semantic search. Provide an absolute path. " +
-      "Indexing runs in the background — use get_indexing_status to check progress.",
+      "Index a git repository for semantic search. Uses the origin remote as the codebase identity " +
+      "(so a repo is indexed once across all users) and overlays a per-branch view of the working " +
+      "tree. Unchanged files reuse existing embeddings — only changed content is re-embedded.",
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Absolute path to the codebase directory." },
-        force: { type: "boolean", description: "Force re-index even if already indexed.", default: false },
+        path: {
+          type: "string",
+          description: "Absolute path to the local checkout. Must be inside a git repo with an 'origin' remote.",
+        },
+        force: {
+          type: "boolean",
+          description: "Force re-sync even if HEAD hasn't moved and the working tree is clean.",
+          default: false,
+        },
       },
       required: ["path"],
     },
@@ -389,12 +580,13 @@ export const claudeContextToolDefs = [
   {
     name: "search_code",
     description:
-      "Search an indexed codebase using natural language. " +
-      "Use for: finding implementations, understanding patterns, locating related code.",
+      "Search the caller's current branch of an indexed codebase using natural language. " +
+      "Results are filtered to the branch's working-tree overlay — code that exists on other branches " +
+      "but not on this one will not appear. Use for: finding implementations, understanding patterns.",
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Absolute path to the codebase." },
+        path: { type: "string", description: "Absolute path to the local checkout." },
         query: { type: "string", description: "Natural language search query." },
         limit: { type: "number", default: 10, maximum: 50 },
       },
@@ -403,22 +595,25 @@ export const claudeContextToolDefs = [
   },
   {
     name: "get_indexing_status",
-    description: "Check indexing progress for a codebase path.",
+    description: "Check indexing progress for the current branch of a codebase.",
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Absolute path to the codebase." },
+        path: { type: "string", description: "Absolute path to the local checkout." },
       },
       required: ["path"],
     },
   },
   {
     name: "clear_index",
-    description: "Remove the search index for a codebase.",
+    description:
+      "Remove the search index for a codebase. With scope='branch' (default) drops only the current " +
+      "branch's overlay. With scope='codebase' drops the entire shared collection — affects all users.",
     inputSchema: {
       type: "object",
       properties: {
-        path: { type: "string", description: "Absolute path to the codebase." },
+        path: { type: "string", description: "Absolute path to the local checkout." },
+        scope: { type: "string", enum: ["branch", "codebase"], default: "branch" },
       },
       required: ["path"],
     },
@@ -427,63 +622,73 @@ export const claudeContextToolDefs = [
 
 // ── Tool handlers ─────────────────────────────────────────────────────────────
 
+function identityErr(absPath: string): string {
+  return (
+    `'${absPath}' cannot be indexed: it must be inside a git repository with an 'origin' remote ` +
+    `(run 'git remote -v' to check). Collection identity requires a stable upstream URL so the ` +
+    `index can be shared across machines.`
+  );
+}
+
 export async function handleClaudeContextTool(
   name: string,
   args: Record<string, unknown>,
   config: GatewayConfig,
 ): Promise<{ content: Array<{ type: string; text: string }>; isError?: boolean }> {
-  function text(t: string) {
-    return { content: [{ type: "text", text: t }] };
-  }
-  function err(t: string) {
-    return { content: [{ type: "text", text: t }], isError: true };
-  }
+  const textRes = (t: string) => ({ content: [{ type: "text", text: t }] });
+  const errRes = (t: string) => ({ content: [{ type: "text", text: t }], isError: true });
 
   switch (name) {
     case "index_codebase": {
       const absPath = args.path as string;
       const force = (args.force as boolean) ?? false;
 
-      if (!absPath || typeof absPath !== "string") return err("path required");
+      if (!absPath || typeof absPath !== "string") return errRes("path required");
       if (!fs.existsSync(absPath) || !fs.statSync(absPath).isDirectory()) {
-        return err(`Path '${absPath}' is not a directory`);
+        return errRes(`Path '${absPath}' is not a directory`);
       }
 
-      // Check existing job state on the gateway
+      const identity = resolveGitIdentity(absPath);
+      if (!identity) return errRes(identityErr(absPath));
+
+      const collection = collectionName(identity.codebaseId);
+
+      if (force) {
+        await gatewayFetch(
+          config,
+          "DELETE",
+          `/api/plugins/claude-context/jobs?codebaseId=${encodeURIComponent(identity.codebaseId)}&branch=${encodeURIComponent(identity.branch)}`,
+        ).catch(() => {});
+      }
+
       const statusRes = await gatewayFetch(
         config,
         "GET",
-        `/api/plugins/claude-context/jobs?path=${encodeURIComponent(absPath)}`,
+        `/api/plugins/claude-context/jobs?codebaseId=${encodeURIComponent(identity.codebaseId)}&branch=${encodeURIComponent(identity.branch)}`,
       );
       if (statusRes.ok) {
         const existing = (await statusRes.json()) as { status?: string };
         if (existing.status === "indexing" && !force) {
-          return err(`Already indexing '${absPath}'. Use force=true to restart.`);
+          return errRes(
+            `Already indexing '${identity.codebaseId}@${identity.branch}'. Use force=true to restart.`,
+          );
         }
       }
 
-      const collection = collectionName(absPath);
-
-      if (force) {
-        // DELETE /jobs drops both the vectordb collection and the job record.
-        await gatewayFetch(
-          config,
-          "DELETE",
-          `/api/plugins/claude-context/jobs?path=${encodeURIComponent(absPath)}`,
-        ).catch(() => {});
-      }
-
       await upsertJob(config, {
-        path: absPath,
+        codebaseId: identity.codebaseId,
+        branch: identity.branch,
         collection,
         status: "indexing",
         percentage: 0,
       });
 
       // Fire-and-forget background indexing
-      runIndexing(config, absPath, collection).catch(console.error);
+      runSync(config, absPath, identity).catch(console.error);
 
-      return text(`Started indexing '${absPath}'. Use get_indexing_status to track progress.`);
+      return textRes(
+        `Started sync for '${identity.codebaseId}@${identity.branch}'. Use get_indexing_status to track progress.`,
+      );
     }
 
     case "search_code": {
@@ -491,17 +696,25 @@ export async function handleClaudeContextTool(
       const query = args.query as string;
       const limit = (args.limit as number) ?? 10;
 
-      if (!absPath) return err("path required");
-      if (!query) return err("query required");
+      if (!absPath) return errRes("path required");
+      if (!query) return errRes("query required");
+
+      const identity = resolveGitIdentity(absPath);
+      if (!identity) return errRes(identityErr(absPath));
 
       const res = await gatewayFetch(config, "POST", "/api/plugins/claude-context/search", {
-        path: absPath,
+        codebaseId: identity.codebaseId,
+        branch: identity.branch,
         query,
         limit,
       });
 
-      if (res.status === 404) return err(`Codebase '${absPath}' is not indexed. Run index_codebase first.`);
-      if (!res.ok) return err(`Search failed: ${res.status}`);
+      if (res.status === 404) {
+        return errRes(
+          `'${identity.codebaseId}@${identity.branch}' is not indexed. Run index_codebase first.`,
+        );
+      }
+      if (!res.ok) return errRes(`Search failed: ${res.status}`);
 
       const data = (await res.json()) as {
         results: Array<{
@@ -519,7 +732,7 @@ export async function handleClaudeContextTool(
 
       if (data.results.length === 0) {
         const note = data.indexing ? " (indexing still in progress — more results may appear later)" : "";
-        return text(`No results found for "${query}"${note}`);
+        return textRes(`No results found for "${query}"${note}`);
       }
 
       const formatted = data.results
@@ -536,25 +749,31 @@ export async function handleClaudeContextTool(
         ? "\n\n⚠️ Indexing still in progress — results may be incomplete."
         : "";
 
-      return text(`Found ${data.results.length} results for "${query}":\n\n${formatted}${note}`);
+      return textRes(`Found ${data.results.length} results for "${query}":\n\n${formatted}${note}`);
     }
 
     case "get_indexing_status": {
       const absPath = args.path as string;
-      if (!absPath) return err("path required");
+      if (!absPath) return errRes("path required");
+
+      const identity = resolveGitIdentity(absPath);
+      if (!identity) return errRes(identityErr(absPath));
 
       const res = await gatewayFetch(
         config,
         "GET",
-        `/api/plugins/claude-context/jobs?path=${encodeURIComponent(absPath)}`,
+        `/api/plugins/claude-context/jobs?codebaseId=${encodeURIComponent(identity.codebaseId)}&branch=${encodeURIComponent(identity.branch)}`,
       );
 
-      if (res.status === 404) return text(`'${absPath}' is not indexed.`);
-      if (!res.ok) return err(`Status check failed: ${res.status}`);
+      if (res.status === 404) {
+        return textRes(`'${identity.codebaseId}@${identity.branch}' is not indexed.`);
+      }
+      if (!res.ok) return errRes(`Status check failed: ${res.status}`);
 
       const job = (await res.json()) as {
         status: string;
         percentage: number;
+        head_commit?: string | null;
         indexed_files?: number;
         total_files?: number;
         total_chunks?: number;
@@ -564,11 +783,15 @@ export async function handleClaudeContextTool(
 
       const ago = Math.round((Date.now() - job.updated_at) / 1000);
       const since = ago < 60 ? `${ago}s ago` : `${Math.round(ago / 60)}m ago`;
+      const label = `${identity.codebaseId}@${identity.branch}`;
 
       if (job.status === "indexed") {
-        return text(
-          `✅ '${absPath}' is fully indexed.\n` +
-            `Files: ${job.indexed_files ?? "?"} | Chunks: ${job.total_chunks ?? "?"} | Updated ${since}`,
+        const headMatches = job.head_commit === identity.headCommit;
+        const dirtyNote = identity.isDirty ? " (working tree dirty — re-sync recommended)" : "";
+        const driftNote = !headMatches ? " (HEAD has moved since last sync — re-sync recommended)" : "";
+        return textRes(
+          `✅ '${label}' is indexed.\n` +
+            `Files: ${job.indexed_files ?? "?"} | Chunks: ${job.total_chunks ?? "?"} | Updated ${since}${dirtyNote}${driftNote}`,
         );
       }
       if (job.status === "indexing") {
@@ -576,31 +799,44 @@ export async function handleClaudeContextTool(
         const progress = job.total_files
           ? ` (${job.indexed_files ?? 0}/${job.total_files} files)`
           : "";
-        return text(`🔄 Indexing in progress: ${pct}%${progress} — last update ${since}`);
+        return textRes(`🔄 Indexing in progress: ${pct}%${progress} — last update ${since}`);
       }
       if (job.status === "failed") {
-        return text(`❌ Indexing failed: ${job.error ?? "unknown error"}\nRun index_codebase to retry.`);
+        return textRes(`❌ Indexing failed: ${job.error ?? "unknown error"}\nRun index_codebase to retry.`);
       }
 
-      return text(`Unknown status: ${job.status}`);
+      return textRes(`Unknown status: ${job.status}`);
     }
 
     case "clear_index": {
       const absPath = args.path as string;
-      if (!absPath) return err("path required");
+      const scope = (args.scope as string) ?? "branch";
+      if (!absPath) return errRes("path required");
+
+      const identity = resolveGitIdentity(absPath);
+      if (!identity) return errRes(identityErr(absPath));
+
+      const qs =
+        scope === "codebase"
+          ? `codebaseId=${encodeURIComponent(identity.codebaseId)}`
+          : `codebaseId=${encodeURIComponent(identity.codebaseId)}&branch=${encodeURIComponent(identity.branch)}`;
 
       const res = await gatewayFetch(
         config,
         "DELETE",
-        `/api/plugins/claude-context/jobs?path=${encodeURIComponent(absPath)}`,
+        `/api/plugins/claude-context/jobs?${qs}`,
       );
-      if (res.status === 404) return text(`'${absPath}' is not indexed.`);
-      if (!res.ok) return err(`Clear failed: ${res.status}`);
+      if (res.status === 404) return textRes(`'${identity.codebaseId}' is not indexed.`);
+      if (!res.ok) return errRes(`Clear failed: ${res.status}`);
 
-      return text(`Cleared index for '${absPath}'.`);
+      return textRes(
+        scope === "codebase"
+          ? `Cleared entire index for '${identity.codebaseId}' (all branches).`
+          : `Cleared branch overlay for '${identity.codebaseId}@${identity.branch}'.`,
+      );
     }
 
     default:
-      return err(`Unknown tool: ${name}`);
+      return errRes(`Unknown tool: ${name}`);
   }
 }

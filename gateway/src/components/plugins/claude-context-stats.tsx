@@ -1,4 +1,4 @@
-import { FolderTree, FileCode, Database, Loader2, AlertCircle } from "lucide-react";
+import { FolderTree, FileCode, Database, GitBranch, Loader2, AlertCircle } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { StatCard } from "@/components/stat-card";
 import { PrettyAmount } from "@/components/pretty-amount";
@@ -61,7 +61,7 @@ export function ClaudeContextStats({ query }: Props) {
           </CardHeader>
           <CardContent className="space-y-3">
             {data!.indexing.map((job) => (
-              <div key={job.path} className="space-y-1">
+              <div key={`${job.codebaseId}#${job.branch}`} className="space-y-1">
                 <div className="flex items-center justify-between text-xs">
                   <span className="flex items-center gap-1.5 font-mono text-muted-foreground truncate">
                     {job.status === 'indexing' ? (
@@ -69,7 +69,9 @@ export function ClaudeContextStats({ query }: Props) {
                     ) : (
                       <AlertCircle className="w-3 h-3 shrink-0 text-destructive" />
                     )}
-                    {job.path}
+                    <span className="truncate">{job.codebaseId}</span>
+                    <GitBranch className="w-3 h-3 shrink-0 opacity-60" />
+                    <span className="truncate">{job.branch}</span>
                   </span>
                   <span className="shrink-0 ml-2 text-muted-foreground">
                     {job.status === 'failed'
@@ -118,7 +120,8 @@ export function ClaudeContextStats({ query }: Props) {
             <CardHeader>
               <CardTitle className="text-base">Indexed Codebases</CardTitle>
               <CardDescription>
-                What <code>index_codebase</code> has stored on this gateway (shared across keys).
+                Shared across every user of the same upstream repo. Branches are overlays — a file that
+                exists on multiple branches stores its chunks once.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -127,6 +130,7 @@ export function ClaudeContextStats({ query }: Props) {
                   <thead>
                     <tr className="text-left text-xs text-muted-foreground border-b">
                       <th className="py-2 pr-4 font-medium">Codebase</th>
+                      <th className="py-2 pr-4 font-medium">Branches</th>
                       <th className="py-2 pr-4 font-medium">Files</th>
                       <th className="py-2 pr-4 font-medium">Chunks</th>
                       <th className="py-2 pr-4 font-medium">Dim</th>
@@ -135,12 +139,30 @@ export function ClaudeContextStats({ query }: Props) {
                   </thead>
                   <tbody>
                     {data!.collections.map((c) => (
-                      <tr key={c.name} className="border-b last:border-b-0">
+                      <tr key={c.name} className="border-b last:border-b-0 align-top">
                         <td className="py-2 pr-4 font-mono text-xs break-all">
-                          {c.codebasePath ? (
-                            <span title={c.name}>{c.codebasePath}</span>
+                          {c.codebaseId ? (
+                            <span title={c.name}>{c.codebaseId}</span>
                           ) : (
                             <span className="text-muted-foreground">{c.name}</span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-4 text-xs">
+                          {c.branches.length === 0 ? (
+                            <span className="text-muted-foreground">—</span>
+                          ) : (
+                            <div className="flex flex-wrap gap-1">
+                              {c.branches.map((b) => (
+                                <span
+                                  key={b.branch}
+                                  className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-mono"
+                                  title={b.headCommit ? `HEAD ${b.headCommit.slice(0, 8)} · ${formatRelative(b.updatedAt)}` : formatRelative(b.updatedAt)}
+                                >
+                                  <GitBranch className="w-3 h-3 opacity-60" />
+                                  {b.branch}
+                                </span>
+                              ))}
+                            </div>
                           )}
                         </td>
                         <td className="py-2 pr-4">{c.files.toLocaleString()}</td>

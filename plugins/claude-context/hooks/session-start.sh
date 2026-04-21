@@ -12,6 +12,11 @@ ROOT=$(git -C "$PROJECT_DIR" rev-parse --show-toplevel 2>/dev/null) || exit 0
 
 [ "${CLAUDE_CONTEXT_AUTO_INDEX:-1}" = "1" ] || exit 0
 
+# Collection identity is the normalized 'origin' remote URL so that every user
+# who checks out the same repo shares one index. Without a remote we can't
+# build a stable identifier → skip indexing silently.
+git -C "$ROOT" remote get-url origin >/dev/null 2>&1 || exit 0
+
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 if [ -z "$PLUGIN_ROOT" ]; then
     # Resolve from this script's location: hooks/ → plugin root.

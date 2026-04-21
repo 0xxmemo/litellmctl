@@ -73,24 +73,38 @@ export type UsePluginTargetsReturn = ReturnType<typeof usePluginTargets>
 
 // ── Plugin usage / monitoring ────────────────────────────────────────────────
 
+export interface ClaudeContextBranch {
+  branch: string
+  status: 'indexing' | 'indexed' | 'failed'
+  percentage: number
+  headCommit: string | null
+  totalFiles: number | null
+  indexedFiles: number | null
+  totalChunks: number | null
+  updatedAt: number
+}
+
 export interface ClaudeContextCollection {
   name: string
+  codebaseId: string | null
   dimension: number
   createdAt: number
   chunks: number
   files: number
-  codebasePath: string | null
+  branches: ClaudeContextBranch[]
 }
 
 export interface ClaudeContextIndexingJob {
-  path: string
+  codebaseId: string
+  branch: string
   collection: string
   status: 'indexing' | 'failed'
   percentage: number
+  headCommit: string | null
   error: string | null
-  total_files: number | null
-  indexed_files: number | null
-  total_chunks: number | null
+  totalFiles: number | null
+  indexedFiles: number | null
+  totalChunks: number | null
   updatedAt: number
 }
 

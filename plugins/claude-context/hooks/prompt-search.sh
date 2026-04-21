@@ -26,6 +26,10 @@ case "$PROMPT" in /*) exit 0 ;; esac
 ROOT=$(git -C "$CWD" rev-parse --show-toplevel 2>/dev/null) || exit 0
 [ -n "$ROOT" ] || exit 0
 
+# Must have an origin remote (same as the session-start hook) — the CLI would
+# exit with code 2 in this case but failing fast here avoids spawning bun.
+git -C "$ROOT" remote get-url origin >/dev/null 2>&1 || exit 0
+
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
 if [ -z "$PLUGIN_ROOT" ]; then
     PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

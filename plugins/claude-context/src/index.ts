@@ -5,22 +5,24 @@
  *   - MCP server (no argv)  — stdio MCP protocol, used by Claude Code as an MCP plugin
  *   - CLI (index|search|status subcommand) — used by hooks (session-start, prompt-search)
  *
- * All state (jobs, vectors) lives in the gateway. No local snapshot file.
+ * Identity is derived from git on every call (origin remote → codebaseId,
+ * HEAD → branch). The CLI silently exits when a path has no origin remote;
+ * the MCP tools surface the same condition as an error because the model
+ * invoked them explicitly.
+ *
+ * All state lives in the gateway — no local snapshot files.
  */
 
 import * as fs from "fs";
 import {
   claudeContextToolDefs,
-  handleClaudeContextTool,
-  runIndexing,
   collectionName,
+  handleClaudeContextTool,
+  resolveGitIdentity,
+  runSync,
 } from "./tools/claude-context";
 
 // ── Gateway credentials ───────────────────────────────────────────────────────
-//
-// Accepts both the MCP-style names (GATEWAY_URL / GATEWAY_API_KEY) and the
-// legacy hook-style names (LLM_GATEWAY_URL / LLM_GATEWAY_API_KEY) so existing
-// install scripts keep working without a coordinated rename.
 
 function resolveGatewayConfig(): { baseUrl: string; apiKey: string } {
   const baseUrl = process.env.GATEWAY_URL || process.env.LLM_GATEWAY_URL;
@@ -38,7 +40,6 @@ function resolveGatewayConfig(): { baseUrl: string; apiKey: string } {
 
 const allToolDefs = [
   ...claudeContextToolDefs,
-  // future plugin tool sets go here
 ];
 
 async function dispatchTool(
@@ -72,50 +73,57 @@ async function runCli(argv: string[]): Promise<void> {
   const log = (m: string) => process.stderr.write(`[cli] ${m}\n`);
   const emit = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
 
+  if (!args.path) { log(`${sub}: --path required`); process.exit(1); }
+  const absPath = String(args.path);
+  if (!fs.existsSync(absPath) || !fs.statSync(absPath).isDirectory()) {
+    log(`${sub}: '${absPath}' is not a directory`);
+    process.exit(1);
+  }
+
+  // Resolve identity once up front. No origin → silent exit for every subcommand;
+  // hooks must never block on this or emit noise when run in a non-git repo.
+  const identity = resolveGitIdentity(absPath);
+  if (!identity) {
+    log(`${absPath}: no git origin remote — skipping (shared index requires a stable upstream URL)`);
+    if (sub === "search") process.exit(2); // prompt-search.sh treats 2 as not-indexed / silent
+    process.exit(0);
+  }
+
   try {
     if (sub === "index") {
-      if (!args.path) { log("index: --path required"); process.exit(1); }
-      const absPath = String(args.path);
-      if (!fs.existsSync(absPath) || !fs.statSync(absPath).isDirectory()) {
-        log(`index: '${absPath}' is not a directory`);
-        process.exit(1);
-      }
-      log(`index ${absPath}${args.force ? " (force)" : ""}`);
+      log(`sync ${identity.codebaseId}@${identity.branch} (head ${identity.headCommit.slice(0, 8)}${identity.isDirty ? ", dirty" : ""})`);
 
-      const coll = collectionName(absPath);
-
-      // If already indexing and !force, skip (matches legacy behavior)
-      const existing = await gatewayGet(
-        config,
-        `/api/plugins/claude-context/jobs?path=${encodeURIComponent(absPath)}`,
-      );
-      if (existing.ok) {
-        const job = (await existing.json()) as { status: string };
-        if (job.status === "indexing" && !args.force) {
-          emit({ skipped: true, reason: "already_indexing" });
-          return;
+      if (args.force) {
+        await fetch(
+          `${config.baseUrl}/api/plugins/claude-context/jobs?codebaseId=${encodeURIComponent(identity.codebaseId)}&branch=${encodeURIComponent(identity.branch)}`,
+          { method: "DELETE", headers: { Authorization: `Bearer ${config.apiKey}` } },
+        ).catch(() => {});
+      } else {
+        const existing = await gatewayGet(
+          config,
+          `/api/plugins/claude-context/jobs?codebaseId=${encodeURIComponent(identity.codebaseId)}&branch=${encodeURIComponent(identity.branch)}`,
+        );
+        if (existing.ok) {
+          const job = (await existing.json()) as { status: string };
+          if (job.status === "indexing") {
+            emit({ skipped: true, reason: "already_indexing" });
+            return;
+          }
         }
       }
 
-      // DELETE /jobs drops both the vectordb collection and the job record.
-      if (args.force) {
-        await fetch(
-          `${config.baseUrl}/api/plugins/claude-context/jobs?path=${encodeURIComponent(absPath)}`,
-          { method: "DELETE", headers: { Authorization: `Bearer ${config.apiKey}` } },
-        ).catch(() => {});
-      }
-
-      await gatewayPost(config, "/api/plugins/claude-context/jobs", {
-        path: absPath,
-        collection: coll,
-        status: "indexing",
-        percentage: 0,
-      });
-
-      // Run to completion so the hook knows when it's done
       try {
-        await runIndexing(config, absPath, coll);
-        emit({ done: true });
+        const result = await runSync(config, absPath, identity);
+        if (result.shortCircuit) {
+          log(`up-to-date (head ${identity.headCommit.slice(0, 8)}) — skipping`);
+          emit({ done: true, shortCircuit: true });
+        } else {
+          log(
+            `synced ${identity.codebaseId}@${identity.branch}: ` +
+              `${result.embeddedChunks} embedded, ${result.reusedChunks} reused, ${result.totalFiles} files`,
+          );
+          emit({ done: true, ...result });
+        }
       } catch (err) {
         emit({ error: err instanceof Error ? err.message : String(err) });
         process.exit(1);
@@ -124,21 +132,21 @@ async function runCli(argv: string[]): Promise<void> {
     }
 
     if (sub === "search") {
-      if (!args.path) { log("search: --path required"); process.exit(1); }
       if (!args.query) { log("search: --query required"); process.exit(1); }
 
       // Check job exists first — hook expects exit 2 when not indexed.
       const statusRes = await gatewayGet(
         config,
-        `/api/plugins/claude-context/jobs?path=${encodeURIComponent(String(args.path))}`,
+        `/api/plugins/claude-context/jobs?codebaseId=${encodeURIComponent(identity.codebaseId)}&branch=${encodeURIComponent(identity.branch)}`,
       );
       if (statusRes.status === 404) {
-        log(`search: '${args.path}' not indexed`);
+        log(`search: '${identity.codebaseId}@${identity.branch}' not indexed`);
         process.exit(2);
       }
 
       const searchRes = await gatewayPost(config, "/api/plugins/claude-context/search", {
-        path: args.path,
+        codebaseId: identity.codebaseId,
+        branch: identity.branch,
         query: args.query,
         limit: args.limit ?? 5,
       });
@@ -172,10 +180,9 @@ async function runCli(argv: string[]): Promise<void> {
     }
 
     if (sub === "status") {
-      if (!args.path) { log("status: --path required"); process.exit(1); }
       const res = await gatewayGet(
         config,
-        `/api/plugins/claude-context/jobs?path=${encodeURIComponent(String(args.path))}`,
+        `/api/plugins/claude-context/jobs?codebaseId=${encodeURIComponent(identity.codebaseId)}&branch=${encodeURIComponent(identity.branch)}`,
       );
       if (res.status === 404) { emit({ status: "not_found" }); return; }
       emit(await res.json());
@@ -217,6 +224,10 @@ async function gatewayPost(
 }
 
 // ── Mode dispatch ─────────────────────────────────────────────────────────────
+
+// `collectionName` intentionally re-exported so downstream scripts can still
+// derive the shared collection from a codebaseId without reaching into tools/.
+void collectionName;
 
 const argv = process.argv.slice(2);
 if (argv.length > 0 && ["index", "search", "status"].includes(argv[0])) {
