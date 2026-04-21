@@ -32,7 +32,10 @@ set -euo pipefail
 # ── Defaults ────────────────────────────────────────────────────────────────
 
 REPO_URL="https://github.com/0xxmemo/litellmctl.git"
-INSTALL_DIR="${LITELLM_DIR:-${HOME}/.litellm}"
+# HOME may be unset when SSM / systemd invokes this as root; fall back to
+# /root. The resolve-to-app-user block below fixes INSTALL_DIR when we're
+# running as root for a different target user.
+INSTALL_DIR="${LITELLM_DIR:-${HOME:-/root}/.litellm}"
 VENV_DIR="$INSTALL_DIR/venv"
 
 WITH_SWAP=0;      SWAP_SIZE_GB=32
@@ -188,7 +191,7 @@ services_healthy() {
 if [ "$USE_FINGERPRINT" = 1 ] && [ -d "$INSTALL_DIR/.git" ] && [ -f "$INSTALL_DIR/.env" ]; then
   CURRENT_PRINT="$(compute_fingerprint)"
   if [ -f "$FINGERPRINT_FILE" ] && [ "$(cat "$FINGERPRINT_FILE" 2>/dev/null || true)" = "$CURRENT_PRINT" ] && services_healthy; then
-    ok "fingerprint unchanged (${CURRENT_PRINT%%:*:*:*}), services healthy — skipping all steps"
+    ok "fingerprint unchanged (${CURRENT_PRINT%%:*}), services healthy — skipping all steps"
     date -u +%FT%TZ > /var/log/user-data-done 2>/dev/null || true
     exit 0
   fi
