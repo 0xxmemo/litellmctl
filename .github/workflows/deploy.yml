@@ -177,22 +177,25 @@ jobs:
           sudo -u ec2-user -H git pull --ff-only origin "${REF}" || true   # tags can't pull
           sudo -u ec2-user -H git submodule update --init --recursive
 
-          # Sync .env from SSM Parameter Store so every deploy propagates
-          # secret rotations (master key, Proton creds, admin emails)
-          # without overwriting local-only keys the admin may have added
-          # via the console.
+          # Seed .env from SSM Parameter Store for keys that are MISSING.
+          # The admin is the source of truth: anything they've already set
+          # (via the web console, SSM session, or manual edit) stays
+          # untouched. To rotate a secret from the pipeline, delete its
+          # line from .env and re-deploy — the next run will re-seed it
+          # from SSM Parameter Store.
           ENV_FILE=/home/ec2-user/.litellm/.env
           touch "\$ENV_FILE"
           chown ec2-user:ec2-user "\$ENV_FILE"
           chmod 600 "\$ENV_FILE"
 
-          upsert() {
+          seed_if_absent() {
             local k="\$1" v="\$2"
             [ -z "\$v" ] && return
             if grep -q "^\${k}=" "\$ENV_FILE"; then
-              sed -i "s|^\${k}=.*|\${k}=\${v}|" "\$ENV_FILE"
+              echo "  - \${k} already set on instance — keeping admin value"
             else
               echo "\${k}=\${v}" >> "\$ENV_FILE"
+              echo "  + \${k} seeded from SSM Parameter Store"
             fi
           }
 
@@ -205,10 +208,9 @@ jobs:
           for key in LITELLM_MASTER_KEY GATEWAY_ADMIN_EMAILS \\
                      GATEWAY_PROTON_EMAIL GATEWAY_PROTON_USERNAME \\
                      GATEWAY_PROTON_PASSWORD GATEWAY_PROTON_2FA_SECRET; do
-            upsert "\$key" "\$(fetch_param \$key)"
+            seed_if_absent "\$key" "\$(fetch_param \$key)"
           done
-          # Non-secret flag — always set by every deploy.
-          upsert GATEWAY_CONSOLE_ENABLED true
+          seed_if_absent GATEWAY_CONSOLE_ENABLED true
           grep -q '^GATEWAY_SESSION_SECRET=' "\$ENV_FILE" || \\
             echo "GATEWAY_SESSION_SECRET=\$(head -c 48 /dev/urandom | base64 | tr -d '=+/' | head -c 48)" >> "\$ENV_FILE"
 

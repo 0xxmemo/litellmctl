@@ -106,6 +106,16 @@ Because the EBS volume is mounted directly at `~/.litellm`, **the repo
 itself lives on the persistent volume**. Instance replacement never
 loses state. `git pull && litellmctl restart` is the entire deploy loop.
 
+**`.env` is admin-owned.** On first boot the pipeline seeds `.env` from
+CloudFormation parameters (which come from your GitHub secrets). After
+that, the instance's `.env` is the source of truth — the deploy pipeline
+only *adds* missing keys, never overwrites existing ones. So you can
+edit `.env` from the admin web console (e.g. to rotate
+`LITELLM_MASTER_KEY` or tweak `GATEWAY_ADMIN_EMAILS`) and your changes
+survive every subsequent deploy. To reset a value *from* the pipeline,
+delete its line from `.env` and re-deploy — the next run re-seeds it
+from SSM Parameter Store.
+
 ## Admin console
 
 The gateway's `/console` route is a full bash PTY into the EC2 instance,
