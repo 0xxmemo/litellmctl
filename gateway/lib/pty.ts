@@ -124,13 +124,23 @@ export function spawnConsole(cols = 80, rows = 24): PtyHandle {
   // signal.signal(SIGHUP, SIG_IGN) runs as a direct syscall at startup,
   // and SIG_IGN is inherited across exec at the kernel level, so the
   // follow-up interactive bash starts with HUP already ignored.
-  const proc = pty.spawn("/usr/bin/python3", [
+  // Triple-layered SIGHUP defence against the Bun+node-pty quirk:
+  //   1. setsid --ctty puts the child into its own session with the pty
+  //      as its controlling terminal, isolated from the outer session's
+  //      hangup propagation.
+  //   2. python3 -c installs signal.SIG_IGN for SIGHUP at the syscall
+  //      level, which is preserved across execvp per POSIX.
+  //   3. bash -il inherits SIG_IGN and (per bash startup rules) keeps
+  //      it ignored for its entire lifetime.
+  const proc = pty.spawn("/usr/bin/setsid", [
+    "--ctty",
+    "/usr/bin/python3",
     "-c",
     [
       "import os, sys, signal",
       "signal.signal(signal.SIGHUP, signal.SIG_IGN)",
       "signal.signal(signal.SIGPIPE, signal.SIG_DFL)",
-      "sys.stdout.write('[wrapper] SIGHUP=IGN, exec bash\\r\\n')",
+      "sys.stdout.write('[console] shell ready\\r\\n')",
       "sys.stdout.flush()",
       "os.execvp('/bin/bash', ['/bin/bash', '-il'])",
     ].join("; "),

@@ -46,6 +46,11 @@ process.on("uncaughtException", (err) => {
 process.on("unhandledRejection", (reason) => {
   console.error("[gateway][unhandledRejection]", reason);
 });
+// Installing a SIGHUP handler makes bun (and forked children up until
+// exec) not die on the spurious SIGHUP that node-pty delivers to pty
+// children on Bun/Linux. The pty wrapper installs a second, permanent
+// SIG_IGN immediately after exec so the signal stays ignored in bash.
+process.on("SIGHUP", () => {});
 
 // ============================================================================
 // CONFIGURATION
