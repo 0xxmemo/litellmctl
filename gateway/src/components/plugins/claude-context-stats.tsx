@@ -2,7 +2,7 @@ import { FolderTree, FileCode, Database } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { StatCard } from "@/components/stat-card";
 import { PrettyAmount } from "@/components/pretty-amount";
-import type { UseClaudeContextUsageReturn } from "@/hooks/usePlugins";
+import type { UseClaudeContextUsageReturn } from "@/hooks/use-plugins";
 
 interface Props {
   query: UseClaudeContextUsageReturn;

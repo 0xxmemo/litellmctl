@@ -15,7 +15,7 @@ import {
   ResponsiveContainer
 } from 'recharts'
 import { Calendar, Download } from 'lucide-react'
-import { useUserStatsAnalytics } from '@/hooks/useStats'
+import { useUserStatsAnalytics } from '@/hooks/use-stats'
 
 export function UsageAnalytics() {
   const [dateRange, setDateRange] = useState('7d')

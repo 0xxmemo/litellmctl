@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { AlertCircle, AlertTriangle, CheckCircle, XCircle, UserPlus, Trash2, Users, UsersRound } from 'lucide-react'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuth } from '@/hooks/use-auth'
 import {
   useAdminUsers,
   useApproveUser,
@@ -16,7 +16,7 @@ import {
   useDeleteUser,
   useDisapproveAll,
   useRevokeAllKeys,
-} from '@/hooks/useAdmin'
+} from '@/hooks/use-admin'
 import { AdminErrorBoundary } from '@/components/admin-error-boundary'
 import { TeamsPanel } from '@/components/teams-panel'
 import { toast } from 'sonner'

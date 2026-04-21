@@ -7,8 +7,8 @@ import { SearchAddon } from '@xterm/addon-search'
 import { ClipboardAddon } from '@xterm/addon-clipboard'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { RefreshCw, Eraser, Search, X, Copy, Maximize2, Minimize2 } from 'lucide-react'
-import { useAuth } from '@/hooks/useAuth'
-import { useHealth } from '@/hooks/useHealth'
+import { useAuth } from '@/hooks/use-auth'
+import { useHealth } from '@/hooks/use-health'
 
 type ConnState = 'connecting' | 'open' | 'closed' | 'error' | 'denied'
 

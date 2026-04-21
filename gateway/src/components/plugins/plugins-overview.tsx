@@ -3,7 +3,7 @@ import { FolderTree, Brain } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ClaudeContextStats } from "./claude-context-stats";
 import { SupermemoryStats } from "./supermemory-stats";
-import { useClaudeContextUsage, useSupermemoryUsage } from "@/hooks/usePlugins";
+import { useClaudeContextUsage, useSupermemoryUsage } from "@/hooks/use-plugins";
 
 interface Props {
   enabled: boolean;

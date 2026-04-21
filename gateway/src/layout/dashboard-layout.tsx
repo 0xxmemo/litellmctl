@@ -6,7 +6,7 @@ import { TopBar } from '@/components/top-bar'
 import { Button } from '@/components/ui/button'
 import { Menu } from 'lucide-react'
 import { Toaster } from 'sonner'
-import { useAuth, useLogout } from '@/hooks/useAuth'
+import { useAuth, useLogout } from '@/hooks/use-auth'
 import { useAppVersion } from '@/hooks/use-app-version'
 
 export function DashboardLayout() {

@@ -8,7 +8,7 @@ import {
   PopoverTrigger,
 } from '@/components/ui/popover'
 import { Badge } from '@/components/ui/badge'
-import type { UseAuthReturn } from '@/hooks/useAuth'
+import type { UseAuthReturn } from '@/hooks/use-auth'
 
 interface TopBarProps {
   auth: UseAuthReturn

@@ -4,7 +4,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts'
 import { Activity, Key, TrendingUp, RefreshCw } from 'lucide-react'
 import { PrettyAmount } from '@/components/pretty-amount'
-import { useUserStats } from '@/hooks/useStats'
+import { useUserStats } from '@/hooks/use-stats'
 
 /** Shows "Updated Xs ago" with spinning icon during background refetch */
 function LastUpdated({ dataUpdatedAt, isFetching }: { dataUpdatedAt: number; isFetching: boolean }) {

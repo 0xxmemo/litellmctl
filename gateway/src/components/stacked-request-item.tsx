@@ -17,7 +17,7 @@ import {
   resolveProvider,
 } from '@lib/models'
 import { cn } from '@/lib/utils'
-import { useGroupItems } from '@/hooks/useRequests'
+import { useGroupItems } from '@/hooks/use-requests'
 
 export interface GroupedRequest {
   id: string

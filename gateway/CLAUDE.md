@@ -28,7 +28,7 @@ Path aliases (tsconfig.json):
 
 ```
 src/lib/query-keys.ts     ← All query key constants (single source of truth)
-src/hooks/use*.ts          ← Custom hooks (fetch fns + useQuery/useMutation)
+src/hooks/use-*.ts          ← Custom hooks (fetch fns + useQuery/useMutation)
 src/components/*.tsx        ← UI only — imports hooks, never touches react-query directly
 src/pages/*.tsx
 ```
@@ -42,7 +42,7 @@ import { queryKeys } from '@/lib/query-keys'
 // queryKeys.keys, queryKeys.auth, queryKeys.adminUsers, etc.
 ```
 
-### Hook files — `src/hooks/use*.ts`
+### Hook files — `src/hooks/use-*.ts`
 
 One hook file per domain. Each file contains:
 1. **Types** — interfaces for API responses (exported)
@@ -50,16 +50,16 @@ One hook file per domain. Each file contains:
 3. **Hooks** — exported `useX()` wrapping `useQuery` / `useMutation`
 
 Existing hooks:
-- `useAuth.ts` — `useAuth()`, `useAuthStatus()`, `useLogout()`
-- `useKeys.ts` — `useKeys()`, `useCreateKey()`, `useRevokeKey()`
-- `useAdmin.ts` — `useAdminUsers()`, `useApproveUser()`, `useRejectUser()`, `useAddUser()`, `useDeleteUser()`, ...
-- `useStats.ts` — `useUserStats()`, `useUserStatsAnalytics()`
-- `useSettings.ts` — `useModelOverrides()`, `useSaveModelOverrides()`, `useTierAliases()`, `useSaveProfile()`
-- `useRequests.ts` — `useGroupedRequests()`, `useGroupItems()`
+- `use-auth.ts` — `useAuth()`, `useAuthStatus()`, `useLogout()`
+- `use-keys.ts` — `useKeys()`, `useCreateKey()`, `useRevokeKey()`
+- `use-admin.ts` — `useAdminUsers()`, `useApproveUser()`, `useRejectUser()`, `useAddUser()`, `useDeleteUser()`, ...
+- `use-stats.ts` — `useUserStats()`, `useUserStatsAnalytics()`
+- `use-settings.ts` — `useModelOverrides()`, `useSaveModelOverrides()`, `useTierAliases()`, `useSaveProfile()`
+- `use-requests.ts` — `useGroupedRequests()`, `useGroupItems()`
 
 ### Rules
 
-- **Components/pages import hooks only** — `import { useKeys, useCreateKey } from '@/hooks/useKeys'`. No `useQuery`/`useMutation`/`useQueryClient` in component files.
+- **Components/pages import hooks only** — `import { useKeys, useCreateKey } from '@/hooks/use-keys'`. No `useQuery`/`useMutation`/`useQueryClient` in component files.
 - **Mutations invalidate via queryKeys** — `queryClient.invalidateQueries({ queryKey: queryKeys.keys })` inside the hook's `onSuccess`.
 - **No manual loading/error state** — `useQuery` provides `isLoading`, `error`, `data`. Never create parallel `useState` for these.
 - **UI state stays in components** — form inputs, dialog open/close, copiedId, etc. remain as local `useState`.
@@ -67,7 +67,7 @@ Existing hooks:
 
 Example:
 ```ts
-// src/hooks/useKeys.ts
+// src/hooks/use-keys.ts
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/lib/query-keys'
 
@@ -89,7 +89,7 @@ export function useCreateKey() {
 
 ```tsx
 // src/components/key-manager.tsx — NO react-query imports
-import { useKeys, useCreateKey } from '@/hooks/useKeys'
+import { useKeys, useCreateKey } from '@/hooks/use-keys'
 
 export function KeyManager() {
   const { data: keys = [], isLoading } = useKeys()
@@ -112,12 +112,12 @@ Pages and layout components call hooks and pass data down as props. Components N
 ### Example
 
 ```tsx
-// src/hooks/useKeys.ts
+// src/hooks/use-keys.ts
 export function useKeys() { return useQuery(...) }
 export type UseKeysReturn = ReturnType<typeof useKeys>
 
 // src/pages/api-keys.tsx
-import { useKeys } from '@/hooks/useKeys'
+import { useKeys } from '@/hooks/use-keys'
 import { KeysList } from '@/components/keys-list'
 export function ApiKeys() {
   const keysQuery = useKeys()
@@ -125,7 +125,7 @@ export function ApiKeys() {
 }
 
 // src/components/keys-list.tsx — NO hook imports
-import type { UseKeysReturn } from '@/hooks/useKeys'
+import type { UseKeysReturn } from '@/hooks/use-keys'
 interface Props { keysQuery: UseKeysReturn }
 export function KeysList({ keysQuery }: Props) {
   const { data: keys = [], isLoading } = keysQuery

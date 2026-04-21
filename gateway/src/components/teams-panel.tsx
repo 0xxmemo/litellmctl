@@ -15,7 +15,7 @@ import {
   useRemoveTeamMember,
   useAdminUsers,
   type TeamRecord,
-} from '@/hooks/useAdmin'
+} from '@/hooks/use-admin'
 import { toast } from 'sonner'
 import { PrettyDate } from '@/components/pretty-date'
 import { errorMessage } from '@/lib/utils'

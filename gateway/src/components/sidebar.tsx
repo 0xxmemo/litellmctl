@@ -8,8 +8,8 @@ import {
   Shield,
   Terminal,
 } from 'lucide-react'
-import type { UseAuthReturn } from '@/hooks/useAuth'
-import { useHealth } from '@/hooks/useHealth'
+import type { UseAuthReturn } from '@/hooks/use-auth'
+import { useHealth } from '@/hooks/use-health'
 
 const base =
   'w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-left text-sm transition-all'

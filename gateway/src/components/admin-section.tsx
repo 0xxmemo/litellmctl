@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Users } from 'lucide-react'
-import { useAdminUsers, useApproveUser, useRejectUser } from '@/hooks/useAdmin'
+import { useAdminUsers, useApproveUser, useRejectUser } from '@/hooks/use-admin'
 
 interface AdminSectionProps {
   user?: {

@@ -26,7 +26,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'sonner'
 import { PrettyDate } from '@/components/pretty-date'
-import { useKeys, useCreateKey, useUpdateKey, useRevokeKey } from '@/hooks/useKeys'
+import { useKeys, useCreateKey, useUpdateKey, useRevokeKey } from '@/hooks/use-keys'
 import { errorMessage } from '@/lib/utils'
 
 export function ApiKeys() {

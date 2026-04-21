@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Zap, Mail, Key, Clock } from 'lucide-react'
 import { toast } from 'sonner'
-import { useAuth } from '@/hooks/useAuth'
+import { useAuth } from '@/hooks/use-auth'
 
 export function AuthPage() {
   const { user, refreshUser } = useAuth()

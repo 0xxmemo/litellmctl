@@ -11,7 +11,7 @@ import { Admin } from './pages/admin';
 import { Console } from './pages/console';
 import { Docs } from './pages/docs';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useAuth } from './hooks/useAuth';
+import { useAuth } from './hooks/use-auth';
 import {
   createRouter,
   createRoute,

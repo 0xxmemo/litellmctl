@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Check, Download, Trash2 } from "lucide-react";
 import { CopyButton } from "./copy-button";
-import { usePlugins, usePluginTargets } from "@/hooks/usePlugins";
+import { usePlugins, usePluginTargets } from "@/hooks/use-plugins";
 
 const KEY_PLACEHOLDER = "YOUR_API_KEY";
 

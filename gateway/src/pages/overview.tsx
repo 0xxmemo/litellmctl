@@ -9,9 +9,9 @@ import { ModelUsagePieChart } from '@/components/model-usage-pie-chart'
 import { RequestsTable } from '@/components/requests-table'
 import { PluginsOverview } from '@/components/plugins/plugins-overview'
 import { getDisplayName, formatProviderName, getProviderColor, extractProvider, resolveProvider } from '@lib/models'
-import { useUserStats } from '@/hooks/useStats'
-import { useAuth } from '@/hooks/useAuth'
-import { useRequestsTable } from '@/hooks/useRequests'
+import { useUserStats } from '@/hooks/use-stats'
+import { useAuth } from '@/hooks/use-auth'
+import { useRequestsTable } from '@/hooks/use-requests'
 import {
   LineChart,
   Line,

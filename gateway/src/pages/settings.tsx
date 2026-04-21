@@ -1,5 +1,5 @@
-import { useAuth, useLogout } from '@/hooks/useAuth'
-import { useModelOverrides, useSaveModelOverrides, useTierAliases, useSaveProfile } from '@/hooks/useSettings'
+import { useAuth, useLogout } from '@/hooks/use-auth'
+import { useModelOverrides, useSaveModelOverrides, useTierAliases, useSaveProfile } from '@/hooks/use-settings'
 import { SettingsPanel } from '@/components/settings-panel'
 
 export function Settings() {
