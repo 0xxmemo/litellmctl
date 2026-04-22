@@ -6,8 +6,8 @@
  * the per-dim vec0 tables from fragmenting.
  */
 
-export const EMBEDDING_MODEL = "local/nomic-embed-text";
-export const EMBEDDING_DIMENSIONS = 512;
+export const EMBEDDING_MODEL = "bedrock/titan-embed-v2";
+export const EMBEDDING_DIMENSIONS = 1024;
 export const COLLECTION_NAME = "memories";
 
 export interface PluginConfig {

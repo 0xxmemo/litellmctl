@@ -20,6 +20,7 @@ import {
   appendRefOverlay,
   createCollection,
   deleteByIds,
+  dropCollection,
   hasCollection,
   insertDocuments,
   listExistingChunkIds,
@@ -33,8 +34,8 @@ import type { GatewayPlugin } from "../lib/plugin-registry";
 
 const COLLECTION = "memories";
 const MEMORY_REF_FILE = "memory";
-const EMBEDDING_MODEL = "local/nomic-embed-text";
-const EMBEDDING_DIMENSIONS = 512;
+const EMBEDDING_MODEL = "bedrock/titan-embed-v2";
+const EMBEDDING_DIMENSIONS = 1024;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -282,6 +283,22 @@ export const supermemoryPlugin: GatewayPlugin = {
     "/forget": { POST: handleForget },
     "/search": { POST: handleSearch },
     "/usage": { GET: handleUsage },
+  },
+  migrate: () => {
+    // One-shot dim cutover: drop the existing collection if it was embedded
+    // against the old model (512-d nomic-embed). Existing memories don't
+    // survive the switch — their vectors are in the wrong space — but users
+    // can re-save what matters. Running at every start is cheap: once dim
+    // matches, this becomes a no-op.
+    const row = db
+      .prepare("SELECT dimension FROM plugin_collections WHERE name = ?")
+      .get(COLLECTION) as { dimension: number } | undefined;
+    if (row && row.dimension !== EMBEDDING_DIMENSIONS) {
+      dropCollection(COLLECTION);
+      console.log(
+        `[supermemory] dropped legacy '${COLLECTION}' collection (dimension ${row.dimension} → ${EMBEDDING_DIMENSIONS})`,
+      );
+    }
   },
 };
 

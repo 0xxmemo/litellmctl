@@ -23,12 +23,14 @@ const EMBEDDING_MODEL = "bedrock/titan-embed-v2";
 const EMBEDDING_DIMENSIONS = 1024;
 const CHUNK_LINES = 150;
 const CHUNK_OVERLAP = 30;
-// Titan v2 caps at 8192 input tokens. Code averages ~3 chars/token, so 20000
-// chars ≈ 6.7K tokens — safe even with the `// file: <path>` prefix we add.
-// Oversized slices get bisected by line; single lines that still exceed the
-// cap (minified bundles, dense one-line CSV/JSON) get split by character
-// offset so no content is dropped.
-const MAX_CHUNK_CHARS = 20000;
+// Titan v2 caps at 8192 input tokens. Char-to-token ratio varies wildly —
+// ASCII code averages ~3.5 chars/token, but CJK / emoji / minified / base64
+// can drop to ~1 char/token. We size the cap to stay safe under 8192 even in
+// the worst case (7500 chars * 1 char/token = 7500 tokens, leaving headroom
+// for the `// file: <path>` prefix we prepend at embed time). embedBatch
+// below also retries a failing batch item by splitting it, so pathological
+// content still indexes rather than killing the whole sync.
+const MAX_CHUNK_CHARS = 7500;
 const EMBED_BATCH_SIZE = 32;
 const EXISTS_BATCH_SIZE = 800;
 const PROGRESS_INTERVAL_MS = 2000;
@@ -93,20 +95,63 @@ async function upsertJob(config: GatewayConfig, job: JobUpdate): Promise<void> {
   await gatewayFetch(config, "POST", "/api/plugins/claude-context/jobs", job);
 }
 
+async function embedOne(config: GatewayConfig, text: string): Promise<number[]> {
+  const res = await gatewayFetch(config, "POST", "/v1/embeddings", {
+    model: EMBEDDING_MODEL,
+    input: [text],
+    dimensions: EMBEDDING_DIMENSIONS,
+  });
+  if (res.ok) {
+    const data = (await res.json()) as { data: Array<{ embedding: number[] }> };
+    return data.data[0].embedding;
+  }
+  // Only split on context-window errors, not on auth / quota / network failures.
+  // Titan surfaces "Too many input tokens" with a 400; everything else bubbles up.
+  const body = await res.text().catch(() => "");
+  const isContextWindow = res.status === 400 && /Too many input tokens|context.?window/i.test(body);
+  if (!isContextWindow || text.length <= 500) {
+    throw new Error(`Embedding error ${res.status}: ${body}`);
+  }
+  // Over-budget chunk slipped past the chunker cap. Halve and average — the
+  // content still contributes to search (both halves get a vector that points
+  // to the same chunk) instead of poisoning the whole batch.
+  const mid = Math.floor(text.length / 2);
+  const [left, right] = await Promise.all([
+    embedOne(config, text.slice(0, mid)),
+    embedOne(config, text.slice(mid)),
+  ]);
+  return averageVectors(left, right);
+}
+
+function averageVectors(a: number[], b: number[]): number[] {
+  const out = new Array<number>(a.length);
+  for (let i = 0; i < a.length; i++) out[i] = (a[i] + b[i]) / 2;
+  return out;
+}
+
 async function embedBatch(config: GatewayConfig, texts: string[]): Promise<number[][]> {
   const res = await gatewayFetch(config, "POST", "/v1/embeddings", {
     model: EMBEDDING_MODEL,
     input: texts,
     dimensions: EMBEDDING_DIMENSIONS,
   });
-  if (!res.ok) {
-    const msg = await res.text().catch(() => "");
-    throw new Error(`Embedding error ${res.status}: ${msg}`);
+  if (res.ok) {
+    const data = (await res.json()) as {
+      data: Array<{ embedding: number[]; index: number }>;
+    };
+    return data.data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
   }
-  const data = (await res.json()) as {
-    data: Array<{ embedding: number[]; index: number }>;
-  };
-  return data.data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
+  const body = await res.text().catch(() => "");
+  const isContextWindow = res.status === 400 && /Too many input tokens|context.?window/i.test(body);
+  if (!isContextWindow) {
+    throw new Error(`Embedding error ${res.status}: ${body}`);
+  }
+  // One (or more) item in the batch is oversized — the whole batch 400s. Fall
+  // back to per-item embedding so the offender can be halved without taking
+  // the other 31 chunks down with it.
+  const vectors: number[][] = [];
+  for (const text of texts) vectors.push(await embedOne(config, text));
+  return vectors;
 }
 
 async function chunksExists(
