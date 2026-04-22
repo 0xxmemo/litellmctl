@@ -1,3 +1,4 @@
+import { useMemo, useState } from "react";
 import { Brain, Sparkles } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { StatCard } from "@/components/stat-card";
@@ -25,6 +26,20 @@ function formatDateLabel(iso: string | null): string {
 
 export function SupermemoryStats({ query }: Props) {
   const { data, isLoading, error } = query;
+  const [projectFilter, setProjectFilter] = useState<string>("");
+
+  const projects = useMemo(() => {
+    if (!data?.memories) return [] as string[];
+    const seen = new Set<string>();
+    for (const m of data.memories) seen.add(m.project);
+    return Array.from(seen).sort();
+  }, [data?.memories]);
+
+  const visibleMemories = useMemo(() => {
+    if (!data?.memories) return [];
+    if (!projectFilter) return data.memories;
+    return data.memories.filter((m) => m.project === projectFilter);
+  }, [data?.memories, projectFilter]);
 
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -69,31 +84,57 @@ export function SupermemoryStats({ query }: Props) {
       </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base">Recent Memories</CardTitle>
-          <CardDescription>
-            Newest {data.memories.length} of {data.total.toLocaleString()} memories stored on your API key.
-          </CardDescription>
+        <CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+          <div>
+            <CardTitle className="text-base">Recent Memories</CardTitle>
+            <CardDescription>
+              Newest {data.memories.length} of {data.total.toLocaleString()} memories stored on your API key.
+            </CardDescription>
+          </div>
+          {projects.length > 1 && (
+            <select
+              className="h-8 rounded-md border bg-background px-2 text-xs"
+              value={projectFilter}
+              onChange={(e) => setProjectFilter(e.target.value)}
+              aria-label="Filter by project"
+            >
+              <option value="">All projects</option>
+              {projects.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          )}
         </CardHeader>
         <CardContent>
-          <ul className="space-y-2">
-            {data.memories.map((m) => (
-              <li key={m.id} className="rounded-md border bg-muted/40 p-3 text-sm">
-                <div className="flex items-start justify-between gap-4">
-                  <p className="flex-1 whitespace-pre-wrap break-words leading-relaxed">
-                    {m.content.length > 400 ? `${m.content.slice(0, 400)}…` : m.content}
+          {visibleMemories.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No memories in project <code>{projectFilter}</code>.
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {visibleMemories.map((m) => (
+                <li key={m.id} className="rounded-md border bg-muted/40 p-3 text-sm">
+                  <div className="flex items-start justify-between gap-4">
+                    <p className="flex-1 whitespace-pre-wrap break-words leading-relaxed">
+                      {m.content.length > 400 ? `${m.content.slice(0, 400)}…` : m.content}
+                    </p>
+                    <span className="shrink-0 text-xs text-muted-foreground">
+                      {formatDateLabel(m.createdAt)}
+                    </span>
+                  </div>
+                  <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+                    <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">
+                      {m.project}
+                    </span>
+                    <span>{m.id}</span>
+                    {m.source ? <span>· {m.source}</span> : null}
                   </p>
-                  <span className="shrink-0 text-xs text-muted-foreground">
-                    {formatDateLabel(m.createdAt)}
-                  </span>
-                </div>
-                <p className="mt-1 text-[10px] uppercase tracking-wide text-muted-foreground">
-                  {m.id}
-                  {m.source ? ` · ${m.source}` : ""}
-                </p>
-              </li>
-            ))}
-          </ul>
+                </li>
+              ))}
+            </ul>
+          )}
         </CardContent>
       </Card>
     </div>

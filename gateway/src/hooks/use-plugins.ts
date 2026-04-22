@@ -119,6 +119,7 @@ export interface SupermemoryEntry {
   content: string
   createdAt: string | null
   source: string | null
+  project: string
 }
 
 export interface SupermemoryUsage {
@@ -126,6 +127,7 @@ export interface SupermemoryUsage {
   total: number
   createdAt?: number
   dimension?: number
+  project?: string | null
   memories: SupermemoryEntry[]
 }
 
@@ -134,8 +136,10 @@ async function fetchClaudeContextUsage(): Promise<ClaudeContextUsage> {
   return (await res.json()) as ClaudeContextUsage
 }
 
-async function fetchSupermemoryUsage(limit: number): Promise<SupermemoryUsage> {
-  const res = await apiFetch(`/api/plugins/supermemory/usage?limit=${limit}`)
+async function fetchSupermemoryUsage(limit: number, project?: string): Promise<SupermemoryUsage> {
+  const params = new URLSearchParams({ limit: String(limit) })
+  if (project) params.set('project', project)
+  const res = await apiFetch(`/api/plugins/supermemory/usage?${params.toString()}`)
   return (await res.json()) as SupermemoryUsage
 }
 
@@ -212,10 +216,14 @@ export function useClearClaudeContextJob() {
 
 export type UseClearClaudeContextJobReturn = ReturnType<typeof useClearClaudeContextJob>
 
-export function useSupermemoryUsage(limit = 20, options?: { enabled?: boolean }) {
+export function useSupermemoryUsage(
+  limit = 20,
+  options?: { enabled?: boolean; project?: string },
+) {
+  const project = options?.project
   return useQuery({
-    queryKey: queryKeys.supermemoryUsage(limit),
-    queryFn: () => fetchSupermemoryUsage(limit),
+    queryKey: queryKeys.supermemoryUsage(limit, project),
+    queryFn: () => fetchSupermemoryUsage(limit, project),
     enabled: options?.enabled ?? true,
     refetchOnWindowFocus: false,
   })

@@ -450,25 +450,24 @@ const FIELD_TO_COLUMN: Record<string, string> = {
   chunk_id: "chunk_id",
 };
 
-export interface ParsedFilter {
-  column: string;
-  values: string[];
-}
+// Keys allowed inside `metadata.<key> in [...]`. Strict identifier set so the
+// key can be interpolated into the JSON path without risk of SQL/JSON injection.
+const METADATA_KEY_RE = /^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/;
+
+export type ParsedFilter =
+  | { kind: "column"; column: string; values: string[] }
+  | { kind: "metadata"; jsonKey: string; values: string[] };
 
 export function parseFilterExpr(expr: string): ParsedFilter | null {
   if (!expr || !expr.trim()) return null;
-  const match = expr.match(/^\s*(\w+)\s+in\s+\[(.*)\]\s*$/i);
+  const match = expr.match(/^\s*([\w.]+)\s+in\s+\[(.*)\]\s*$/i);
   if (!match) {
     throw new Error(
       `Unsupported filter expression. Only '<field> in [...]' is supported: ${expr}`,
     );
   }
   const field = match[1];
-  if (!ALLOWED_FILTER_FIELDS.has(field)) {
-    throw new Error(`Unsupported filter field: ${field}`);
-  }
   const body = match[2];
-  if (!body.trim()) return { column: FIELD_TO_COLUMN[field], values: [] };
 
   const values: string[] = [];
   const re = /"((?:[^"\\]|\\.)*)"|'((?:[^'\\]|\\.)*)'/g;
@@ -476,7 +475,19 @@ export function parseFilterExpr(expr: string): ParsedFilter | null {
   while ((m = re.exec(body)) !== null) {
     values.push((m[1] ?? m[2]).replace(/\\(.)/g, "$1"));
   }
-  return { column: FIELD_TO_COLUMN[field], values };
+
+  if (field.startsWith("metadata.")) {
+    const jsonKey = field.slice("metadata.".length);
+    if (!METADATA_KEY_RE.test(jsonKey)) {
+      throw new Error(`Unsupported metadata key: ${jsonKey}`);
+    }
+    return { kind: "metadata", jsonKey, values };
+  }
+
+  if (!ALLOWED_FILTER_FIELDS.has(field)) {
+    throw new Error(`Unsupported filter field: ${field}`);
+  }
+  return { kind: "column", column: FIELD_TO_COLUMN[field], values };
 }
 
 // ── Search ──────────────────────────────────────────────────────────────────
@@ -551,7 +562,12 @@ export function searchVectors(
   let sql = `SELECT * FROM plugin_chunks WHERE rowid IN (${placeholders}) AND collection = ?`;
   const args: (string | number)[] = [...rowIds, collection];
   if (parsed && parsed.values.length > 0) {
-    sql += ` AND ${parsed.column} IN (${parsed.values.map(() => "?").join(",")})`;
+    const valPhs = parsed.values.map(() => "?").join(",");
+    if (parsed.kind === "metadata") {
+      sql += ` AND json_extract(metadata, '$.${parsed.jsonKey}') IN (${valPhs})`;
+    } else {
+      sql += ` AND ${parsed.column} IN (${valPhs})`;
+    }
     args.push(...parsed.values);
   } else if (parsed && parsed.values.length === 0) {
     return [];
@@ -700,7 +716,12 @@ export function searchHybrid(
     let sql = `SELECT * FROM plugin_chunks WHERE rowid IN (${placeholders}) AND collection = ?`;
     const args: (string | number)[] = [...rowIds, collection];
     if (parsed && parsed.values.length > 0) {
-      sql += ` AND ${parsed.column} IN (${parsed.values.map(() => "?").join(",")})`;
+      const valPhs = parsed.values.map(() => "?").join(",");
+      if (parsed.kind === "metadata") {
+        sql += ` AND json_extract(metadata, '$.${parsed.jsonKey}') IN (${valPhs})`;
+      } else {
+        sql += ` AND ${parsed.column} IN (${valPhs})`;
+      }
       args.push(...parsed.values);
     } else if (parsed && parsed.values.length === 0) {
       ftsResults = [];
@@ -860,9 +881,12 @@ export function queryByFilter(
   }
 
   const placeholders = parsed.values.map(() => "?").join(",");
+  const filterSql = parsed.kind === "metadata"
+    ? `json_extract(pc.metadata, '$.${parsed.jsonKey}') IN (${placeholders})`
+    : `pc.${parsed.column} IN (${placeholders})`;
   let sql = `SELECT pc.* FROM plugin_chunks pc
               WHERE pc.collection = ?
-                AND pc.${parsed.column} IN (${placeholders})`;
+                AND ${filterSql}`;
   const args: (string | number)[] = [collection, ...parsed.values];
   if (refIds !== null) {
     const refPhs = refIds.map(() => "?").join(",");

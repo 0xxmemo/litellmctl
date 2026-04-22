@@ -14,6 +14,7 @@ export interface Memory {
     id: string;
     memory: string;
     similarity: number;
+    project?: string;
     createdAt?: string;
 }
 
@@ -21,6 +22,21 @@ export interface SearchResult {
     results: Memory[];
     total: number;
     timing: number;
+}
+
+export interface WhoamiResult {
+    email: string;
+    role: string;
+    teams: Array<{ id: string; name: string }>;
+}
+
+export interface SaveOptions {
+    project?: string;
+}
+
+export interface SearchOptions {
+    project?: string;
+    projects?: string[];
 }
 
 // ── Client ────────────────────────────────────────────────────────────────
@@ -53,29 +69,46 @@ export class MemoryClient {
         return (await res.json()) as T;
     }
 
-    /** Save a memory. Server hashes content to a stable id, so re-saves are upserts. */
-    async save(content: string): Promise<{ id: string; status: "saved" }> {
+    /** Save a memory. Server hashes (project, content) to a stable id, so re-saves are upserts. */
+    async save(
+        content: string,
+        opts: SaveOptions = {},
+    ): Promise<{ id: string; project: string; status: "saved" }> {
         if (!content.trim()) throw new Error("content is required");
-        return this.request("POST", "/api/plugins/supermemory/save", { content });
+        return this.request("POST", "/api/plugins/supermemory/save", {
+            content,
+            ...(opts.project ? { project: opts.project } : {}),
+        });
     }
 
-    /** Forget by exact-content hash; server scopes delete to the caller's own memories. */
-    async forget(content: string): Promise<{ success: boolean; message: string }> {
+    /**
+     * Forget by exact-content hash first, then semantic fallback. Server scopes
+     * every delete to the caller's own chunks (team chunks stay put).
+     */
+    async forget(
+        content: string,
+        opts: SaveOptions = {},
+    ): Promise<{ success: boolean; message: string }> {
         if (!content.trim()) throw new Error("content is required");
 
-        // Try exact-content match first (server hashes content to the same id).
+        // Exact-content match first (server hashes (project, content) → same id).
         const exact = await this.request<{ deleted: number }>(
             "POST",
             "/api/plugins/supermemory/forget",
-            { content },
+            {
+                content,
+                ...(opts.project ? { project: opts.project } : {}),
+            },
         );
         if (exact.deleted > 0) {
             return { success: true, message: "Forgot memory (exact match)" };
         }
 
-        // Semantic fallback — find the closest match and delete it if above threshold.
+        // Semantic fallback — scoped to the same project(s).
         const SIM_THRESHOLD = 0.85;
-        const search = await this.search(content, 5);
+        const search = await this.search(content, 5, {
+            project: opts.project,
+        });
         const hit = search.results.find((m) => m.similarity >= SIM_THRESHOLD);
         if (!hit) {
             return {
@@ -89,7 +122,10 @@ export class MemoryClient {
             { id: hit.id },
         );
         if (byId.deleted === 0) {
-            return { success: false, message: "Semantic match belonged to another user or team — cannot forget." };
+            return {
+                success: false,
+                message: "Semantic match belonged to another user or team — cannot forget.",
+            };
         }
         return {
             success: true,
@@ -98,18 +134,43 @@ export class MemoryClient {
     }
 
     /** Semantic search — server embeds the query and auto-scopes to the caller's refs. */
-    async search(query: string, limit = 10): Promise<SearchResult> {
+    async search(
+        query: string,
+        limit = 10,
+        opts: SearchOptions = {},
+    ): Promise<SearchResult> {
         if (!query.trim()) throw new Error("query is required");
         const start = Date.now();
+        const body: Record<string, unknown> = { query, limit };
+        if (opts.projects && opts.projects.length > 0) {
+            body.projects = opts.projects;
+        } else if (opts.project) {
+            body.project = opts.project;
+        }
         const res = await this.request<{
-            results: Array<{ id: string; content: string; similarity: number; createdAt: string | null }>;
-        }>("POST", "/api/plugins/supermemory/search", { query, limit });
+            results: Array<{
+                id: string;
+                content: string;
+                similarity: number;
+                project?: string;
+                createdAt: string | null;
+            }>;
+        }>("POST", "/api/plugins/supermemory/search", body);
         const results: Memory[] = res.results.map((r) => ({
             id: r.id,
             memory: r.content,
             similarity: r.similarity,
+            project: r.project,
             createdAt: r.createdAt ?? undefined,
         }));
         return { results, total: results.length, timing: Date.now() - start };
+    }
+
+    /** Identity lookup — which email/role/teams is this MCP bound to? */
+    async whoami(): Promise<WhoamiResult> {
+        return this.request<WhoamiResult>(
+            "GET",
+            "/api/plugins/supermemory/whoami",
+        );
     }
 }

@@ -6,18 +6,37 @@ type: mcp
 
 ## What it does
 
-Registers an MCP server that gives Claude Code two tools for building
+Registers an MCP server that gives Claude Code three tools for building
 persistent memory across conversations:
 
-- `memory({ content, action: "save" | "forget" })` — save a fact the user
-  shares (preferences, goals, project info) or forget one that's outdated.
-  Forget resolves by exact content match first, then semantic similarity.
-- `recall({ query, limit? })` — semantic search over saved memories.
+- `memory({ content, action: "save" | "forget", project? })` — save a fact
+  the user shares (preferences, goals, project info) or forget one that's
+  outdated. Forget resolves by exact `(project, content)` hash first, then
+  semantic similarity (threshold 0.85) inside the same project.
+- `recall({ query, limit?, project? })` — semantic search over saved
+  memories, markdown-formatted with percent-match and project tag.
+- `whoAmI()` — identify which gateway account/email/teams this MCP is
+  bound to. Useful for debugging.
 
 All embeddings are generated via the LiteLLM gateway's `/v1/embeddings`
-(local Ollama, 512-d Matryoshka) and vectors are persisted in the gateway's
-sqlite-vec store. Your API key scopes the collection — nothing is sent to
-`api.supermemory.ai` or any third party.
+and vectors are persisted in the gateway's sqlite-vec store. Your API key
+scopes the collection — nothing is sent to `api.supermemory.ai` or any
+third party.
+
+### Project scoping
+
+Every memory lives in a named bucket. If you omit `project`, it lands in
+`default`. Named buckets (e.g. `work`, `personal`, `gateway`) let you keep
+facts about different contexts separate: `recall` with a project returns
+only memories from that bucket. Slugs must match
+`^[a-z0-9][a-z0-9._-]{0,63}$`.
+
+### Limits
+
+- `content` max 200,000 chars
+- `query` max 1,000 chars
+- `project` slug max 64 chars, regex above
+- `recall.limit` max 50
 
 ## Wiring
 
@@ -39,13 +58,15 @@ The MCP server is registered in `~/.claude/settings.json` under
 
 <!-- TODO: migrate docs to LITELLMCTL_URL / LITELLMCTL_API_KEY without breaking deployments. -->
 
-Embedding model (`local/nomic-embed-text`) and dimensions (`512`) are fixed
-by the LiteLLM control plane — not configurable.
+Embedding model (`bedrock/titan-embed-v2`, 1024-d) is fixed by the LiteLLM
+control plane — not configurable.
 
 ## Data layout
 
 Memories live in the gateway's `plugin_chunks` table under collection
-`memories`, with vectors in `plugin_chunks_vec_512`. Scoped by
-`api_key_hash`, so rotating a key orphans the old memories. Purge with
-the `forget` tool or drop the collection via the gateway admin tooling
-before rotating.
+`memories`, with vectors in `plugin_chunks_vec_1024`. Isolation is by
+gateway user (via `plugin_ref_chunks` overlays); team memberships grant
+read access to shared memories tagged under a team ref. Project slug is
+stored in each memory's metadata JSON and filtered server-side via
+`json_extract`. Forget is user-scoped — you cannot remove a teammate's
+memory.
