@@ -742,12 +742,23 @@ export async function syncSubmodules(
         result,
       });
     } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      // Flip the job to "failed" now so the UI stops showing a stuck
+      // "indexing" bar — otherwise it sits there until the gateway's 120s
+      // staleness reaper notices the missing heartbeats.
+      await upsertJob(config, {
+        codebaseId: identity.codebaseId,
+        branch: identity.branch,
+        collection,
+        status: "failed",
+        error: message,
+      }).catch(() => {});
       reports.push({
         codebaseId: identity.codebaseId,
         branch: identity.branch,
         absPath: sm.absPath,
         relPath: sm.relPath,
-        error: err instanceof Error ? err.message : String(err),
+        error: message,
       });
       continue;
     }

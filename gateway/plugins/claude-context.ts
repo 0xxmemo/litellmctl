@@ -549,7 +549,7 @@ async function handleUsage(req: Request): Promise<Response> {
     )
     .all() as Array<{ name: string; dimension: number; createdAt: number }>;
 
-  const allJobs = db
+  const rawJobs = db
     .prepare(
       `SELECT codebase_id AS codebaseId, branch, collection, status, percentage,
               head_commit AS headCommit, error,
@@ -571,6 +571,33 @@ async function handleUsage(req: Request): Promise<Response> {
       totalChunks: number | null;
       updatedAt: number;
     }>;
+
+  // Apply the staleness reaper so the UI doesn't keep showing "indexing" for
+  // jobs whose client died without flipping the status. reapIfStale writes
+  // back to the DB if it fires, so subsequent reads see the failed state.
+  const allJobs = rawJobs.map((j) => {
+    if (j.status !== "indexing") return j;
+    const reaped = reapIfStale({
+      codebase_id: j.codebaseId,
+      branch: j.branch,
+      collection: j.collection,
+      status: j.status as IndexingJob["status"],
+      percentage: j.percentage,
+      head_commit: j.headCommit,
+      error: j.error,
+      total_files: j.totalFiles,
+      indexed_files: j.indexedFiles,
+      total_chunks: j.totalChunks,
+      started_at: j.updatedAt,
+      updated_at: j.updatedAt,
+    });
+    return {
+      ...j,
+      status: reaped.status,
+      error: reaped.error,
+      updatedAt: reaped.updated_at,
+    };
+  });
 
   const byCollection = new Map<string, typeof allJobs>();
   for (const j of allJobs) {

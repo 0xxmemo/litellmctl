@@ -182,7 +182,17 @@ async function runCli(argv: string[]): Promise<void> {
           emit({ done: true, ...result, submodules: submoduleReports });
         }
       } catch (err) {
-        emit({ error: err instanceof Error ? err.message : String(err) });
+        const message = err instanceof Error ? err.message : String(err);
+        // Flip the parent job to "failed" so the UI doesn't sit on a stale
+        // "indexing" bar waiting for the 120s heartbeat reaper.
+        await gatewayPost(config, "/api/plugins/claude-context/jobs", {
+          codebaseId: identity.codebaseId,
+          branch: identity.branch,
+          collection,
+          status: "failed",
+          error: message,
+        }).catch(() => {});
+        emit({ error: message });
         process.exit(1);
       }
       return;
