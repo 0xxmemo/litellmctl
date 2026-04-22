@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Download, Trash2 } from "lucide-react";
 import { CopyButton } from "./copy-button";
 import { usePlugins, usePluginTargets } from "@/hooks/use-plugins";
@@ -14,11 +14,17 @@ export function PluginsInstall({ apiKey, baseUrl }: PluginsInstallProps) {
   const { data: plugins = [], isLoading: pluginsLoading } = usePlugins();
   const { data: targets = [], isLoading: targetsLoading } = usePluginTargets();
   const [selectedTarget, setSelectedTarget] = useState<string>("claude-code");
-  const [showUninstall, setShowUninstall] = useState<Record<string, boolean>>({});
+  const [selectedPlugin, setSelectedPlugin] = useState<string>("");
+  const [showUninstall, setShowUninstall] = useState<boolean>(false);
 
-  const toggleUninstall = (slug: string) => {
-    setShowUninstall((prev) => ({ ...prev, [slug]: !prev[slug] }));
-  };
+  // Default to the first plugin (index 0) once the list loads.
+  useEffect(() => {
+    if (plugins.length > 0 && !selectedPlugin) {
+      setSelectedPlugin(plugins[0].slug);
+    }
+  }, [plugins, selectedPlugin]);
+
+  const plugin = plugins.find((p) => p.slug === selectedPlugin);
 
   return (
     <div className="space-y-3">
@@ -32,32 +38,46 @@ export function PluginsInstall({ apiKey, baseUrl }: PluginsInstallProps) {
         </p>
       ) : (
         <div className="space-y-3">
-          {/* Target Platform Selector */}
-          <div className="space-y-1">
-            <label className="text-xs font-medium text-muted-foreground">
-              Target Platform
-            </label>
-            <select
-              value={selectedTarget}
-              onChange={(e) => setSelectedTarget(e.target.value)}
-              className="glass glass--outline gateway-select"
-            >
-              {targets.map((target) => (
-                <option key={target.id} value={target.id}>
-                  {target.name}
-                </option>
-              ))}
-            </select>
-            <p className="text-xs text-muted-foreground">
-              Plugins register an MCP server in:{" "}
-              <code className="text-xs">
-                {targets.find((t) => t.id === selectedTarget)?.settingsDir || "~/.claude"}
-              </code>
-              /settings.json
-            </p>
+          {/* Compact selector row — plugin + target side by side */}
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                Plugin
+              </label>
+              <select
+                value={selectedPlugin}
+                onChange={(e) => {
+                  setSelectedPlugin(e.target.value);
+                  setShowUninstall(false);
+                }}
+                className="glass glass--outline gateway-select"
+              >
+                {plugins.map((p) => (
+                  <option key={p.slug} value={p.slug}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-muted-foreground">
+                Target Platform
+              </label>
+              <select
+                value={selectedTarget}
+                onChange={(e) => setSelectedTarget(e.target.value)}
+                className="glass glass--outline gateway-select"
+              >
+                {targets.map((target) => (
+                  <option key={target.id} value={target.id}>
+                    {target.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          {plugins.map((plugin) => {
+          {plugin && (() => {
             const installUrl = `${baseUrl}/api/plugins/install.sh?slug=${plugin.slug}&target=${selectedTarget}`;
             const uninstallUrl = `${baseUrl}/api/plugins/uninstall.sh?slug=${plugin.slug}&target=${selectedTarget}`;
             // TODO: default to LITELLMCTL_API_KEY after migration from LLM_GATEWAY_API_KEY.
@@ -65,10 +85,9 @@ export function PluginsInstall({ apiKey, baseUrl }: PluginsInstallProps) {
               targets.find((t) => t.id === selectedTarget)?.configVar || "LLM_GATEWAY_API_KEY";
             const installCmd = `curl -fsSL ${installUrl} | ${configVar}="${KEY_PLACEHOLDER}" bash`;
             const uninstallCmd = `curl -fsSL ${uninstallUrl} | bash`;
-            const isUninstallVisible = showUninstall[plugin.slug] ?? false;
 
             return (
-              <div key={plugin.slug} className="space-y-3 rounded-lg border border-border/50 bg-muted/35 p-4 backdrop-blur-md dark:border-white/5">
+              <div className="space-y-3 rounded-lg border border-border/50 bg-muted/35 p-4 backdrop-blur-md dark:border-white/5">
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
@@ -117,13 +136,13 @@ export function PluginsInstall({ apiKey, baseUrl }: PluginsInstallProps) {
                 <div className="space-y-1">
                   <button
                     type="button"
-                    onClick={() => toggleUninstall(plugin.slug)}
+                    onClick={() => setShowUninstall((v) => !v)}
                     className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors"
                   >
                     <Trash2 className="h-3.5 w-3.5 shrink-0" />
-                    <span>{isUninstallVisible ? "Hide uninstall" : "Uninstall"}</span>
+                    <span>{showUninstall ? "Hide uninstall" : "Uninstall"}</span>
                   </button>
-                  {isUninstallVisible && (
+                  {showUninstall && (
                     <div className="flex items-center gap-4 mt-1">
                       <code className="text-xs break-all font-mono text-muted-foreground select-all flex-1">
                         {uninstallCmd}
@@ -136,7 +155,7 @@ export function PluginsInstall({ apiKey, baseUrl }: PluginsInstallProps) {
                 </div>
               </div>
             );
-          })}
+          })()}
         </div>
       )}
     </div>
