@@ -515,18 +515,31 @@ export function searchVectors(
   const parsed = filterExpr ? parseFilterExpr(filterExpr) : null;
   const k = Math.max(1, Math.min(200, Math.floor(topK) || 10));
 
-  // Overfetch when post-KNN filtering is active (filter expr or ref overlay).
+  // vec0 rejects WHERE constraints on auxiliary columns (the `+collection`
+  // declaration in ensureVecTable makes it aux, not a partition key). Run
+  // KNN unscoped and narrow to the caller's collection via the plugin_chunks
+  // join below. Over-fetch generously because the same vec_<dim> table is
+  // shared across every collection at that dimension — without headroom, a
+  // dim with many collections could return almost no rows in ours.
+  const dimCollCount = (db
+    .prepare(
+      "SELECT COUNT(*) AS n FROM plugin_collections WHERE dimension = ?",
+    )
+    .get(coll.dimension) as { n: number }).n || 1;
   const postFilter = parsed !== null || refIds !== null;
-  const knnLimit = postFilter ? k * 4 : k;
+  const baseMultiplier = postFilter ? 4 : 1;
+  const knnLimit = Math.min(
+    2000,
+    Math.max(k, k * baseMultiplier * dimCollCount),
+  );
   const nearest = db
     .prepare(
       `SELECT rowid, distance
          FROM ${vecTable}
         WHERE vector MATCH ?
-          AND k = ?
-          AND collection = ?`,
+          AND k = ?`,
     )
-    .all(JSON.stringify(queryVector), knnLimit, collection) as {
+    .all(JSON.stringify(queryVector), knnLimit) as {
     rowid: number;
     distance: number;
   }[];
@@ -535,8 +548,8 @@ export function searchVectors(
 
   const rowIds = nearest.map((n) => n.rowid);
   const placeholders = rowIds.map(() => "?").join(",");
-  let sql = `SELECT * FROM plugin_chunks WHERE rowid IN (${placeholders})`;
-  const args: (string | number)[] = [...rowIds];
+  let sql = `SELECT * FROM plugin_chunks WHERE rowid IN (${placeholders}) AND collection = ?`;
+  const args: (string | number)[] = [...rowIds, collection];
   if (parsed && parsed.values.length > 0) {
     sql += ` AND ${parsed.column} IN (${parsed.values.map(() => "?").join(",")})`;
     args.push(...parsed.values);
