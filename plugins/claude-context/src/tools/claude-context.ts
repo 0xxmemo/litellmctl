@@ -19,8 +19,8 @@ import { execSync } from "child_process";
 
 // ── Config ────────────────────────────────────────────────────────────────────
 
-const EMBEDDING_MODEL = "local/nomic-embed-text";
-const EMBEDDING_DIMENSIONS = 512;
+const EMBEDDING_MODEL = "bedrock/titan-embed-v2";
+const EMBEDDING_DIMENSIONS = 1024;
 const CHUNK_LINES = 150;
 const CHUNK_OVERLAP = 30;
 const EMBED_BATCH_SIZE = 32;

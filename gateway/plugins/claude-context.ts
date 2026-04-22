@@ -31,8 +31,8 @@ import type { GatewayPlugin } from "../lib/plugin-registry";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const EMBEDDING_MODEL = "local/nomic-embed-text";
-const EMBEDDING_DIMENSIONS = 512;
+const EMBEDDING_MODEL = "bedrock/titan-embed-v2";
+const EMBEDDING_DIMENSIONS = 1024;
 
 // ── Validation ────────────────────────────────────────────────────────────────
 
@@ -692,5 +692,25 @@ export const claudeContextPlugin: GatewayPlugin = {
       `CREATE INDEX IF NOT EXISTS idx_plugin_indexing_jobs_collection
          ON plugin_indexing_jobs(collection)`,
     );
+
+    // One-shot cleanup: previous installs embedded at 512-d using a local
+    // model. After the switch to bedrock/titan-embed-v2 @ 1024-d those chunks
+    // are dead weight — vector searches can't mix dimensions and the local
+    // embedder is gone, so they'll never be searched again. Drop every
+    // collection whose dimension != EMBEDDING_DIMENSIONS along with its jobs.
+    const stale = db
+      .prepare(
+        "SELECT name FROM plugin_collections WHERE name LIKE 'code_chunks_%' AND dimension != ?",
+      )
+      .all(EMBEDDING_DIMENSIONS) as Array<{ name: string }>;
+    for (const { name } of stale) {
+      dropCollection(name);
+      db.prepare("DELETE FROM plugin_indexing_jobs WHERE collection = ?").run(name);
+    }
+    if (stale.length > 0) {
+      console.log(
+        `[claude-context] dropped ${stale.length} legacy collection(s) with dimension != ${EMBEDDING_DIMENSIONS}`,
+      );
+    }
   },
 };

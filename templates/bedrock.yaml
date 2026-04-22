@@ -1,0 +1,31 @@
+name: AWS Bedrock
+desc: AWS API credentials — Titan Text Embeddings v2 (Matryoshka, 256/512/1024 dims, $0.02/M tokens)
+auth: api_key
+env_vars:
+  - AWS_ACCESS_KEY_ID
+  - AWS_SECRET_ACCESS_KEY
+  - AWS_REGION_NAME
+role: supplemental
+
+models: []
+
+# Titan v2 is the drop-in replacement for local/nomic-embed-text when you shrink
+# the host off local inference. Default 1024-d (Titan's full vector) — switch
+# to 256 or 512 via the Matryoshka option below if you want smaller rows. If
+# you change the dimension, the claude-context plugin's EMBEDDING_DIMENSIONS
+# must match and every existing chunk has to be re-embedded.
+#
+# Credentials resolve through boto3's default chain (env vars → shared config →
+# IAM instance profile). Listing AWS_* in env_vars above only drives the wizard's
+# readiness check; on EC2 with an attached IAM role you can leave them unset and
+# boto3 will fall through to the instance metadata service.
+embedding_models:
+  - model_name: bedrock/titan-embed-v2
+    model: bedrock/amazon.titan-embed-text-v2:0
+    dimensions: 1024
+    model_info:
+      mode: embedding
+      input_cost_per_token: 0.00000002
+      output_cost_per_token: 0
+      output_vector_size: 1024
+      embedding_dimensions_options: [256, 512, 1024]
