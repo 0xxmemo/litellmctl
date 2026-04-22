@@ -41,7 +41,7 @@ configure_settings() {
     local settings_file="$1"
     if command -v python3 >/dev/null 2>&1; then
         python3 - "$settings_file" "$PLUGIN_SRC_DIR" "$GATEWAY_ORIGIN" "$API_KEY" << 'PYEOF'
-import json, os, sys
+import json, os, shlex, sys
 
 settings_file, plugin_src, gateway_url, api_key = sys.argv[1:5]
 entry_name = "supermemory"
@@ -63,9 +63,38 @@ settings["mcpServers"][entry_name] = {
     },
 }
 
+# Auto-recall UserPromptSubmit hook. Injects relevant memories as additional
+# context on every prompt so the agent doesn't have to call `recall` itself.
+# We keep a single supermemory-tagged entry, replacing any previous one.
+hook_script = os.path.join(plugin_src, "hooks", "recall-on-prompt.sh")
+hook_cmd = (
+    f"LLM_GATEWAY_URL={shlex.quote(gateway_url)} "
+    f"LLM_GATEWAY_API_KEY={shlex.quote(api_key)} "
+    f"bash {shlex.quote(hook_script)}"
+)
+hook_entry = {
+    "_tag": "supermemory",  # marker so uninstall can strip only ours
+    "hooks": [
+        {
+            "type": "command",
+            "command": hook_cmd,
+            "timeout": 5,
+        }
+    ],
+}
+
+hooks = settings.setdefault("hooks", {})
+ups = hooks.setdefault("UserPromptSubmit", [])
+if not isinstance(ups, list):
+    ups = []
+    hooks["UserPromptSubmit"] = ups
+ups[:] = [h for h in ups if not (isinstance(h, dict) and h.get("_tag") == "supermemory")]
+ups.append(hook_entry)
+
 with open(settings_file, "w") as f:
     json.dump(settings, f, indent=2)
 print(f"  Registered mcpServers.{entry_name}")
+print(f"  Registered hooks.UserPromptSubmit (auto-recall)")
 PYEOF
     elif command -v jq >/dev/null 2>&1; then
         local tmp
@@ -73,7 +102,7 @@ PYEOF
         jq --arg plugin_src "$PLUGIN_SRC_DIR" \
            --arg gateway "$GATEWAY_ORIGIN" \
            --arg key "$API_KEY" '
-            if .mcpServers == null then .mcpServers = {} else . end |
+            (if .mcpServers == null then .mcpServers = {} else . end) |
             .mcpServers["supermemory"] = {
                 "command": "bun",
                 "args": ["run", ($plugin_src + "/src/index.ts")],
@@ -81,9 +110,21 @@ PYEOF
                     "LLM_GATEWAY_URL": $gateway,
                     "LLM_GATEWAY_API_KEY": $key
                 }
-            }
+            } |
+            (if .hooks == null then .hooks = {} else . end) |
+            (if .hooks.UserPromptSubmit == null then .hooks.UserPromptSubmit = [] else . end) |
+            .hooks.UserPromptSubmit = ([ .hooks.UserPromptSubmit[] | select(._tag != "supermemory") ]) |
+            .hooks.UserPromptSubmit += [{
+                "_tag": "supermemory",
+                "hooks": [{
+                    "type": "command",
+                    "command": ("LLM_GATEWAY_URL=\x27" + $gateway + "\x27 LLM_GATEWAY_API_KEY=\x27" + $key + "\x27 bash \x27" + $plugin_src + "/hooks/recall-on-prompt.sh\x27"),
+                    "timeout": 5
+                }]
+            }]
         ' "$settings_file" > "$tmp" && mv "$tmp" "$settings_file"
         echo "  Registered mcpServers.supermemory"
+        echo "  Registered hooks.UserPromptSubmit (auto-recall)"
     else
         echo "  Error: need python3 or jq to mutate settings.json" >&2
         exit 1

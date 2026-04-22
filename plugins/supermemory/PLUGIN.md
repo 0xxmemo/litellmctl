@@ -49,6 +49,30 @@ The MCP server is registered in `~/.claude/settings.json` under
 `mcpServers.supermemory` and runs via
 `bun run /Users/anon/.litellm/plugins/supermemory/src/index.ts`.
 
+## Auto-recall hook (the "efficient" path)
+
+Install also registers a `hooks.UserPromptSubmit` entry (tagged
+`_tag: "supermemory"` for clean uninstall) that runs
+`hooks/recall-on-prompt.sh` on every user prompt. The hook:
+
+1. Reads the prompt from the event JSON.
+2. Skips trivial prompts (< 6 chars or starting with `!`).
+3. Calls `/api/plugins/supermemory/search` with a 1.5 s timeout.
+4. Injects hits above `SUPERMEMORY_RECALL_MIN_SIMILARITY` (default 0.50)
+   as `hookSpecificOutput.additionalContext`.
+5. Silently no-ops on any failure — the user never sees an error.
+
+This means the agent gets relevant memories automatically without having
+to decide to call `recall` itself. Override behavior via env on the hook
+command (edit `settings.json`):
+
+| Var | Default |
+|---|---|
+| `SUPERMEMORY_RECALL_MIN_SIMILARITY` | `0.50` |
+| `SUPERMEMORY_RECALL_LIMIT` | `5` |
+| `SUPERMEMORY_RECALL_PROJECT` | `default` |
+| `SUPERMEMORY_RECALL_MAX_PROMPT` | `1000` (gateway cap) |
+
 ## Environment
 
 | Var | Required | Default |

@@ -16,20 +16,44 @@ try:
         settings = json.load(f)
 except Exception:
     settings = {}
-removed = False
+removed_mcp = False
 if "mcpServers" in settings and "supermemory" in settings["mcpServers"]:
     del settings["mcpServers"]["supermemory"]
-    removed = True
+    removed_mcp = True
+
+# Strip the auto-recall hook by the _tag marker written at install time.
+removed_hook = False
+hooks = settings.get("hooks") or {}
+ups = hooks.get("UserPromptSubmit")
+if isinstance(ups, list):
+    before = len(ups)
+    ups = [h for h in ups if not (isinstance(h, dict) and h.get("_tag") == "supermemory")]
+    if not ups:
+        del hooks["UserPromptSubmit"]
+    else:
+        hooks["UserPromptSubmit"] = ups
+    if len(ups) != before:
+        removed_hook = True
+if hooks is not None and not hooks:
+    settings.pop("hooks", None)
+
 with open(settings_file, "w") as f:
     json.dump(settings, f, indent=2)
-print("  Removed mcpServers.supermemory" if removed else "  mcpServers.supermemory not registered")
+print("  Removed mcpServers.supermemory" if removed_mcp else "  mcpServers.supermemory not registered")
+print("  Removed hooks.UserPromptSubmit (auto-recall)" if removed_hook else "  hooks.UserPromptSubmit (auto-recall) not registered")
 PYEOF
     elif command -v jq >/dev/null 2>&1; then
         local tmp
         tmp=$(mktemp)
-        jq 'if .mcpServers then (.mcpServers |= del(.["supermemory"])) else . end' \
-            "$SETTINGS_FILE" > "$tmp" && mv "$tmp" "$SETTINGS_FILE"
-        echo "  Removed mcpServers.supermemory (via jq)"
+        jq '
+            (if .mcpServers then .mcpServers |= del(.["supermemory"]) else . end) |
+            (if (.hooks // {}).UserPromptSubmit then
+                .hooks.UserPromptSubmit |= [ .[] | select(._tag != "supermemory") ]
+             else . end) |
+            (if (.hooks // {}).UserPromptSubmit == [] then .hooks |= del(.UserPromptSubmit) else . end) |
+            (if .hooks == {} then del(.hooks) else . end)
+        ' "$SETTINGS_FILE" > "$tmp" && mv "$tmp" "$SETTINGS_FILE"
+        echo "  Removed mcpServers.supermemory + hooks.UserPromptSubmit (via jq)"
     else
         echo "  Warning: neither python3 nor jq available; skipping settings.json edit" >&2
     fi
