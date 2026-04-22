@@ -2,6 +2,37 @@
 
 All notable changes to litellmctl are documented here.
 
+## [1.6.1] - 2026-04-22
+
+### Features
+
+- **Supermemory: project scoping.** Memories now carry a `project` slug (default `default`). Save/forget/search/usage all honor it, and the same content in two projects hashes to distinct IDs — no cross-project forget collisions. The MCP `memory` and `recall` tools gained a `project` field; the UI's recent-memories list shows a per-entry chip and a client-side project selector.
+- **Supermemory: auto-recall hook.** Installer now registers `hooks.UserPromptSubmit` pointing at `plugins/supermemory/hooks/recall-on-prompt.sh`. On every user prompt the hook POSTs to `/api/plugins/supermemory/search` with a 1.5 s hard timeout and injects hits above a similarity floor (default 0.50) as `hookSpecificOutput.additionalContext` — the agent gets relevant context automatically without having to call `recall`. Fail-open on every error path; a down gateway never surfaces to the user. Tagged with `_tag: "supermemory"` so uninstall strips only our entry. Tunable via `SUPERMEMORY_RECALL_{MIN_SIMILARITY,LIMIT,PROJECT,MAX_PROMPT}`.
+- **Supermemory: `whoAmI` tool and `/whoami` endpoint.** Returns `{email, role, teams}` so the agent can verify which gateway account the MCP is bound to without making it guess from side channels.
+- **Vectordb: `metadata.<key>` filter.** `parseFilterExpr` now accepts `metadata.<key> in ["a","b"]` backed by SQLite's `json_extract`. Additive — no existing caller changes. `ParsedFilter` became a discriminated union (`{kind: "column"} | {kind: "metadata"}`); `searchVectors`, `searchHybrid` FTS branch, and `queryByFilter` all emit the appropriate WHERE fragment. This unblocked supermemory project scoping without overloading `relativePath`.
+- **Hybrid vector + FTS5 search** for code/memory lookups. Vector KNN and BM25 run in parallel, results fused with Reciprocal Rank Fusion (`RRF_K = 60`) so literal-keyword hits the embedder misses (e.g. "heartbeat", "staleness reaper") get rescued by FTS while concept queries stay carried by the vector side.
+- **`pick-model` skill.** Ships `/m-<model>` slash commands (one per configured model) for fast switching in Claude Code. Install/uninstall scripts wire them into `~/.claude/commands`.
+- **`ssm-ops` skill.** `ssm-run` script + docs for executing commands on the production EC2 instance via AWS SSM (git pull, restart gateway, tail logs, hotfixes) — handles the litellmctl PATH and `systemd --user` gotchas.
+- **Claude-context: job controls.** Admin can cancel running indexing jobs, clear completed/failed jobs from the UI, and the background worker now detects and reaps stale jobs (PID dead / heartbeat expired) so a crashed indexer doesn't block future runs. Job failure messages surface cleanly in the status endpoint.
+- **Claude-context: grep-nudge hook.** `UserPromptSubmit` hook that detects `grep`/`rg` invocations in the prompt and nudges the agent to use semantic search instead when a codebase is indexed. State lives under `~/.claude/plugin-state/`.
+- **Claude-context: scope tree + branch/codebase management.** Directory-structure visualization in the usage panel; codebases are identity-keyed on the `origin` remote with a per-branch working-tree overlay so the same repo indexed on multiple branches shares embeddings for unchanged files.
+- **Server-side plugin registry.** `gateway/lib/plugin-registry.ts` now owns plugin route mounting at `/api/plugins/<slug>/<relpath>` with a typed `GatewayPlugin` contract (routes, `migrate()` hook). Both `claude-context` and `supermemory` migrated onto it.
+- **Admin: restart gateway from the UI.** New admin endpoint triggers a full gateway restart. The self-restart path was reworked so the service actually completes the restart when invoked from within itself (previously the parent process would kill the reloader mid-exec).
+- **AWS Bedrock Titan embeddings.** New `env.example` entries and provider template for `bedrock/titan-embed-v2` (1024-d). Supermemory's embedding model moved off local Ollama to Titan for consistent quality across the install; on startup the plugin's `migrate()` drops stale-dim collections so the 512→1024 cutover is seamless (no memories were in production).
+
+### Fixes
+
+- **Vectordb KNN collection filter.** `vec0` rejects WHERE constraints on auxiliary columns, so filtering by `collection` inside the KNN MATCH was silently dropping rows whenever a dimension was shared across multiple collections. The KNN now runs unscoped with a generous over-fetch proportional to `collections-per-dim`, and `collection` is re-applied in the follow-up join. Without this, collections with many sibling collections at the same dimension returned near-empty result sets.
+- **Gateway restart mid-service.** `bin/gateway-launch.sh` and the systemd unit were racing: the admin endpoint kicked off a restart, which killed its own parent before the child had exec'd. Sequencing fixed; restart completes reliably when triggered from the UI.
+- **Claude-context validation + staleness.** Tighter validation in vectordb writes and the claude-context job loop; stale jobs (crashed indexer, dead PID) now get reaped automatically instead of blocking new indexing runs for the same codebase.
+
+### Changes
+
+- **Plugins/skills installer refactor.** `plugins-install` and `skills-install` components collapsed to a compact list layout (row-per-entry with select dropdown defaulting to index 0) — scales past the ~4 plugins point where the old stacked-card grid got unwieldy. Skill installers ship as tarball bundles (same pattern plugins already used) so adding a new file no longer needs a new route.
+- **Oversized-file chunking** in claude-context: files larger than the token budget are now split along semantic boundaries instead of hard byte cuts, improving retrieval quality on monolithic source files.
+- **Plugin-state paths standardized** to `~/.claude/plugin-state/` for every plugin (grep-nudge, claude-context, supermemory) so nothing gets committed to user repos and all state lives in one predictable place.
+- **Auth page branding.** Icons replaced with the logo image.
+
 ## [1.6.0] - 2026-04-21
 
 ### Features
