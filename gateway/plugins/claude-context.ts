@@ -605,35 +605,42 @@ async function handleUsage(req: Request): Promise<Response> {
     byCollection.get(j.collection)!.push(j);
   }
 
-  const results = collections.map((c) => {
-    const counts = db
-      .prepare(
-        `SELECT COUNT(*) AS chunks, COUNT(DISTINCT relative_path) AS files
-           FROM plugin_chunks
-          WHERE collection = ?`,
-      )
-      .get(c.name) as { chunks: number; files: number };
-    const jobs = byCollection.get(c.name) ?? [];
-    const codebaseId = jobs[0]?.codebaseId ?? null;
-    return {
-      name: c.name,
-      codebaseId,
-      dimension: c.dimension,
-      createdAt: c.createdAt,
-      chunks: counts.chunks,
-      files: counts.files,
-      branches: jobs.map((j) => ({
-        branch: j.branch,
-        status: j.status,
-        percentage: j.percentage,
-        headCommit: j.headCommit,
-        totalFiles: j.totalFiles,
-        indexedFiles: j.indexedFiles,
-        totalChunks: j.totalChunks,
-        updatedAt: j.updatedAt,
-      })),
-    };
-  });
+  // Skip collections with no surviving job rows — those are orphan chunk sets
+  // left behind by a Clear. They're still reusable on the next index_codebase
+  // (chunk IDs are content-hashed, so chunksExists picks them back up), but
+  // the UI shouldn't render rows without a codebaseId label.
+  const results = collections
+    .map((c) => {
+      const jobs = byCollection.get(c.name) ?? [];
+      const codebaseId = jobs[0]?.codebaseId ?? null;
+      if (!codebaseId) return null;
+      const counts = db
+        .prepare(
+          `SELECT COUNT(*) AS chunks, COUNT(DISTINCT relative_path) AS files
+             FROM plugin_chunks
+            WHERE collection = ?`,
+        )
+        .get(c.name) as { chunks: number; files: number };
+      return {
+        name: c.name,
+        codebaseId,
+        dimension: c.dimension,
+        createdAt: c.createdAt,
+        chunks: counts.chunks,
+        files: counts.files,
+        branches: jobs.map((j) => ({
+          branch: j.branch,
+          status: j.status,
+          percentage: j.percentage,
+          headCommit: j.headCommit,
+          totalFiles: j.totalFiles,
+          indexedFiles: j.indexedFiles,
+          totalChunks: j.totalChunks,
+          updatedAt: j.updatedAt,
+        })),
+      };
+    })
+    .filter((r): r is NonNullable<typeof r> => r !== null);
 
   const indexing = allJobs.filter(
     (j) => j.status === "indexing" || j.status === "failed" || j.status === "cancelled",
