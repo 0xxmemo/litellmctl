@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   Square,
   Trash2,
+  Eraser,
 } from "lucide-react";
 import {
   Card,
@@ -32,6 +33,7 @@ import type {
   UseClaudeContextUsageReturn,
   UseRemoveClaudeContextCodebaseReturn,
   UseStopClaudeContextJobReturn,
+  UseClearClaudeContextJobReturn,
 } from "@/hooks/use-plugins";
 
 interface Props {
@@ -39,6 +41,7 @@ interface Props {
   isAdmin: boolean;
   removeCodebase: UseRemoveClaudeContextCodebaseReturn;
   stopJob: UseStopClaudeContextJobReturn;
+  clearJob: UseClearClaudeContextJobReturn;
 }
 
 function formatRelative(timestamp: number): string {
@@ -54,11 +57,13 @@ function formatRelative(timestamp: number): string {
 
 type StopTarget = { codebaseId: string; branch: string };
 type RemoveTarget = { codebaseId: string };
+type ClearTarget = { codebaseId: string; branch: string };
 
-export function ClaudeContextStats({ query, isAdmin, removeCodebase, stopJob }: Props) {
+export function ClaudeContextStats({ query, isAdmin, removeCodebase, stopJob, clearJob }: Props) {
   const { data, isLoading, error } = query;
   const [stopTarget, setStopTarget] = useState<StopTarget | null>(null);
   const [removeTarget, setRemoveTarget] = useState<RemoveTarget | null>(null);
+  const [clearTarget, setClearTarget] = useState<ClearTarget | null>(null);
 
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -131,6 +136,20 @@ export function ClaudeContextStats({ query, isAdmin, removeCodebase, stopJob }: 
                       >
                         <Square className="w-3 h-3 mr-1" />
                         Stop
+                      </Button>
+                    )}
+                    {isAdmin && (job.status === 'failed' || job.status === 'cancelled') && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 px-2 text-xs"
+                        onClick={() =>
+                          setClearTarget({ codebaseId: job.codebaseId, branch: job.branch })
+                        }
+                        disabled={clearJob.isPending}
+                      >
+                        <Eraser className="w-3 h-3 mr-1" />
+                        Clear
                       </Button>
                     )}
                   </div>
@@ -292,6 +311,51 @@ export function ClaudeContextStats({ query, isAdmin, removeCodebase, stopJob }: 
               }}
             >
               {stopJob.isPending ? 'Stopping…' : 'Stop Indexing'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Clear terminal job confirmation */}
+      <Dialog open={clearTarget !== null} onOpenChange={(open) => { if (!open) setClearTarget(null); }}>
+        <DialogContent className="sm:max-w-[460px] w-[95vw] sm:w-full">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eraser className="h-5 w-5" />
+              Clear Job Entry
+            </DialogTitle>
+            <DialogDescription>
+              Remove the job row for{' '}
+              <strong className="font-mono break-all">{clearTarget?.codebaseId}</strong>
+              {' '}on branch <strong className="font-mono">{clearTarget?.branch}</strong> from the
+              panel?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <p className="text-xs text-muted-foreground">
+              Only this branch's overlay and job row are removed. Embedded chunks are kept — the next
+              <code className="text-xs"> index_codebase</code> run reuses them.
+            </p>
+          </div>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setClearTarget(null)}
+              className="w-full sm:w-auto"
+            >
+              Cancel
+            </Button>
+            <Button
+              className="w-full sm:w-auto"
+              disabled={!clearTarget || clearJob.isPending}
+              onClick={() => {
+                if (!clearTarget) return;
+                clearJob.mutate(clearTarget, {
+                  onSettled: () => setClearTarget(null),
+                });
+              }}
+            >
+              {clearJob.isPending ? 'Clearing…' : 'Clear Entry'}
             </Button>
           </DialogFooter>
         </DialogContent>

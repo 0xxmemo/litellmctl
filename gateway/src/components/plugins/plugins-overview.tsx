@@ -8,6 +8,7 @@ import {
   useSupermemoryUsage,
   useRemoveClaudeContextCodebase,
   useStopClaudeContextJob,
+  useClearClaudeContextJob,
 } from "@/hooks/use-plugins";
 
 interface Props {
@@ -21,6 +22,7 @@ export function PluginsOverview({ enabled, isAdmin }: Props) {
   const supermemoryQuery = useSupermemoryUsage(20, { enabled });
   const removeCodebase = useRemoveClaudeContextCodebase();
   const stopJob = useStopClaudeContextJob();
+  const clearJob = useClearClaudeContextJob();
 
   return (
     <Tabs value={active} onValueChange={setActive} className="w-full">
@@ -41,6 +43,7 @@ export function PluginsOverview({ enabled, isAdmin }: Props) {
           isAdmin={isAdmin}
           removeCodebase={removeCodebase}
           stopJob={stopJob}
+          clearJob={clearJob}
         />
       </TabsContent>
 

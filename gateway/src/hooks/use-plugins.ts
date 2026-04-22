@@ -173,6 +173,15 @@ async function cancelJobApi(params: { codebaseId: string; branch?: string }): Pr
   if (!res.ok) throw new Error(`HTTP ${res.status}`)
 }
 
+async function clearJobApi(params: { codebaseId: string; branch: string }): Promise<void> {
+  const qs = `codebaseId=${encodeURIComponent(params.codebaseId)}&branch=${encodeURIComponent(params.branch)}`
+  const res = await fetch(`/api/plugins/claude-context/jobs?${qs}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}
+
 export function useRemoveClaudeContextCodebase() {
   const qc = useQueryClient()
   return useMutation({
@@ -192,6 +201,16 @@ export function useStopClaudeContextJob() {
 }
 
 export type UseStopClaudeContextJobReturn = ReturnType<typeof useStopClaudeContextJob>
+
+export function useClearClaudeContextJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: clearJobApi,
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.claudeContextUsage }),
+  })
+}
+
+export type UseClearClaudeContextJobReturn = ReturnType<typeof useClearClaudeContextJob>
 
 export function useSupermemoryUsage(limit = 20, options?: { enabled?: boolean }) {
   return useQuery({
