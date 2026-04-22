@@ -91,17 +91,23 @@ hook_env = {
 }
 session_start_cmd = os.path.join(plugin_src, "hooks", "session-start.sh")
 prompt_submit_cmd = os.path.join(plugin_src, "hooks", "prompt-search.sh")
+grep_nudge_cmd = os.path.join(plugin_src, "hooks", "grep-nudge.sh")
 
 settings.setdefault("hooks", {})
 
-def _replace_or_append(group_key, marker_substr, hook_obj):
+def _replace_or_append(group_key, marker_substr, hook_obj, matcher=None):
     group = settings["hooks"].setdefault(group_key, [])
     for entry in group:
         for h in entry.get("hooks", []):
             if marker_substr in (h.get("command") or ""):
                 h.update(hook_obj)
+                if matcher is not None:
+                    entry["matcher"] = matcher
                 return
-    group.append({"hooks": [hook_obj]})
+    block = {"hooks": [hook_obj]}
+    if matcher is not None:
+        block["matcher"] = matcher
+    group.append(block)
 
 env_prefix = " ".join(f"{k}={json.dumps(v)}" for k, v in hook_env.items())
 _replace_or_append(
@@ -112,6 +118,11 @@ _replace_or_append(
     "UserPromptSubmit", "claude-context/hooks/prompt-search.sh",
     {"type": "command", "command": f"env {env_prefix} {prompt_submit_cmd}", "timeout": 5},
 )
+_replace_or_append(
+    "PreToolUse", "claude-context/hooks/grep-nudge.sh",
+    {"type": "command", "command": f"env {env_prefix} {grep_nudge_cmd}", "timeout": 3},
+    matcher="Grep|Glob|Bash",
+)
 
 with open(settings_file, "w") as f:
     json.dump(settings, f, indent=2)
@@ -119,7 +130,10 @@ print("  Registered SessionStart + UserPromptSubmit hooks in settings.json")
 PYEOF
 
 # --- Ensure hook scripts are executable ---
-for hook in "${PLUGIN_SRC_DIR}/hooks/session-start.sh" "${PLUGIN_SRC_DIR}/hooks/prompt-search.sh"; do
+for hook in \
+    "${PLUGIN_SRC_DIR}/hooks/session-start.sh" \
+    "${PLUGIN_SRC_DIR}/hooks/prompt-search.sh" \
+    "${PLUGIN_SRC_DIR}/hooks/grep-nudge.sh"; do
     [ -f "$hook" ] && chmod +x "$hook"
 done
 

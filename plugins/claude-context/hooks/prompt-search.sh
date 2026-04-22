@@ -52,7 +52,10 @@ BLOCK=$(printf '%s' "$RESULTS" | jq -r '
 ')
 [ -n "$BLOCK" ] || exit 0
 
-CTX=$(printf '<claude-context relevance="top-%s">\n%s\n</claude-context>' "$LIMIT" "$BLOCK")
+# Trailing directive teaches iteration. Without it the model treats the
+# injected block as "the answer" and reverts to Grep for sub-questions.
+FOOTER='If these snippets do not cover the question, call `mcp__claude-context__search_code` with a refined query before reaching for Grep.'
+CTX=$(printf '<claude-context relevance="top-%s">\n%s\n\n%s\n</claude-context>' "$LIMIT" "$BLOCK" "$FOOTER")
 jq -n --arg ctx "$CTX" '{
     hookSpecificOutput: {
         hookEventName: "UserPromptSubmit",

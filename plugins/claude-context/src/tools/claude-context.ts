@@ -889,15 +889,23 @@ export const claudeContextToolDefs = [
   {
     name: "search_code",
     description:
-      "Search the caller's current branch of an indexed codebase using natural language. " +
-      "Results are filtered to the branch's working-tree overlay — code that exists on other branches " +
-      "but not on this one will not appear. Use for: finding implementations, understanding patterns.",
+      "PREFER THIS OVER Grep/Glob for any conceptual codebase question. Semantic search across " +
+      "the current branch's working tree via local embeddings — finds code by meaning, not exact " +
+      "string match. Results are scoped to the branch overlay (code on other branches won't appear).\n\n" +
+      "USE THIS FIRST when:\n" +
+      "  • exploring unfamiliar code (\"where is auth handled?\", \"how does X flow work?\")\n" +
+      "  • the target is a concept, behavior, or pattern, not a known identifier\n" +
+      "  • Grep would require you to guess the exact keyword\n" +
+      "  • you want related code, not just literal matches\n\n" +
+      "Use Grep/Glob INSTEAD when: you already know the exact identifier/string, you need regex, " +
+      "or you're filtering by filename pattern.\n\n" +
+      "Iterate: if the first query is off, refine and call again. Cheap and fast.",
     inputSchema: {
       type: "object",
       properties: {
         path: { type: "string", description: "Absolute path to the local checkout." },
-        query: { type: "string", description: "Natural language search query." },
-        limit: { type: "number", default: 10, maximum: 50 },
+        query: { type: "string", description: "Natural language query — describe what the code does, not how it's named." },
+        limit: { type: "number", default: 10, maximum: 50, description: "Top-K matches. Default 10 is usually right; raise to 20-30 for broad exploratory queries." },
       },
       required: ["path", "query"],
     },

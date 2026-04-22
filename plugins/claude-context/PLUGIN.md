@@ -34,7 +34,7 @@ The MCP server is registered in `~/.claude.json` under top-level `mcpServers.cla
 | `LLM_GATEWAY_API_KEY` | yes | — |
 
 <!-- TODO: migrate docs to LITELLMCTL_URL / LITELLMCTL_API_KEY without breaking deployments. -->
-| `CLAUDE_CONTEXT_STATE_DIR` | no | `~/.litellm/plugin-state/claude-context` |
+| `CLAUDE_CONTEXT_STATE_DIR` | no | `~/.claude/plugin-state/claude-context` |
 | `EMBEDDING_BATCH_SIZE` | no | `64` |
 
 ## Uninstall

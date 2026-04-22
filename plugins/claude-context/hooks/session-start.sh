@@ -23,7 +23,7 @@ if [ -z "$PLUGIN_ROOT" ]; then
     PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 fi
 
-STATE_DIR="${CLAUDE_CONTEXT_STATE_DIR:-$HOME/.litellm/plugin-state/claude-context}"
+STATE_DIR="${CLAUDE_CONTEXT_STATE_DIR:-$HOME/.claude/plugin-state/claude-context}"
 mkdir -p "$STATE_DIR"
 LOG="$STATE_DIR/auto-index.log"
 
@@ -32,5 +32,18 @@ nohup bun run "$PLUGIN_ROOT/src/index.ts" index --path "$ROOT" \
     >>"$LOG" 2>&1 </dev/null &
 disown 2>/dev/null || true
 
-# additionalContext: a one-line note for the model.
-printf 'claude-context: indexing/syncing %s in background (log: %s)\n' "$ROOT" "$LOG"
+# additionalContext: a directive that biases tool selection for the rest of
+# the session. Claude Code injects this before the first user turn, so it
+# functions as a mini system-prompt augmentation. Keep it short — long blocks
+# here compete for the same attention as actual user instructions.
+cat <<EOF
+This repository is indexed for semantic search (claude-context MCP).
+Indexing/syncing $ROOT in background (log: $LOG).
+
+Tool preference for this session:
+- For conceptual questions ("where is X handled?", "how does Y work?", "what
+  code implements Z?") call \`mcp__claude-context__search_code\` FIRST — it's
+  faster and more accurate than guessing a Grep keyword.
+- Iterate: refine the query and call again if the first pass is off.
+- Use Grep/Glob ONLY for exact identifiers, regex, or filename patterns.
+EOF
