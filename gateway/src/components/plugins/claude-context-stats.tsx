@@ -1,11 +1,44 @@
-import { FolderTree, FileCode, Database, GitBranch, Loader2, AlertCircle } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { useState } from "react";
+import {
+  FolderTree,
+  FileCode,
+  Database,
+  GitBranch,
+  Loader2,
+  AlertCircle,
+  AlertTriangle,
+  Square,
+  Trash2,
+} from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { StatCard } from "@/components/stat-card";
 import { PrettyAmount } from "@/components/pretty-amount";
-import type { UseClaudeContextUsageReturn } from "@/hooks/use-plugins";
+import type {
+  UseClaudeContextUsageReturn,
+  UseRemoveClaudeContextCodebaseReturn,
+  UseStopClaudeContextJobReturn,
+} from "@/hooks/use-plugins";
 
 interface Props {
   query: UseClaudeContextUsageReturn;
+  isAdmin: boolean;
+  removeCodebase: UseRemoveClaudeContextCodebaseReturn;
+  stopJob: UseStopClaudeContextJobReturn;
 }
 
 function formatRelative(timestamp: number): string {
@@ -19,8 +52,13 @@ function formatRelative(timestamp: number): string {
   return `${days}d ago`;
 }
 
-export function ClaudeContextStats({ query }: Props) {
+type StopTarget = { codebaseId: string; branch: string };
+type RemoveTarget = { codebaseId: string };
+
+export function ClaudeContextStats({ query, isAdmin, removeCodebase, stopJob }: Props) {
   const { data, isLoading, error } = query;
+  const [stopTarget, setStopTarget] = useState<StopTarget | null>(null);
+  const [removeTarget, setRemoveTarget] = useState<RemoveTarget | null>(null);
 
   if (isLoading) {
     return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -62,8 +100,8 @@ export function ClaudeContextStats({ query }: Props) {
           <CardContent className="space-y-3">
             {data!.indexing.map((job) => (
               <div key={`${job.codebaseId}#${job.branch}`} className="space-y-1">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="flex items-center gap-1.5 font-mono text-muted-foreground truncate">
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <span className="flex items-center gap-1.5 font-mono text-muted-foreground truncate min-w-0">
                     {job.status === 'indexing' ? (
                       <Loader2 className="w-3 h-3 shrink-0 animate-spin" />
                     ) : (
@@ -73,11 +111,29 @@ export function ClaudeContextStats({ query }: Props) {
                     <GitBranch className="w-3 h-3 shrink-0 opacity-60" />
                     <span className="truncate">{job.branch}</span>
                   </span>
-                  <span className="shrink-0 ml-2 text-muted-foreground">
-                    {job.status === 'failed'
-                      ? 'failed'
-                      : `${Math.round(job.percentage)}%`}
-                  </span>
+                  <div className="shrink-0 flex items-center gap-2">
+                    <span className="text-muted-foreground">
+                      {job.status === 'failed'
+                        ? 'failed'
+                        : job.status === 'cancelled'
+                          ? 'cancelled'
+                          : `${Math.round(job.percentage)}%`}
+                    </span>
+                    {isAdmin && job.status === 'indexing' && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-6 px-2 text-xs"
+                        onClick={() =>
+                          setStopTarget({ codebaseId: job.codebaseId, branch: job.branch })
+                        }
+                        disabled={stopJob.isPending}
+                      >
+                        <Square className="w-3 h-3 mr-1" />
+                        Stop
+                      </Button>
+                    )}
+                  </div>
                 </div>
                 {job.status === 'indexing' && (
                   <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
@@ -87,7 +143,7 @@ export function ClaudeContextStats({ query }: Props) {
                     />
                   </div>
                 )}
-                {job.status === 'failed' && job.error && (
+                {(job.status === 'failed' || job.status === 'cancelled') && job.error && (
                   <p className="text-xs text-destructive truncate">{job.error}</p>
                 )}
               </div>
@@ -135,6 +191,7 @@ export function ClaudeContextStats({ query }: Props) {
                       <th className="py-2 pr-4 font-medium">Chunks</th>
                       <th className="py-2 pr-4 font-medium">Dim</th>
                       <th className="py-2 pr-4 font-medium">Indexed</th>
+                      {isAdmin && <th className="py-2 pr-4 font-medium sr-only">Actions</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -169,6 +226,22 @@ export function ClaudeContextStats({ query }: Props) {
                         <td className="py-2 pr-4">{c.chunks.toLocaleString()}</td>
                         <td className="py-2 pr-4 text-muted-foreground">{c.dimension}</td>
                         <td className="py-2 pr-4 text-muted-foreground">{formatRelative(c.createdAt)}</td>
+                        {isAdmin && (
+                          <td className="py-2 pr-4 text-right">
+                            {c.codebaseId && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-7 px-2 text-xs text-destructive hover:text-destructive"
+                                onClick={() => setRemoveTarget({ codebaseId: c.codebaseId! })}
+                                disabled={removeCodebase.isPending}
+                              >
+                                <Trash2 className="w-3 h-3 mr-1" />
+                                Remove
+                              </Button>
+                            )}
+                          </td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -178,6 +251,96 @@ export function ClaudeContextStats({ query }: Props) {
           </Card>
         </>
       )}
+
+      {/* Stop job confirmation */}
+      <Dialog open={stopTarget !== null} onOpenChange={(open) => { if (!open) setStopTarget(null); }}>
+        <DialogContent className="sm:max-w-[460px] w-[95vw] sm:w-full">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Stop Indexing
+            </DialogTitle>
+            <DialogDescription>
+              Stop the running indexing job for{' '}
+              <strong className="font-mono break-all">{stopTarget?.codebaseId}</strong>
+              {' '}on branch <strong className="font-mono">{stopTarget?.branch}</strong>?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <p className="text-xs text-muted-foreground">
+              The client CLI will abort at its next chunk upload. Chunks already embedded stay in the
+              collection — you can resume the sync later without re-embedding them.
+            </p>
+          </div>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setStopTarget(null)}
+              className="w-full sm:w-auto"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              className="w-full sm:w-auto"
+              disabled={!stopTarget || stopJob.isPending}
+              onClick={() => {
+                if (!stopTarget) return;
+                stopJob.mutate(stopTarget, {
+                  onSettled: () => setStopTarget(null),
+                });
+              }}
+            >
+              {stopJob.isPending ? 'Stopping…' : 'Stop Indexing'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Remove codebase confirmation */}
+      <Dialog open={removeTarget !== null} onOpenChange={(open) => { if (!open) setRemoveTarget(null); }}>
+        <DialogContent className="sm:max-w-[460px] w-[95vw] sm:w-full">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2 text-destructive">
+              <AlertTriangle className="h-5 w-5" />
+              Remove Codebase
+            </DialogTitle>
+            <DialogDescription>
+              Permanently drop all branches, overlays, and chunks for{' '}
+              <strong className="font-mono break-all">{removeTarget?.codebaseId}</strong>?
+            </DialogDescription>
+          </DialogHeader>
+          <div className="py-2">
+            <p className="text-xs text-ui-danger-fg">
+              This action cannot be undone. Every user of this upstream repo will lose their indexed
+              view — the next <code className="text-xs">index_codebase</code> call will re-embed from
+              scratch.
+            </p>
+          </div>
+          <DialogFooter className="flex-col sm:flex-row gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setRemoveTarget(null)}
+              className="w-full sm:w-auto"
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              className="w-full sm:w-auto"
+              disabled={!removeTarget || removeCodebase.isPending}
+              onClick={() => {
+                if (!removeTarget) return;
+                removeCodebase.mutate(removeTarget.codebaseId, {
+                  onSettled: () => setRemoveTarget(null),
+                });
+              }}
+            >
+              {removeCodebase.isPending ? 'Removing…' : 'Remove Codebase'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

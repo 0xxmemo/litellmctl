@@ -1,4 +1,4 @@
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { queryKeys } from '@/lib/query-keys'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -75,7 +75,7 @@ export type UsePluginTargetsReturn = ReturnType<typeof usePluginTargets>
 
 export interface ClaudeContextBranch {
   branch: string
-  status: 'indexing' | 'indexed' | 'failed'
+  status: 'indexing' | 'indexed' | 'failed' | 'cancelled'
   percentage: number
   headCommit: string | null
   totalFiles: number | null
@@ -98,7 +98,7 @@ export interface ClaudeContextIndexingJob {
   codebaseId: string
   branch: string
   collection: string
-  status: 'indexing' | 'failed'
+  status: 'indexing' | 'failed' | 'cancelled'
   percentage: number
   headCommit: string | null
   error: string | null
@@ -151,6 +151,47 @@ export function useClaudeContextUsage(options?: { enabled?: boolean }) {
 }
 
 export type UseClaudeContextUsageReturn = ReturnType<typeof useClaudeContextUsage>
+
+// Admin-only destructive actions. Backend enforces the role check; the UI
+// only gates button visibility.
+
+async function deleteCodebaseApi(codebaseId: string): Promise<void> {
+  const res = await fetch(
+    `/api/plugins/claude-context/jobs?codebaseId=${encodeURIComponent(codebaseId)}`,
+    { method: 'DELETE', credentials: 'include' },
+  )
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}
+
+async function cancelJobApi(params: { codebaseId: string; branch?: string }): Promise<void> {
+  const res = await fetch('/api/plugins/claude-context/jobs/cancel', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}
+
+export function useRemoveClaudeContextCodebase() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: deleteCodebaseApi,
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.claudeContextUsage }),
+  })
+}
+
+export type UseRemoveClaudeContextCodebaseReturn = ReturnType<typeof useRemoveClaudeContextCodebase>
+
+export function useStopClaudeContextJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: cancelJobApi,
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.claudeContextUsage }),
+  })
+}
+
+export type UseStopClaudeContextJobReturn = ReturnType<typeof useStopClaudeContextJob>
 
 export function useSupermemoryUsage(limit = 20, options?: { enabled?: boolean }) {
   return useQuery({

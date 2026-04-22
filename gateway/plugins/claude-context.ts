@@ -13,7 +13,7 @@
  * searchVectors(..., refId="<codebaseId>#<branch>").
  */
 
-import { db, requireUser } from "../lib/db";
+import { db, requireUser, requireAdmin } from "../lib/db";
 import { LITELLM_URL, LITELLM_AUTH } from "../lib/config";
 import {
   createCollection,
@@ -86,7 +86,7 @@ export interface IndexingJob {
   codebase_id: string;
   branch: string;
   collection: string;
-  status: "indexing" | "indexed" | "failed";
+  status: "indexing" | "indexed" | "failed" | "cancelled";
   percentage: number;
   head_commit: string | null;
   error: string | null;
@@ -115,6 +115,22 @@ function reapIfStale(job: IndexingJob): IndexingJob {
   return { ...job, status: "failed", error, updated_at: now };
 }
 
+// A job in "cancelled" status is sticky — an admin flipped it to stop work.
+// The client's next /chunks POST will 409 and its runSync aborts. Heartbeat
+// upserts that would move it back to "indexing" are rejected so the cancel
+// doesn't race with a concurrent heartbeat.
+function existingJobStatus(
+  codebaseId: string,
+  branch: string,
+): string | null {
+  const row = db
+    .prepare(
+      "SELECT status FROM plugin_indexing_jobs WHERE codebase_id = ? AND branch = ?",
+    )
+    .get(codebaseId, branch) as { status: string } | undefined;
+  return row?.status ?? null;
+}
+
 // ── Route handlers ────────────────────────────────────────────────────────────
 
 // POST /jobs — upsert by (codebase_id, branch).
@@ -137,6 +153,16 @@ async function handleUpsertJob(req: Request): Promise<Response> {
   if (!collection || typeof collection !== "string") return errJson("collection required");
   if (!status || !["indexing", "indexed", "failed"].includes(status)) {
     return errJson("status must be indexing | indexed | failed");
+  }
+
+  // An admin-issued cancel is sticky: reject heartbeats that would resurrect
+  // the job as "indexing". Let terminal statuses (indexed|failed) through so
+  // the client's own error path can still record a final state if it raced.
+  if (status === "indexing") {
+    const current = existingJobStatus(codebaseId as string, branch as string);
+    if (current === "cancelled") {
+      return Response.json({ error: "job_cancelled" }, { status: 409 });
+    }
   }
 
   const now = Date.now();
@@ -215,11 +241,11 @@ async function handleGetJobs(req: Request): Promise<Response> {
   return Response.json({ jobs });
 }
 
-// DELETE /jobs?codebaseId=X[&branch=Y]
+// DELETE /jobs?codebaseId=X[&branch=Y] — admin only.
 // With branch: delete that branch's job row + overlay only (chunks stay — other branches may share).
 // Without branch: drop the whole collection (chunks + overlays + jobs).
 async function handleDeleteJob(req: Request): Promise<Response> {
-  const auth = await requireUser(req);
+  const auth = await requireAdmin(req);
   if (auth instanceof Response) return auth;
 
   const url = new URL(req.url);
@@ -254,6 +280,45 @@ async function handleDeleteJob(req: Request): Promise<Response> {
   return Response.json({ deleted: true, scope: "codebase" });
 }
 
+// POST /jobs/cancel — admin only. Body: { codebaseId, branch? }.
+// Flips matching indexing jobs to "cancelled"; the running client CLI aborts
+// at its next /chunks POST (409) or heartbeat (409).
+async function handleCancelJob(req: Request): Promise<Response> {
+  const auth = await requireAdmin(req);
+  if (auth instanceof Response) return auth;
+
+  let body: { codebaseId?: string; branch?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return errJson("Invalid JSON body");
+  }
+
+  const { codebaseId, branch } = body;
+  if (!isValidCodebaseId(codebaseId)) return errJson("codebaseId required");
+  if (branch !== undefined && !isValidBranch(branch)) return errJson("invalid branch");
+
+  const now = Date.now();
+  const error = "stopped by admin";
+  const result = branch
+    ? db
+        .prepare(
+          `UPDATE plugin_indexing_jobs
+              SET status = 'cancelled', error = ?, updated_at = ?
+            WHERE codebase_id = ? AND branch = ? AND status = 'indexing'`,
+        )
+        .run(error, now, codebaseId, branch)
+    : db
+        .prepare(
+          `UPDATE plugin_indexing_jobs
+              SET status = 'cancelled', error = ?, updated_at = ?
+            WHERE codebase_id = ? AND status = 'indexing'`,
+        )
+        .run(error, now, codebaseId);
+
+  return Response.json({ cancelled: Number(result.changes) });
+}
+
 // POST /chunks — body: { codebaseId, documents: VectorDocument[] }
 // Client pre-filters via /chunks/exists, then sends only the missing docs.
 async function handleInsertChunks(req: Request): Promise<Response> {
@@ -275,6 +340,17 @@ async function handleInsertChunks(req: Request): Promise<Response> {
 
   const collection = resolveCollection(codebaseId as string);
   if (!collection) return errJson("no active indexing job for this codebaseId; POST /jobs first", 409);
+
+  // Reject chunk uploads for cancelled jobs so the client's runSync aborts
+  // at the next batch instead of continuing to grind through embeddings.
+  const cancelled = db
+    .prepare(
+      `SELECT 1 FROM plugin_indexing_jobs
+        WHERE codebase_id = ? AND status = 'cancelled'
+        LIMIT 1`,
+    )
+    .get(codebaseId as string);
+  if (cancelled) return errJson("job_cancelled", 409);
 
   const firstVecLen = documents[0].vector?.length ?? 0;
   if (firstVecLen === 0) return errJson("documents[0].vector is empty");
@@ -532,7 +608,9 @@ async function handleUsage(req: Request): Promise<Response> {
     };
   });
 
-  const indexing = allJobs.filter((j) => j.status === "indexing" || j.status === "failed");
+  const indexing = allJobs.filter(
+    (j) => j.status === "indexing" || j.status === "failed" || j.status === "cancelled",
+  );
 
   const totals = {
     codebases: results.length,
@@ -551,6 +629,7 @@ export const claudeContextPlugin: GatewayPlugin = {
   description: "Semantic code search backed by shared sqlite-vec, branch-aware via ref overlays.",
   routes: {
     "/jobs": { GET: handleGetJobs, POST: handleUpsertJob, DELETE: handleDeleteJob },
+    "/jobs/cancel": { POST: handleCancelJob },
     "/chunks": { POST: handleInsertChunks },
     "/chunks/exists": { POST: handleChunksExists },
     "/overlay": { GET: handleGetOverlay, POST: handleOverlay },

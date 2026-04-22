@@ -299,10 +299,24 @@ export interface Submodule {
 }
 
 /**
+ * Foundry/Forge uses git submodules as its package manager — `lib/forge-std`,
+ * `lib/openzeppelin-contracts`, etc. are dependencies, not first-party source.
+ * When we see a `foundry.toml` at the repo root, treat every submodule as a
+ * vendored dep and don't recurse.
+ */
+function isDependencyManagedByGitSubmodules(absPath: string): boolean {
+  return fs.existsSync(path.join(absPath, "foundry.toml"));
+}
+
+/**
  * Parse .gitmodules and return each initialized submodule's checkout path.
- * Uninitialized submodules (missing .git) are skipped silently.
+ * Uninitialized submodules (missing .git) are skipped silently. Repos that
+ * use git submodules as a dependency manager (Foundry) return [] — their
+ * submodules are third-party deps and shouldn't be indexed as separate
+ * codebases.
  */
 export function listSubmodules(absPath: string): Submodule[] {
+  if (isDependencyManagedByGitSubmodules(absPath)) return [];
   const raw = gitCmd(absPath, [
     "config",
     "--file",

@@ -225,7 +225,10 @@ export function Overview() {
           </TabsContent>
 
           <TabsContent value="plugins" className="mt-6">
-            <PluginsOverview enabled={activeTab === 'plugins'} />
+            <PluginsOverview
+              enabled={activeTab === 'plugins'}
+              isAdmin={currentUser?.role === 'admin'}
+            />
           </TabsContent>
         </Tabs>
       )}

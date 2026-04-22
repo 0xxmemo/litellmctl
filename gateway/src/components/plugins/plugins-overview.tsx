@@ -3,16 +3,24 @@ import { FolderTree, Brain } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ClaudeContextStats } from "./claude-context-stats";
 import { SupermemoryStats } from "./supermemory-stats";
-import { useClaudeContextUsage, useSupermemoryUsage } from "@/hooks/use-plugins";
+import {
+  useClaudeContextUsage,
+  useSupermemoryUsage,
+  useRemoveClaudeContextCodebase,
+  useStopClaudeContextJob,
+} from "@/hooks/use-plugins";
 
 interface Props {
   enabled: boolean;
+  isAdmin: boolean;
 }
 
-export function PluginsOverview({ enabled }: Props) {
+export function PluginsOverview({ enabled, isAdmin }: Props) {
   const [active, setActive] = useState<string>("claude-context");
   const claudeContextQuery = useClaudeContextUsage({ enabled });
   const supermemoryQuery = useSupermemoryUsage(20, { enabled });
+  const removeCodebase = useRemoveClaudeContextCodebase();
+  const stopJob = useStopClaudeContextJob();
 
   return (
     <Tabs value={active} onValueChange={setActive} className="w-full">
@@ -28,7 +36,12 @@ export function PluginsOverview({ enabled }: Props) {
       </TabsList>
 
       <TabsContent value="claude-context" className="mt-4">
-        <ClaudeContextStats query={claudeContextQuery} />
+        <ClaudeContextStats
+          query={claudeContextQuery}
+          isAdmin={isAdmin}
+          removeCodebase={removeCodebase}
+          stopJob={stopJob}
+        />
       </TabsContent>
 
       <TabsContent value="supermemory" className="mt-4">
