@@ -23,6 +23,12 @@ const EMBEDDING_MODEL = "bedrock/titan-embed-v2";
 const EMBEDDING_DIMENSIONS = 1024;
 const CHUNK_LINES = 150;
 const CHUNK_OVERLAP = 30;
+// Titan v2 caps at 8192 input tokens. Code averages ~3 chars/token, so 20000
+// chars ≈ 6.7K tokens — safe even with the `// file: <path>` prefix we add.
+// Oversized slices get bisected by line; single lines that still exceed the
+// cap (minified bundles, dense one-line CSV/JSON) get split by character
+// offset so no content is dropped.
+const MAX_CHUNK_CHARS = 20000;
 const EMBED_BATCH_SIZE = 32;
 const EXISTS_BATCH_SIZE = 800;
 const PROGRESS_INTERVAL_MS = 2000;
@@ -418,26 +424,60 @@ function chunkFile(
 ): PendingChunk[] {
   const lines = content.split("\n");
   const chunks: PendingChunk[] = [];
-  for (let start = 0; start < lines.length; start += CHUNK_LINES - CHUNK_OVERLAP) {
-    const end = Math.min(start + CHUNK_LINES, lines.length);
-    const text = lines.slice(start, end).join("\n");
-    if (text.trim().length === 0) {
-      if (end >= lines.length) break;
-      continue;
-    }
-    const id = crypto
-      .createHash("sha256")
-      .update(`${relPath}|${start + 1}|${text}`)
-      .digest("hex")
-      .slice(0, 32);
+
+  // charOffset is only present in IDs for character-split pieces of a single
+  // oversized line. This keeps the ID format for normal chunks unchanged so
+  // previously-embedded content still reuses via chunksExists.
+  const pushChunk = (
+    startLine: number,
+    endLine: number,
+    text: string,
+    charOffset: number,
+  ): void => {
+    const idInput =
+      charOffset === 0
+        ? `${relPath}|${startLine}|${text}`
+        : `${relPath}|${startLine}|co${charOffset}|${text}`;
+    const id = crypto.createHash("sha256").update(idInput).digest("hex").slice(0, 32);
     chunks.push({
       id,
       content: text,
       relativePath: relPath,
-      startLine: start + 1,
-      endLine: end,
+      startLine,
+      endLine,
       extension: ext,
     });
+  };
+
+  const emit = (start: number, end: number): void => {
+    const text = lines.slice(start, end).join("\n");
+    if (text.trim().length === 0) return;
+
+    if (text.length <= MAX_CHUNK_CHARS) {
+      pushChunk(start + 1, end, text, 0);
+      return;
+    }
+
+    // Oversized slice: prefer bisecting by lines so chunks stay semantically
+    // coherent. Fall through to character splitting only when we're already
+    // down to a single line (minified bundle, one-line JSON blob, etc.).
+    if (end - start > 1) {
+      const mid = Math.floor((start + end) / 2);
+      emit(start, mid);
+      emit(mid, end);
+      return;
+    }
+
+    for (let off = 0; off < text.length; off += MAX_CHUNK_CHARS) {
+      const sub = text.slice(off, off + MAX_CHUNK_CHARS);
+      if (sub.trim().length === 0) continue;
+      pushChunk(start + 1, end, sub, off);
+    }
+  };
+
+  for (let start = 0; start < lines.length; start += CHUNK_LINES - CHUNK_OVERLAP) {
+    const end = Math.min(start + CHUNK_LINES, lines.length);
+    emit(start, end);
     if (end >= lines.length) break;
   }
   return chunks;
