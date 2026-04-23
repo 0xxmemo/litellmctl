@@ -82,28 +82,9 @@ export function invalidateModelOverridesCache(email: string): void {
 }
 
 /**
- * Resolve x-litellm-model-id to the actual underlying model by querying
- * LiteLLM /model/info. Runs in the background tracking path only.
- */
-async function resolveModelById(modelId: string): Promise<string | null> {
-  try {
-    const res = await fetch(`${LITELLM_URL}/model/info`, {
-      headers: { Authorization: LITELLM_AUTH },
-      signal: AbortSignal.timeout(3000),
-    });
-    if (!res.ok) return null;
-    const data = await res.json();
-    for (const m of data.data || []) {
-      if (m.model_info?.id === modelId) {
-        return m.litellm_params?.model || m.model_name || null;
-      }
-    }
-  } catch {}
-  return null;
-}
-
-/**
  * Fire-and-forget: extract usage from a cloned non-streaming response.
+ * `resolvedModel` comes from the `x-litellm-model-name` response header, set
+ * by our LiteLLM fork to the post-fallback `litellm_params.model`.
  */
 function trackFromJson(
   clone: Response,
@@ -111,26 +92,25 @@ function trackFromJson(
   requestedModel: string | null,
   keyHash: string | null,
   endpoint: string,
-  litellmModelId: string | null,
+  resolvedModel: string | null,
 ) {
   clone
     .json()
-    .then(async (data) => {
+    .then((data) => {
       if (data === null || typeof data !== "object") return;
       const usage = data.usage;
       if (!usage) return;
-      let actualModel = data.model || requestedModel || "unknown";
-      if (litellmModelId) {
-        const resolved = await resolveModelById(litellmModelId);
-        if (resolved) actualModel = resolved;
-      }
+      const responseModel =
+        typeof data.model === "string" ? data.model : null;
+      const reqModel = requestedModel ?? responseModel;
+      const actualModel = resolvedModel || responseModel || reqModel || "unknown";
       trackUsage(
         email,
         actualModel,
         usage.prompt_tokens ?? usage.input_tokens ?? 0,
         usage.completion_tokens ?? usage.output_tokens ?? 0,
         keyHash,
-        requestedModel || undefined,
+        reqModel || undefined,
         endpoint,
       );
     })
@@ -147,11 +127,11 @@ function trackFromSSE(
   requestedModel: string | null,
   keyHash: string | null,
   endpoint: string,
-  litellmModelId: string | null,
+  resolvedModel: string | null,
 ) {
   clone
     .text()
-    .then(async (text) => {
+    .then((text) => {
       let usage: any = null;
       let model: string | null = null;
       // Scan backwards — usage is in one of the last events
@@ -175,18 +155,15 @@ function trackFromSSE(
         } catch {}
       }
       if (!usage) return;
-      let actualModel = model || requestedModel || "unknown";
-      if (litellmModelId) {
-        const resolved = await resolveModelById(litellmModelId);
-        if (resolved) actualModel = resolved;
-      }
+      const reqModel = requestedModel ?? model;
+      const actualModel = resolvedModel || model || reqModel || "unknown";
       trackUsage(
         email,
         actualModel,
         usage.prompt_tokens ?? usage.input_tokens ?? 0,
         usage.completion_tokens ?? usage.output_tokens ?? 0,
         keyHash,
-        requestedModel || undefined,
+        reqModel || undefined,
         endpoint,
       );
     })
@@ -220,57 +197,79 @@ async function proxyHandler(req: Request) {
       if (keyRecord) keyHash = keyRecord.keyHash;
     }
 
-    // Read body once to extract requested model and apply overrides
-    let body: ArrayBuffer = await req.arrayBuffer();
-    let requestedModel: string | null = null;
-    let forwardForm: FormData | null = null;
-    const audioFormEndpoint =
+    // Decide whether we need to buffer+inspect the body. Most requests don't:
+    // users without per-model overrides, and audio uploads already sent as
+    // multipart, can stream straight through to LiteLLM without us ever
+    // touching their bytes. Fast path has no TextDecoder/JSON.parse overhead
+    // and begins forwarding as the client uploads.
+    const overrides = getUserModelOverrides(auth.email);
+    const hasOverrides = Object.keys(overrides).length > 0;
+    const reqContentType = req.headers.get("content-type") || "";
+    const isAudioForm =
       endpoint === "/audio/transcriptions" || endpoint === "/audio/translations";
-    try {
-      const text = new TextDecoder().decode(body);
-      const json = JSON.parse(text);
-      if (json !== null && typeof json === "object" && !Array.isArray(json)) {
-        requestedModel = typeof json.model === "string" ? json.model : null;
+    const needsAudioConversion =
+      isAudioForm && !reqContentType.startsWith("multipart/");
+    const mustInspectBody = hasOverrides || needsAudioConversion;
 
-        if (requestedModel) {
-          const overrides = getUserModelOverrides(auth.email);
-          if (overrides[requestedModel]) {
-            json.model = overrides[requestedModel];
-            body = new TextEncoder().encode(JSON.stringify(json)).buffer;
-          }
-        }
-
-        // /audio/transcriptions and /audio/translations accept multipart
-        // uploads only. Translate a JSON `{file: "<data-url|base64>", ...}`
-        // into FormData so the UI Try tab and non-multipart clients work.
-        if (audioFormEndpoint && typeof json.file === "string") {
-          forwardForm = jsonAudioToFormData(json as Record<string, unknown>);
-        }
-      }
-    } catch {
-      // Not JSON — already-multipart requests land here; pass through as-is.
-    }
-
-    // Forward to LiteLLM — let Bun handle the proxy pipeline natively
     const headers = new Headers(req.headers);
     headers.set("Authorization", LITELLM_AUTH);
     headers.delete("x-api-key");
-    if (forwardForm) {
-      // FormData needs fetch to set the multipart boundary; nuke stale headers.
-      headers.delete("content-type");
-      headers.delete("content-length");
+
+    let fetchBody: BodyInit | undefined;
+    // `requestedModel` is only set on the slow path (pre-override parse). On
+    // the fast path it's derived from the response by the tracker — LiteLLM's
+    // `_override_openai_response_model` forces `response.model` back to the
+    // client-requested value, so either source yields the same telemetry.
+    let requestedModel: string | null = null;
+
+    if (!mustInspectBody) {
+      fetchBody = req.body ?? undefined;
+    } else {
+      const rawBody = await req.arrayBuffer();
+      let forwardForm: FormData | null = null;
+      let mutatedBody: ArrayBuffer | null = null;
+      try {
+        const text = new TextDecoder().decode(rawBody);
+        const json = JSON.parse(text);
+        if (json !== null && typeof json === "object" && !Array.isArray(json)) {
+          requestedModel = typeof json.model === "string" ? json.model : null;
+
+          if (requestedModel && overrides[requestedModel]) {
+            json.model = overrides[requestedModel];
+            mutatedBody = new TextEncoder().encode(JSON.stringify(json)).buffer;
+          }
+
+          if (needsAudioConversion && typeof json.file === "string") {
+            forwardForm = jsonAudioToFormData(json as Record<string, unknown>);
+          }
+        }
+      } catch {
+        // Not JSON — already-multipart audio or other binary uploads that
+        // happened to land here. Forward the raw bytes unchanged.
+      }
+
+      if (forwardForm) {
+        headers.delete("content-type");
+        headers.delete("content-length");
+        fetchBody = forwardForm;
+      } else {
+        fetchBody =
+          mutatedBody ?? (rawBody.byteLength > 0 ? rawBody : undefined);
+      }
     }
 
     const proxyRes = await fetch(targetUrl, {
       method: req.method,
       headers,
-      body: forwardForm ?? (body.byteLength > 0 ? body : undefined),
-    });
+      body: fetchBody,
+      // Required by the fetch spec when body is a streaming ReadableStream.
+      ...(fetchBody instanceof ReadableStream ? { duplex: "half" } : {}),
+    } as RequestInit);
 
     // Usage tracking via Response.clone() — Bun streams the original to the
     // client through its native pipeline; the clone is consumed in background.
     if (proxyRes.ok) {
-      const litellmModelId = proxyRes.headers.get("x-litellm-model-id");
+      const resolvedModel = proxyRes.headers.get("x-litellm-model-name");
       const contentType = proxyRes.headers.get("content-type") || "";
       const isSSE = contentType.includes("text/event-stream");
       const clone = proxyRes.clone();
@@ -282,7 +281,7 @@ async function proxyHandler(req: Request) {
           requestedModel,
           keyHash,
           endpoint,
-          litellmModelId,
+          resolvedModel,
         );
       } else {
         trackFromJson(
@@ -291,7 +290,7 @@ async function proxyHandler(req: Request) {
           requestedModel,
           keyHash,
           endpoint,
-          litellmModelId,
+          resolvedModel,
         );
       }
     }
