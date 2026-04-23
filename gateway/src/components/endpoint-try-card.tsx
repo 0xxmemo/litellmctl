@@ -11,29 +11,54 @@ const LS_KEY_LEGACY = 'llm-gateway-api-key'
 
 // ─── API Key hook ────────────────────────────────────────────────────────────
 
+function readInitialKey(): string {
+  if (typeof window === 'undefined') return ''
+  let stored = localStorage.getItem(LS_KEY)
+  if (!stored) {
+    stored = localStorage.getItem(LS_KEY_LEGACY)
+    if (stored) {
+      localStorage.setItem(LS_KEY, stored)
+      localStorage.removeItem(LS_KEY_LEGACY)
+    }
+  }
+  return stored || ''
+}
+
+let currentApiKey = readInitialKey()
+const apiKeyListeners = new Set<(val: string) => void>()
+
+function broadcastApiKey(val: string) {
+  currentApiKey = val
+  for (const listener of apiKeyListeners) listener(val)
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (e) => {
+    if (e.key !== LS_KEY) return
+    const next = e.newValue || ''
+    if (next !== currentApiKey) broadcastApiKey(next)
+  })
+}
+
 export function useApiKey() {
-  const [apiKey, setApiKeyState] = useState('')
+  const [apiKey, setApiKeyState] = useState(currentApiKey)
 
   useEffect(() => {
-    let stored = localStorage.getItem(LS_KEY)
-    if (!stored) {
-      stored = localStorage.getItem(LS_KEY_LEGACY)
-      if (stored) {
-        localStorage.setItem(LS_KEY, stored)
-        localStorage.removeItem(LS_KEY_LEGACY)
-      }
+    if (currentApiKey !== apiKey) setApiKeyState(currentApiKey)
+    apiKeyListeners.add(setApiKeyState)
+    return () => {
+      apiKeyListeners.delete(setApiKeyState)
     }
-    if (stored) setApiKeyState(stored)
   }, [])
 
   const setApiKey = (val: string) => {
-    setApiKeyState(val)
     localStorage.setItem(LS_KEY, val)
     try {
       localStorage.removeItem(LS_KEY_LEGACY)
     } catch {
       /* ignore */
     }
+    broadcastApiKey(val)
   }
 
   return { apiKey, setApiKey }
