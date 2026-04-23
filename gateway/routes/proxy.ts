@@ -82,44 +82,13 @@ export function invalidateModelOverridesCache(email: string): void {
 }
 
 /**
- * Fire-and-forget: extract usage from a cloned non-streaming response.
- * `resolvedModel` comes from the `x-litellm-model-name` response header, set
- * by our LiteLLM fork to the post-fallback `litellm_params.model`.
- */
-function trackFromJson(
-  clone: Response,
-  email: string,
-  requestedModel: string | null,
-  keyHash: string | null,
-  endpoint: string,
-  resolvedModel: string | null,
-) {
-  clone
-    .json()
-    .then((data) => {
-      if (data === null || typeof data !== "object") return;
-      const usage = data.usage;
-      if (!usage) return;
-      const responseModel =
-        typeof data.model === "string" ? data.model : null;
-      const reqModel = requestedModel ?? responseModel;
-      const actualModel = resolvedModel || responseModel || reqModel || "unknown";
-      trackUsage(
-        email,
-        actualModel,
-        usage.prompt_tokens ?? usage.input_tokens ?? 0,
-        usage.completion_tokens ?? usage.output_tokens ?? 0,
-        keyHash,
-        reqModel || undefined,
-        endpoint,
-      );
-    })
-    .catch(() => {});
-}
-
-/**
- * Fire-and-forget: extract usage from the final SSE events of a cloned
- * streaming response.
+ * Fire-and-forget: extract usage from a cloned streaming response.
+ *
+ * Streams chunks through a ReadableStreamReader so memory stays O(1) — we
+ * never buffer the full response in memory, regardless of how long the LLM
+ * streams. The JSON.parse cost is bounded too: we only parse `data:` lines
+ * that actually contain `"usage"` or `"message_start"`, so content-only
+ * delta chunks cost just a substring check.
  */
 function trackFromSSE(
   clone: Response,
@@ -129,45 +98,76 @@ function trackFromSSE(
   endpoint: string,
   resolvedModel: string | null,
 ) {
-  clone
-    .text()
-    .then((text) => {
-      let usage: any = null;
-      let model: string | null = null;
-      // Scan backwards — usage is in one of the last events
-      for (const line of text.split("\n").reverse()) {
-        if (!line.startsWith("data: ")) continue;
-        try {
-          const evt = JSON.parse(line.slice(6));
-          if (evt == null || typeof evt !== "object") continue;
-          if (evt.usage) {
-            usage = evt.usage;
-            model = model || evt.model;
-            break;
-          }
-          if (evt.type === "message_delta" && evt.usage) {
-            usage = evt.usage;
-            break;
-          }
-          if (evt.type === "message_start" && evt.message) {
-            model = evt.message.model;
-          }
-        } catch {}
+  const body = clone.body;
+  if (!body) return;
+
+  let usage: any = null;
+  let model: string | null = null;
+
+  const processLine = (line: string) => {
+    if (!line.startsWith("data: ")) return;
+    const payload = line.slice(6);
+    // Skip OpenAI's `[DONE]` sentinel and any line that can't carry what we
+    // need. Substring check avoids JSON.parse on every content delta.
+    if (
+      !payload.includes('"usage"') &&
+      !payload.includes('"message_start"')
+    ) {
+      return;
+    }
+    try {
+      const evt = JSON.parse(payload);
+      if (evt == null || typeof evt !== "object") return;
+      if (evt.usage) {
+        usage = evt.usage;
+        if (!model && typeof evt.model === "string") model = evt.model;
+      } else if (evt.type === "message_delta" && evt.usage) {
+        usage = evt.usage;
+      } else if (
+        evt.type === "message_start" &&
+        evt.message &&
+        typeof evt.message.model === "string"
+      ) {
+        model = evt.message.model;
       }
-      if (!usage) return;
-      const reqModel = requestedModel ?? model;
-      const actualModel = resolvedModel || model || reqModel || "unknown";
-      trackUsage(
-        email,
-        actualModel,
-        usage.prompt_tokens ?? usage.input_tokens ?? 0,
-        usage.completion_tokens ?? usage.output_tokens ?? 0,
-        keyHash,
-        reqModel || undefined,
-        endpoint,
-      );
-    })
-    .catch(() => {});
+    } catch {}
+  };
+
+  (async () => {
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let nl = buffer.indexOf("\n");
+        while (nl !== -1) {
+          processLine(buffer.slice(0, nl));
+          buffer = buffer.slice(nl + 1);
+          nl = buffer.indexOf("\n");
+        }
+      }
+      buffer += decoder.decode();
+      if (buffer.length > 0) processLine(buffer);
+    } catch {
+      return;
+    }
+
+    if (!usage) return;
+    const reqModel = requestedModel ?? model;
+    const actualModel = resolvedModel || model || reqModel || "unknown";
+    trackUsage(
+      email,
+      actualModel,
+      usage.prompt_tokens ?? usage.input_tokens ?? 0,
+      usage.completion_tokens ?? usage.output_tokens ?? 0,
+      keyHash,
+      reqModel || undefined,
+      endpoint,
+    );
+  })();
 }
 
 // LiteLLM Proxy — requireUser (not guest), with fire-and-forget usage tracking
@@ -266,17 +266,23 @@ async function proxyHandler(req: Request) {
       ...(fetchBody instanceof ReadableStream ? { duplex: "half" } : {}),
     } as RequestInit);
 
-    // Usage tracking via Response.clone() — Bun streams the original to the
-    // client through its native pipeline; the clone is consumed in background.
+    // Usage tracking.
+    //
+    // Non-streaming: LiteLLM publishes token counts as response headers
+    // (`x-litellm-prompt-tokens` et al), so we read them directly — no body
+    // clone, no JSON parse. Pure pass-through from the client's perspective.
+    //
+    // Streaming: token counts only exist after the final SSE event, so we
+    // still clone the response and stream-parse a background copy while the
+    // original flows to the client untouched.
     if (proxyRes.ok) {
       const resolvedModel = proxyRes.headers.get("x-litellm-model-name");
       const contentType = proxyRes.headers.get("content-type") || "";
       const isSSE = contentType.includes("text/event-stream");
-      const clone = proxyRes.clone();
 
       if (isSSE) {
         trackFromSSE(
-          clone,
+          proxyRes.clone(),
           auth.email,
           requestedModel,
           keyHash,
@@ -284,14 +290,21 @@ async function proxyHandler(req: Request) {
           resolvedModel,
         );
       } else {
-        trackFromJson(
-          clone,
-          auth.email,
-          requestedModel,
-          keyHash,
-          endpoint,
-          resolvedModel,
-        );
+        const pt = Number(proxyRes.headers.get("x-litellm-prompt-tokens")) || 0;
+        const ct =
+          Number(proxyRes.headers.get("x-litellm-completion-tokens")) || 0;
+        if (pt > 0 || ct > 0) {
+          const model = resolvedModel || requestedModel || "unknown";
+          trackUsage(
+            auth.email,
+            model,
+            pt,
+            ct,
+            keyHash,
+            requestedModel || undefined,
+            endpoint,
+          );
+        }
       }
     }
 
