@@ -83,8 +83,12 @@ export function SkillsInstall({ apiKey, baseUrl }: SkillsInstallProps) {
             // TODO: default to LITELLMCTL_API_KEY after migration from LLM_GATEWAY_API_KEY.
             const configVar =
               targets.find((t) => t.id === selectedTarget)?.configVar || "LLM_GATEWAY_API_KEY";
-            const installCmd = `curl -fsSL ${installUrl} | ${configVar}="${KEY_PLACEHOLDER}" bash`;
-            const uninstallCmd = `curl -fsSL ${uninstallUrl} | bash`;
+            // See plugins-install.tsx for the rationale. The URL is quoted
+            // because its query string contains `&` (bash/zsh background
+            // operator) and `?` (zsh glob). Without quoting, the pipeline
+            // would background curl and bash would receive empty stdin.
+            const installCmd = `curl -fsSL "${installUrl}" | ${configVar}="${KEY_PLACEHOLDER}" bash`;
+            const uninstallCmd = `curl -fsSL "${uninstallUrl}" | bash`;
 
             return (
               <div className="space-y-3 rounded-lg border border-border/50 bg-muted/35 p-4 backdrop-blur-md dark:border-white/5">

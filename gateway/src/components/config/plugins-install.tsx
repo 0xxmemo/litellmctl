@@ -83,8 +83,13 @@ export function PluginsInstall({ apiKey, baseUrl }: PluginsInstallProps) {
             // TODO: default to LITELLMCTL_API_KEY after migration from LLM_GATEWAY_API_KEY.
             const configVar =
               targets.find((t) => t.id === selectedTarget)?.configVar || "LLM_GATEWAY_API_KEY";
-            const installCmd = `curl -fsSL ${installUrl} | ${configVar}="${KEY_PLACEHOLDER}" bash`;
-            const uninstallCmd = `curl -fsSL ${uninstallUrl} | bash`;
+            // Double-quote the URL: its query string contains `&` (shell
+            // background operator in bash/zsh) and `?` (glob in zsh). An
+            // unquoted URL causes `curl URL?x=1&y=2 | … bash` to background
+            // curl — the script body streams to the terminal and bash gets
+            // empty stdin, producing the "prints body, no execution" symptom.
+            const installCmd = `curl -fsSL "${installUrl}" | ${configVar}="${KEY_PLACEHOLDER}" bash`;
+            const uninstallCmd = `curl -fsSL "${uninstallUrl}" | bash`;
 
             return (
               <div className="space-y-3 rounded-lg border border-border/50 bg-muted/35 p-4 backdrop-blur-md dark:border-white/5">

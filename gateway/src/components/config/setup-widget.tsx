@@ -53,7 +53,10 @@ export function SetupWidget({ apiKey, baseUrl }: SetupWidgetProps) {
             if (option.id !== selectedOption) return null;
 
             const installUrl = `${baseUrl}${option.scriptUrl}`;
-            const installCmd = `curl -fsSL ${installUrl} | ${option.configVar}="${KEY_PLACEHOLDER}" bash`;
+            // URL is quoted for consistency with plugin/skill install commands
+            // and to stay safe if scriptUrl ever grows a query string (shell
+            // metacharacters like & or ? would otherwise break paste-to-run).
+            const installCmd = `curl -fsSL "${installUrl}" | ${option.configVar}="${KEY_PLACEHOLDER}" bash`;
 
             return (
               <div key={option.id} className="space-y-3">

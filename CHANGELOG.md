@@ -2,6 +2,16 @@
 
 All notable changes to litellmctl are documented here.
 
+## [1.6.2] - 2026-04-23
+
+### Fixes
+
+- **Plugin/skill install command broken on Linux (bash).** The Copy button in the gateway UI emitted an unquoted URL: `curl -fsSL ${baseUrl}/api/plugins/install.sh?slug=X&target=Y | KEY=... bash`. On bash, the `&` in the query string is parsed as the backgrounding operator, so curl was backgrounded — its stdout streamed the script body to the terminal while bash received empty stdin and exited without executing. The symptom (reported by users) was "pasting prints the bash script body, nothing runs." On Mac zsh with oh-my-zsh the bug was invisible because `url-quote-magic` + `bracketed-paste-magic` auto-escape `?` and `&` on paste; Linux bash has no such handler. Fix: URL is now double-quoted at the source in `plugins-install.tsx`, `skills-install.tsx`, and (defensively) `setup-widget.tsx`. The copied string is now `curl -fsSL "https://.../install.sh?slug=X&target=Y" | KEY=... bash` and pastes-and-runs cleanly in bash, zsh, and every other POSIX shell, regardless of terminal paste magic.
+
+### Tests
+
+- **Linux install-flow harness** (`tests/linux-harness/`, driver `./tests/linux-harness/run.sh`). Brings up a minimal Bun test gateway that imports the real `buildInstallScript` / `buildUninstallScript` and serves real bundles from `plugins/` and `skills/`, then runs an Ubuntu 24.04 container (bash + zsh + curl + tar + python3 + jq + bun, plus a stub `claude` CLI) that exercises every plugin and skill via `curl -fsSL … | bash` — both the unquoted form (negative control, expected XFAIL) and the quoted form (expected PASS) — in both shells. Success is verified via side effects on disk (`~/.claude/plugins/<slug>/PLUGIN.md`, `~/.claude/skills/<slug>/SKILL.md`, `settings.json` mutation), not echo markers, because the script body itself contains the success string and would false-positive when curl is accidentally backgrounded.
+
 ## [1.6.1] - 2026-04-22
 
 ### Features
