@@ -2,6 +2,16 @@
 
 All notable changes to litellmctl are documented here.
 
+## [1.6.3] - 2026-04-23
+
+### Fixes
+
+- **Claude Code sub-agents (Explore, general-purpose, etc.) failed with HTTP 400 when the parent session used a 4.6+/4.7 model.** Every sub-agent dispatch came back as `API Error: 400 "This model does not support the effort parameter." Received Model Group=lite`, with the fallback chain then surfacing a misleading `DashscopeException - invalid access token or token expired` even when the Dashscope token was valid. Root cause: Claude Code inherits `output_config: {effort}` and `thinking: {type: enabled}` from the parent into the sub-agent's `/v1/messages` payload, but the sub-agents route to the `lite` tier (Haiku 4.5) which rejects both. LiteLLM's `/v1/messages` passthrough is a pure forwarder and has no model-capability gating, so the params went straight to Anthropic and were rejected; the router then ran the fallback chain over `codex/gpt-5.4-mini` → `alibaba/qwen3.6-plus`, where the Anthropic-only `output_config` leaked into the OpenAI-compat completion kwargs and caused Dashscope to return a schema-shaped auth error. Two fixes in the vendored `litellm` submodule: (1) `AnthropicMessagesConfig.transform_anthropic_messages_request` now pops `output_config` for non-4.6/4.7 models and `thinking` for Haiku (or any pre-3.7 model) before the upstream POST, so Haiku accepts the request on the primary path and no fallback is triggered; (2) `LiteLLMMessagesToCompletionTransformationHandler` adds `output_config` to its `excluded_keys` set so even if the fallback does fire, the field never reaches OpenAI/Azure/Dashscope/Bedrock (cherry-pick of upstream BerriAI/litellm `db9914287a`, which is on an unmerged upstream branch). Verified end-to-end by re-spawning the two Explore sub-agents that previously failed — both now succeed on the first attempt against Haiku with no fallback noise. Regression tests in `litellm/tests/test_litellm/llms/anthropic/experimental_pass_through/messages/` cover both paths (6 transform cases + 1 handler case, all green).
+
+### Operations
+
+- **Two services need restarting after a litellm submodule bump.** `litellmctl restart gateway` only cycles the Bun wrapper on port 14041 — the Python LiteLLM proxy on port 4040 is a separate systemd --user unit (`litellm-proxy.service`) that imports the submodule via editable install. Submodule changes need `litellmctl restart proxy` to take effect. Noted in memory.
+
 ## [1.6.2] - 2026-04-23
 
 ### Fixes
