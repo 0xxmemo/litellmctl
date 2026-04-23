@@ -167,6 +167,14 @@ export function Console() {
 
     term.open(containerRef.current)
 
+    // Padding goes on term.element (not the parent container) so FitAddon's
+    // row-count math subtracts it — otherwise the last row renders behind
+    // the hint bar.
+    if (term.element) {
+      term.element.style.padding = '8px'
+      term.element.style.boxSizing = 'border-box'
+    }
+
     // WebGL renderer — fast + crisp. Silently fall back to canvas if the
     // browser / driver can't do it (happens on some Linux VMs).
     try {
@@ -369,7 +377,7 @@ export function Console() {
       {/* Terminal */}
       <div
         ref={containerRef}
-        className="flex-1 min-h-0 p-2 bg-[#0a0a0b] overflow-hidden"
+        className="flex-1 min-h-0 bg-[#0a0a0b] overflow-hidden"
       />
 
       {/* Hint bar */}
