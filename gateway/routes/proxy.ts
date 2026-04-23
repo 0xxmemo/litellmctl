@@ -152,6 +152,9 @@ function trackFromSSE(
       buffer += decoder.decode();
       if (buffer.length > 0) processLine(buffer);
     } catch {
+      // Parser failed — release the tee buffer so upstream bytes aren't
+      // retained in memory waiting for a reader that won't return.
+      reader.cancel().catch(() => {});
       return;
     }
 
