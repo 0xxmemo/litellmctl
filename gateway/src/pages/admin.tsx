@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { AlertCircle, AlertTriangle, CheckCircle, XCircle, UserPlus, Trash2, Users, UsersRound } from 'lucide-react'
+import { AlertCircle, AlertTriangle, CheckCircle, XCircle, UserPlus, Users, UsersRound, MoreHorizontal, ShieldCheck, ShieldOff, Trash2 } from 'lucide-react'
 import { useAuth } from '@/hooks/use-auth'
 import {
   useAdminUsers,
@@ -14,9 +14,11 @@ import {
   useRejectUser,
   useAddUser,
   useDeleteUser,
+  useSetUserRole,
   useDisapproveAll,
   useRevokeAllKeys,
 } from '@/hooks/use-admin'
+import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover'
 import { AdminErrorBoundary } from '@/components/admin-error-boundary'
 import { TeamsPanel } from '@/components/teams-panel'
 import { toast } from 'sonner'
@@ -38,6 +40,9 @@ export function Admin() {
   // Delete confirmation state
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null)
 
+  // Three-dot menu state
+  const [openMenuEmail, setOpenMenuEmail] = useState<string | null>(null)
+
   // Danger Zone state
   const [showDisapproveConfirm, setShowDisapproveConfirm] = useState(false)
   const [showRevokeAllConfirm, setShowRevokeAllConfirm] = useState(false)
@@ -55,6 +60,7 @@ export function Admin() {
   const rejectMutation = useRejectUser()
   const addUserMutation = useAddUser()
   const deleteUserMutation = useDeleteUser()
+  const setRoleMutation = useSetUserRole()
   const disapproveAllMutation = useDisapproveAll()
   const revokeAllMutation = useRevokeAllKeys()
 
@@ -125,6 +131,21 @@ export function Admin() {
       },
       onError: (err: unknown) => {
         showOpMessage('error', `Failed to remove user: ${errorMessage(err)}`)
+        setActionInProgress(null)
+      },
+    })
+  }
+
+  const handleSetRole = (email: string, role: 'user' | 'admin') => {
+    setOpenMenuEmail(null)
+    setActionInProgress(email)
+    setRoleMutation.mutate({ email, role }, {
+      onSuccess: () => {
+        showOpMessage('success', role === 'admin' ? `${email} is now an admin` : `Admin revoked for ${email}`)
+        setActionInProgress(null)
+      },
+      onError: (err: unknown) => {
+        showOpMessage('error', `Failed to update role: ${errorMessage(err)}`)
         setActionInProgress(null)
       },
     })
@@ -415,16 +436,59 @@ export function Admin() {
                           </TableCell>
                           <TableCell>
                             {user.email !== currentUser?.email && (
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="text-ui-danger-fg hover:bg-ui-danger-soft-bg"
-                                onClick={() => setDeleteTarget(user.email)}
-                                disabled={actionInProgress === user.email}
-                                title="Remove user"
+                              <Popover
+                                open={openMenuEmail === user.email}
+                                onOpenChange={(open) => setOpenMenuEmail(open ? user.email : null)}
                               >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-7 w-7 p-0"
+                                    disabled={actionInProgress === user.email}
+                                    title="Actions"
+                                  >
+                                    <MoreHorizontal className="w-4 h-4" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent align="end" className="w-44 p-1">
+                                  <div className="flex flex-col">
+                                    {user.role === 'user' ? (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="justify-start h-8 px-2 text-xs"
+                                        onClick={() => handleSetRole(user.email, 'admin')}
+                                      >
+                                        <ShieldCheck className="w-3 h-3 mr-2" />
+                                        Set Admin
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="justify-start h-8 px-2 text-xs"
+                                        onClick={() => handleSetRole(user.email, 'user')}
+                                      >
+                                        <ShieldOff className="w-3 h-3 mr-2" />
+                                        Revoke Admin
+                                      </Button>
+                                    )}
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="justify-start h-8 px-2 text-xs text-ui-danger-fg hover:bg-ui-danger-soft-bg hover:text-ui-danger-fg"
+                                      onClick={() => {
+                                        setOpenMenuEmail(null)
+                                        setDeleteTarget(user.email)
+                                      }}
+                                    >
+                                      <Trash2 className="w-3 h-3 mr-2" />
+                                      Remove
+                                    </Button>
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
                             )}
                           </TableCell>
                         </TableRow>

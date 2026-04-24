@@ -132,6 +132,28 @@ export function useDeleteUser() {
   })
 }
 
+export function useSetUserRole() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({ email, role }: { email: string; role: 'user' | 'admin' }) => {
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ email, role }),
+      })
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) {
+        throw new Error(data.error || `HTTP ${res.status}`)
+      }
+      return email
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.adminUsers })
+    },
+  })
+}
+
 export function useDisapproveAll() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -185,6 +207,7 @@ export type UseApproveUserReturn = ReturnType<typeof useApproveUser>
 export type UseRejectUserReturn = ReturnType<typeof useRejectUser>
 export type UseAddUserReturn = ReturnType<typeof useAddUser>
 export type UseDeleteUserReturn = ReturnType<typeof useDeleteUser>
+export type UseSetUserRoleReturn = ReturnType<typeof useSetUserRole>
 export type UseDisapproveAllReturn = ReturnType<typeof useDisapproveAll>
 export type UseRevokeAllKeysReturn = ReturnType<typeof useRevokeAllKeys>
 export type UseRestartGatewayReturn = ReturnType<typeof useRestartGateway>
