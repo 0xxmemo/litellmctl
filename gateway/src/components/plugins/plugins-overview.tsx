@@ -9,6 +9,8 @@ import {
   useRemoveClaudeContextCodebase,
   useStopClaudeContextJob,
   useClearClaudeContextJob,
+  useHideClaudeContextCodebase,
+  useUnhideClaudeContextCodebase,
 } from "@/hooks/use-plugins";
 
 interface Props {
@@ -23,6 +25,8 @@ export function PluginsOverview({ enabled, isAdmin }: Props) {
   const removeCodebase = useRemoveClaudeContextCodebase();
   const stopJob = useStopClaudeContextJob();
   const clearJob = useClearClaudeContextJob();
+  const hideCodebase = useHideClaudeContextCodebase();
+  const unhideCodebase = useUnhideClaudeContextCodebase();
 
   return (
     <Tabs value={active} onValueChange={setActive} className="w-full">
@@ -44,6 +48,8 @@ export function PluginsOverview({ enabled, isAdmin }: Props) {
           removeCodebase={removeCodebase}
           stopJob={stopJob}
           clearJob={clearJob}
+          hideCodebase={hideCodebase}
+          unhideCodebase={unhideCodebase}
         />
       </TabsContent>
 

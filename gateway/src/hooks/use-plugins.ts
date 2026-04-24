@@ -91,6 +91,7 @@ export interface ClaudeContextCollection {
   createdAt: number
   chunks: number
   files: number
+  hidden?: boolean
   branches: ClaudeContextBranch[]
 }
 
@@ -106,6 +107,7 @@ export interface ClaudeContextIndexingJob {
   indexedFiles: number | null
   totalChunks: number | null
   updatedAt: number
+  hidden?: boolean
 }
 
 export interface ClaudeContextUsage {
@@ -215,6 +217,44 @@ export function useClearClaudeContextJob() {
 }
 
 export type UseClearClaudeContextJobReturn = ReturnType<typeof useClearClaudeContextJob>
+
+async function hideCodebaseApi(codebaseId: string): Promise<void> {
+  const res = await fetch('/api/plugins/claude-context/hidden', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ codebaseId }),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}
+
+async function unhideCodebaseApi(codebaseId: string): Promise<void> {
+  const res = await fetch(
+    `/api/plugins/claude-context/hidden?codebaseId=${encodeURIComponent(codebaseId)}`,
+    { method: 'DELETE', credentials: 'include' },
+  )
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}
+
+export function useHideClaudeContextCodebase() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: hideCodebaseApi,
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.claudeContextUsage }),
+  })
+}
+
+export type UseHideClaudeContextCodebaseReturn = ReturnType<typeof useHideClaudeContextCodebase>
+
+export function useUnhideClaudeContextCodebase() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: unhideCodebaseApi,
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.claudeContextUsage }),
+  })
+}
+
+export type UseUnhideClaudeContextCodebaseReturn = ReturnType<typeof useUnhideClaudeContextCodebase>
 
 export function useSupermemoryUsage(
   limit = 20,

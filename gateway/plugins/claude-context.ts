@@ -535,10 +535,58 @@ async function handleGetOverlay(req: Request): Promise<Response> {
   });
 }
 
+// POST /hidden — admin only. Body: { codebaseId }. Marks a codebase as hidden
+// so non-admin users don't see it in /usage. Purely a display filter — does
+// not affect chunk storage, search, or indexing in any way.
+async function handleHideCodebase(req: Request): Promise<Response> {
+  const auth = await requireAdmin(req);
+  if (auth instanceof Response) return auth;
+
+  let body: { codebaseId?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return errJson("Invalid JSON body");
+  }
+
+  const { codebaseId } = body;
+  if (!isValidCodebaseId(codebaseId)) return errJson("codebaseId required");
+
+  db.prepare(
+    `INSERT INTO plugin_hidden_codebases (codebase_id, hidden_at)
+     VALUES (?, ?)
+     ON CONFLICT(codebase_id) DO NOTHING`,
+  ).run(codebaseId, Date.now());
+
+  return Response.json({ hidden: true });
+}
+
+// DELETE /hidden?codebaseId=X — admin only. Removes the hidden flag.
+async function handleUnhideCodebase(req: Request): Promise<Response> {
+  const auth = await requireAdmin(req);
+  if (auth instanceof Response) return auth;
+
+  const url = new URL(req.url);
+  const codebaseId = url.searchParams.get("codebaseId");
+  if (!isValidCodebaseId(codebaseId)) return errJson("codebaseId required");
+
+  db.prepare("DELETE FROM plugin_hidden_codebases WHERE codebase_id = ?").run(codebaseId);
+  return Response.json({ hidden: false });
+}
+
+function loadHiddenCodebaseIds(): Set<string> {
+  const rows = db
+    .prepare("SELECT codebase_id AS codebaseId FROM plugin_hidden_codebases")
+    .all() as Array<{ codebaseId: string }>;
+  return new Set(rows.map((r) => r.codebaseId));
+}
+
 // GET /usage — aggregated view for the UI, one row per codebase with per-branch detail.
 async function handleUsage(req: Request): Promise<Response> {
   const auth = await requireUser(req);
   if (auth instanceof Response) return auth;
+  const isAdmin = auth.role === "admin";
+  const hiddenIds = loadHiddenCodebaseIds();
 
   const collections = db
     .prepare(
@@ -614,6 +662,10 @@ async function handleUsage(req: Request): Promise<Response> {
       const jobs = byCollection.get(c.name) ?? [];
       const codebaseId = jobs[0]?.codebaseId ?? null;
       if (!codebaseId) return null;
+      const hidden = hiddenIds.has(codebaseId);
+      // Non-admins never see hidden codebases — this is a display filter only,
+      // underlying chunks/search/indexing are untouched.
+      if (hidden && !isAdmin) return null;
       const counts = db
         .prepare(
           `SELECT COUNT(*) AS chunks, COUNT(DISTINCT relative_path) AS files
@@ -628,6 +680,7 @@ async function handleUsage(req: Request): Promise<Response> {
         createdAt: c.createdAt,
         chunks: counts.chunks,
         files: counts.files,
+        hidden,
         branches: jobs.map((j) => ({
           branch: j.branch,
           status: j.status,
@@ -642,9 +695,12 @@ async function handleUsage(req: Request): Promise<Response> {
     })
     .filter((r): r is NonNullable<typeof r> => r !== null);
 
-  const indexing = allJobs.filter(
-    (j) => j.status === "indexing" || j.status === "failed" || j.status === "cancelled",
-  );
+  const indexing = allJobs
+    .filter(
+      (j) => j.status === "indexing" || j.status === "failed" || j.status === "cancelled",
+    )
+    .filter((j) => isAdmin || !hiddenIds.has(j.codebaseId))
+    .map((j) => ({ ...j, hidden: hiddenIds.has(j.codebaseId) }));
 
   const totals = {
     codebases: results.length,
@@ -669,6 +725,7 @@ export const claudeContextPlugin: GatewayPlugin = {
     "/overlay": { GET: handleGetOverlay, POST: handleOverlay },
     "/search": { POST: handleSearch },
     "/usage": { GET: handleUsage },
+    "/hidden": { POST: handleHideCodebase, DELETE: handleUnhideCodebase },
   },
   migrate: () => {
     db.run(`
@@ -692,6 +749,13 @@ export const claudeContextPlugin: GatewayPlugin = {
       `CREATE INDEX IF NOT EXISTS idx_plugin_indexing_jobs_collection
          ON plugin_indexing_jobs(collection)`,
     );
+
+    db.run(`
+      CREATE TABLE IF NOT EXISTS plugin_hidden_codebases (
+        codebase_id TEXT PRIMARY KEY,
+        hidden_at   INTEGER NOT NULL
+      )
+    `);
 
     // One-shot cleanup: previous installs embedded at 512-d using a local
     // model. After the switch to bedrock/titan-embed-v2 @ 1024-d those chunks

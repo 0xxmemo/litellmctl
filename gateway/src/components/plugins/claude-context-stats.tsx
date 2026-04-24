@@ -10,6 +10,9 @@ import {
   Square,
   Trash2,
   Eraser,
+  MoreHorizontal,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import {
   Card,
@@ -27,6 +30,7 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { StatCard } from "@/components/stat-card";
 import { PrettyAmount } from "@/components/pretty-amount";
 import type {
@@ -34,6 +38,8 @@ import type {
   UseRemoveClaudeContextCodebaseReturn,
   UseStopClaudeContextJobReturn,
   UseClearClaudeContextJobReturn,
+  UseHideClaudeContextCodebaseReturn,
+  UseUnhideClaudeContextCodebaseReturn,
 } from "@/hooks/use-plugins";
 
 interface Props {
@@ -42,6 +48,8 @@ interface Props {
   removeCodebase: UseRemoveClaudeContextCodebaseReturn;
   stopJob: UseStopClaudeContextJobReturn;
   clearJob: UseClearClaudeContextJobReturn;
+  hideCodebase: UseHideClaudeContextCodebaseReturn;
+  unhideCodebase: UseUnhideClaudeContextCodebaseReturn;
 }
 
 function formatRelative(timestamp: number): string {
@@ -59,7 +67,15 @@ type StopTarget = { codebaseId: string; branch: string };
 type RemoveTarget = { codebaseId: string };
 type ClearTarget = { codebaseId: string; branch: string };
 
-export function ClaudeContextStats({ query, isAdmin, removeCodebase, stopJob, clearJob }: Props) {
+export function ClaudeContextStats({
+  query,
+  isAdmin,
+  removeCodebase,
+  stopJob,
+  clearJob,
+  hideCodebase,
+  unhideCodebase,
+}: Props) {
   const { data, isLoading, error } = query;
   const [stopTarget, setStopTarget] = useState<StopTarget | null>(null);
   const [removeTarget, setRemoveTarget] = useState<RemoveTarget | null>(null);
@@ -104,7 +120,10 @@ export function ClaudeContextStats({ query, isAdmin, removeCodebase, stopJob, cl
           </CardHeader>
           <CardContent className="space-y-3">
             {data!.indexing.map((job) => (
-              <div key={`${job.codebaseId}#${job.branch}`} className="space-y-1">
+              <div
+                key={`${job.codebaseId}#${job.branch}`}
+                className={`space-y-1 ${job.hidden ? 'opacity-50' : ''}`}
+              >
                 <div className="flex items-center justify-between gap-2 text-xs">
                   <span className="flex items-center gap-1.5 font-mono text-muted-foreground truncate min-w-0">
                     {job.status === 'indexing' ? (
@@ -115,6 +134,15 @@ export function ClaudeContextStats({ query, isAdmin, removeCodebase, stopJob, cl
                     <span className="truncate">{job.codebaseId}</span>
                     <GitBranch className="w-3 h-3 shrink-0 opacity-60" />
                     <span className="truncate">{job.branch}</span>
+                    {job.hidden && (
+                      <span
+                        className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-normal shrink-0"
+                        title="Hidden from non-admin users"
+                      >
+                        <EyeOff className="w-3 h-3" />
+                        hidden
+                      </span>
+                    )}
                   </span>
                   <div className="shrink-0 flex items-center gap-2">
                     <span className="text-muted-foreground">
@@ -124,33 +152,74 @@ export function ClaudeContextStats({ query, isAdmin, removeCodebase, stopJob, cl
                           ? 'cancelled'
                           : `${Math.round(job.percentage)}%`}
                     </span>
-                    {isAdmin && job.status === 'indexing' && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-6 px-2 text-xs"
-                        onClick={() =>
-                          setStopTarget({ codebaseId: job.codebaseId, branch: job.branch })
-                        }
-                        disabled={stopJob.isPending}
-                      >
-                        <Square className="w-3 h-3 mr-1" />
-                        Stop
-                      </Button>
-                    )}
-                    {isAdmin && (job.status === 'failed' || job.status === 'cancelled') && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-6 px-2 text-xs"
-                        onClick={() =>
-                          setClearTarget({ codebaseId: job.codebaseId, branch: job.branch })
-                        }
-                        disabled={clearJob.isPending}
-                      >
-                        <Eraser className="w-3 h-3 mr-1" />
-                        Clear
-                      </Button>
+                    {isAdmin && (
+                      <Popover>
+                        <PopoverTrigger asChild>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-6 w-6 p-0"
+                            aria-label="Actions"
+                          >
+                            <MoreHorizontal className="w-3 h-3" />
+                          </Button>
+                        </PopoverTrigger>
+                        <PopoverContent align="end" className="w-44 p-1">
+                          <div className="flex flex-col">
+                            {job.status === 'indexing' && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="justify-start h-8 px-2 text-xs"
+                                onClick={() =>
+                                  setStopTarget({ codebaseId: job.codebaseId, branch: job.branch })
+                                }
+                                disabled={stopJob.isPending}
+                              >
+                                <Square className="w-3 h-3 mr-2" />
+                                Stop
+                              </Button>
+                            )}
+                            {(job.status === 'failed' || job.status === 'cancelled') && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="justify-start h-8 px-2 text-xs"
+                                onClick={() =>
+                                  setClearTarget({ codebaseId: job.codebaseId, branch: job.branch })
+                                }
+                                disabled={clearJob.isPending}
+                              >
+                                <Eraser className="w-3 h-3 mr-2" />
+                                Clear
+                              </Button>
+                            )}
+                            {job.hidden ? (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="justify-start h-8 px-2 text-xs"
+                                onClick={() => unhideCodebase.mutate(job.codebaseId)}
+                                disabled={unhideCodebase.isPending}
+                              >
+                                <Eye className="w-3 h-3 mr-2" />
+                                Unhide
+                              </Button>
+                            ) : (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="justify-start h-8 px-2 text-xs"
+                                onClick={() => hideCodebase.mutate(job.codebaseId)}
+                                disabled={hideCodebase.isPending}
+                              >
+                                <EyeOff className="w-3 h-3 mr-2" />
+                                Hide
+                              </Button>
+                            )}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
                     )}
                   </div>
                 </div>
@@ -215,13 +284,27 @@ export function ClaudeContextStats({ query, isAdmin, removeCodebase, stopJob, cl
                   </thead>
                   <tbody>
                     {data!.collections.map((c) => (
-                      <tr key={c.name} className="border-b last:border-b-0 align-top">
+                      <tr
+                        key={c.name}
+                        className={`border-b last:border-b-0 align-top ${c.hidden ? 'opacity-50' : ''}`}
+                      >
                         <td className="py-2 pr-4 font-mono text-xs break-all">
-                          {c.codebaseId ? (
-                            <span title={c.name}>{c.codebaseId}</span>
-                          ) : (
-                            <span className="text-muted-foreground">{c.name}</span>
-                          )}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {c.codebaseId ? (
+                              <span title={c.name}>{c.codebaseId}</span>
+                            ) : (
+                              <span className="text-muted-foreground">{c.name}</span>
+                            )}
+                            {c.hidden && (
+                              <span
+                                className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px]"
+                                title="Hidden from non-admin users"
+                              >
+                                <EyeOff className="w-3 h-3" />
+                                hidden
+                              </span>
+                            )}
+                          </div>
                         </td>
                         <td className="py-2 pr-4 text-xs">
                           {c.branches.length === 0 ? (
@@ -248,16 +331,55 @@ export function ClaudeContextStats({ query, isAdmin, removeCodebase, stopJob, cl
                         {isAdmin && (
                           <td className="py-2 pr-4 text-right">
                             {c.codebaseId && (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 px-2 text-xs text-destructive hover:text-destructive"
-                                onClick={() => setRemoveTarget({ codebaseId: c.codebaseId! })}
-                                disabled={removeCodebase.isPending}
-                              >
-                                <Trash2 className="w-3 h-3 mr-1" />
-                                Remove
-                              </Button>
+                              <Popover>
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 w-7 p-0"
+                                    aria-label="Actions"
+                                  >
+                                    <MoreHorizontal className="w-3.5 h-3.5" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent align="end" className="w-44 p-1">
+                                  <div className="flex flex-col">
+                                    {c.hidden ? (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="justify-start h-8 px-2 text-xs"
+                                        onClick={() => unhideCodebase.mutate(c.codebaseId!)}
+                                        disabled={unhideCodebase.isPending}
+                                      >
+                                        <Eye className="w-3 h-3 mr-2" />
+                                        Unhide
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        className="justify-start h-8 px-2 text-xs"
+                                        onClick={() => hideCodebase.mutate(c.codebaseId!)}
+                                        disabled={hideCodebase.isPending}
+                                      >
+                                        <EyeOff className="w-3 h-3 mr-2" />
+                                        Hide
+                                      </Button>
+                                    )}
+                                    <Button
+                                      variant="ghost"
+                                      size="sm"
+                                      className="justify-start h-8 px-2 text-xs text-destructive hover:text-destructive"
+                                      onClick={() => setRemoveTarget({ codebaseId: c.codebaseId! })}
+                                      disabled={removeCodebase.isPending}
+                                    >
+                                      <Trash2 className="w-3 h-3 mr-2" />
+                                      Remove
+                                    </Button>
+                                  </div>
+                                </PopoverContent>
+                              </Popover>
                             )}
                           </td>
                         )}
