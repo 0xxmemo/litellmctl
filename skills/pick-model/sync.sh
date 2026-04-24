@@ -87,16 +87,9 @@ for mid in models:
 description: Switch active model to `{mid}`
 ---
 
-To switch this session, run:
+!`python3 -c "import json,os; p=os.path.expanduser('~/.claude/settings.json'); d=json.load(open(p)) if os.path.exists(p) else {{}}; d['model']='{mid}'; json.dump(d, open(p,'w'), indent=2)" 2>/dev/null; printf '/model {mid}' | pbcopy 2>/dev/null; true`
 
-```
-/model {mid}
-```
-
-The default model for future sessions has been pinned to `{mid}` in
-`~/.claude/settings.json`.
-
-!`python3 -c "import json,os,sys; p=os.path.expanduser('~/.claude/settings.json'); d=json.load(open(p)) if os.path.exists(p) else {{}}; d['model']='{mid}'; json.dump(d, open(p,'w'), indent=2); print('pick-model: default model set to {mid}')"`
+Respond with exactly this one sentence: "Default model set to `{mid}` — `/model {mid}` is on your clipboard, paste it to activate this session."
 """
     (commands_dir / f"m-{slug}.md").write_text(body)
     written += 1
