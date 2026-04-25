@@ -11,12 +11,13 @@ from ..common.formatting import info
 # Source of truth for completion word lists — mirrors cli.py (flat command surface).
 # If you add a new top-level command, update both this file and cli.py.
 _TOP_COMMANDS = (
-    "wizard install uninstall init-env "
+    "wizard install update uninstall init-env "
     "auth "
     "start stop restart status logs proxy local "
     "users set-role routes api migrate-from-mongo "
     "toggle-claude deploy setup-completions help"
 )
+_UPDATE_FLAGS = "--skip-restart --force"
 _FEATURES = "proxy gateway searxng protonmail embedding transcription"
 _STATUS_TARGETS = "proxy gateway searxng protonmail embedding transcription auth"
 _LOGS_TARGETS = "proxy gateway protonmail searxng"
@@ -100,6 +101,9 @@ print(' '.join(_completable_segments([s for s in '''$segs'''.split() if s])))" 2
     install)
       COMPREPLY=( $(compgen -W "__INSTALL_FLAGS__" -- "$cur") )
       return ;;
+    update)
+      COMPREPLY=( $(compgen -W "__UPDATE_FLAGS__" -- "$cur") )
+      return ;;
     uninstall)
       COMPREPLY=( $(compgen -W "$uninstall_cmds" -- "$cur") )
       return ;;
@@ -125,6 +129,7 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
   commands=(
     'wizard:Interactive config.yaml generator'
     'install:Install / rebuild LiteLLM'
+    'update:Pull latest, reinstall fork, restart proxy'
     'uninstall:Stop and remove components'
     'init-env:Detect auth files and update .env paths'
     'auth:Manage OAuth tokens + protonmail bridge'
@@ -177,6 +182,7 @@ ZSH_COMPLETIONS = r'''_litellmctl_completions() {
       logs)           compadd __LOGS_TARGETS__ ;;
       proxy)          compadd -- --port --config ;;
       install)        compadd -- __INSTALL_FLAGS__ ;;
+      update)         compadd -- __UPDATE_FLAGS__ ;;
       migrate-from-mongo) compadd -- --mongo-uri --force ;;
       deploy)         compadd __DEPLOY_TARGETS__ ;;
       api)
@@ -226,6 +232,7 @@ def _substitute(template: str) -> str:
         .replace("__DEPLOY_TARGETS__", _DEPLOY_TARGETS)
         .replace("__ROLES__", _ROLES)
         .replace("__INSTALL_FLAGS__", _INSTALL_FLAGS)
+        .replace("__UPDATE_FLAGS__", _UPDATE_FLAGS)
     )
 
 

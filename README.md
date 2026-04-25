@@ -104,10 +104,26 @@ Use `litellmctl routes` to see all endpoints with descriptions.
 ```
 litellmctl wizard                 Interactive config.yaml generator
 litellmctl install [flags]        Install / rebuild components
+litellmctl update [flags]         git pull (parent + submodule), reinstall fork, restart proxy
 litellmctl init-env               Detect auth files and update .env
 litellmctl toggle-claude          Toggle Claude Code between direct API and proxy
 litellmctl setup-completions      Add litellmctl alias + tab completion to shell
 ```
+
+#### Update flags
+
+```
+--skip-restart   Reinstall but don't restart the proxy
+--force          Reinstall + restart even if no commits were pulled
+```
+
+`update` is the right command after `git pull`-ing the fork on a server: it
+pulls the parent repo and the `litellm/` submodule, syncs the submodule
+pointer, drops stale `__pycache__` directories, reinstalls the editable
+fork (`pip install -e litellm[proxy] --no-deps`), then restarts the proxy.
+Plain `litellmctl restart proxy` does **not** reinstall — if a non-editable
+copy of `litellm` is shadowing the submodule, restart alone won't pick up
+fork changes.
 
 #### Install flags
 

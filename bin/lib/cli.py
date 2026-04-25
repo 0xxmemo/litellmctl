@@ -250,6 +250,25 @@ def install(
 
 
 @app.command()
+def update(
+    skip_restart: bool = typer.Option(
+        False, "--skip-restart", help="Reinstall but don't restart the proxy."
+    ),
+    force: bool = typer.Option(
+        False, "--force", help="Reinstall + restart even if no commits were pulled.",
+    ),
+) -> None:
+    """Pull latest, reinstall the editable litellm fork, restart the proxy."""
+    from .commands.update import cmd_update
+    try:
+        cmd_update(skip_restart=skip_restart, force=force)
+    except KeyboardInterrupt:
+        from .common.formatting import warn
+        warn("Update cancelled.")
+        raise typer.Exit(130)
+
+
+@app.command()
 def auth(args: Optional[list[str]] = typer.Argument(None)) -> None:
     """Manage OAuth tokens (chatgpt/gemini/qwen/kimi)."""
     from .common.platform import is_interactive
