@@ -86,6 +86,11 @@ export function Console() {
       retryCount.current = 0
       sendResize()
       term.focus()
+      // After the resume replay lands, xterm processes a flood of escape
+      // sequences which can drop the keyboard focus class on the
+      // textarea. Refocus once the queue has drained so TUIs receive
+      // keystrokes immediately.
+      window.setTimeout(() => term.focus(), 80)
     }
     ws.onmessage = (ev) => {
       const data =
@@ -231,6 +236,13 @@ export function Console() {
   }, [user?.role, health?.features.console, connect])
 
   // ── Toolbar actions ───────────────────────────────────────────────────
+  // Toolbar buttons steal keyboard focus when clicked. Painful in a TUI
+  // (vim, htop), where there's no "scroll back and click again" recovery.
+  // Every toolbar handler returns focus to the terminal afterwards.
+  const refocusTerm = useCallback(() => {
+    requestAnimationFrame(() => termRef.current?.focus())
+  }, [])
+
   const handleReconnect = useCallback(() => {
     if (reconnectTimer.current) {
       window.clearTimeout(reconnectTimer.current)
@@ -240,16 +252,19 @@ export function Console() {
     retryCount.current = 0
     unmountedRef.current = false
     if (termRef.current) connect(termRef.current)
-  }, [connect])
+    refocusTerm()
+  }, [connect, refocusTerm])
 
   const handleClear = useCallback(() => {
     termRef.current?.clear()
-  }, [])
+    refocusTerm()
+  }, [refocusTerm])
 
   const handleCopy = useCallback(async () => {
     const sel = termRef.current?.getSelection()
     if (sel) await navigator.clipboard.writeText(sel).catch(() => {})
-  }, [])
+    refocusTerm()
+  }, [refocusTerm])
 
   const handleSearch = useCallback((query: string, direction: 'next' | 'prev') => {
     if (!searchRef.current) return
@@ -257,7 +272,10 @@ export function Console() {
     else searchRef.current.findPrevious(query, { caseSensitive: false })
   }, [])
 
-  const handleFullscreen = useCallback(() => setFullscreen((f) => !f), [])
+  const handleFullscreen = useCallback(() => {
+    setFullscreen((f) => !f)
+    refocusTerm()
+  }, [refocusTerm])
 
   // ── Gates ────────────────────────────────────────────────────────────
   if (user?.role !== 'admin') {
@@ -429,7 +447,10 @@ export function Console() {
               <div className="flex gap-3">
                 <Button
                   variant="outline"
-                  onClick={() => setShowKillConfirm(false)}
+                  onClick={() => {
+                    setShowKillConfirm(false)
+                    refocusTerm()
+                  }}
                   disabled={killMutation.isPending}
                   className="flex-1"
                 >
@@ -454,6 +475,7 @@ export function Console() {
                         retryCount.current = 0
                         termRef.current?.clear()
                         if (termRef.current) connect(termRef.current)
+                        refocusTerm()
                       },
                       onError: (err: unknown) => {
                         const msg = err instanceof Error ? err.message : String(err)
@@ -494,7 +516,10 @@ export function Console() {
               <div className="flex gap-3">
                 <Button
                   variant="outline"
-                  onClick={() => setShowRestartConfirm(false)}
+                  onClick={() => {
+                    setShowRestartConfirm(false)
+                    refocusTerm()
+                  }}
                   disabled={restartMutation.isPending}
                   className="flex-1"
                 >

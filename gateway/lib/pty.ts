@@ -353,6 +353,25 @@ export function attachPty(ws: ServerWebSocket<ConsoleSocketData>): void {
     }
     ws.send(banner);
   } catch {}
+
+  // Force TUIs (vim, htop, less, top, btop) running in the resumed
+  // session to redraw. They redraw on SIGWINCH; SIGWINCH only fires when
+  // ioctl(TIOCSWINSZ) sees changed dimensions. If the new tab happens to
+  // open at the same size as the saved session, the client's resize
+  // message is a no-op and the TUI sits there with stale rendering and
+  // a hidden cursor (htop, less). Jiggle by 1 row and back so SIGWINCH
+  // fires unconditionally; the client's own resize message lands a few
+  // ms later and snaps the dimensions to the actual viewport.
+  if (resumed && !session.exited) {
+    const sess = session;
+    setTimeout(() => {
+      if (sess.exited || sess.attached !== ws) return;
+      try {
+        sess.handle.resize(sess.cols, Math.max(1, sess.rows - 1));
+        sess.handle.resize(sess.cols, sess.rows);
+      } catch {}
+    }, 30);
+  }
 }
 
 export function detachPty(ws: ServerWebSocket<ConsoleSocketData>): void {
