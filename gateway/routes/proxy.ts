@@ -152,9 +152,12 @@ function trackFromSSE(
       buffer += decoder.decode();
       if (buffer.length > 0) processLine(buffer);
     } catch {
-      // Parser failed — release the tee buffer so upstream bytes aren't
-      // retained in memory waiting for a reader that won't return.
-      reader.cancel().catch(() => {});
+      // Tracker reader errored. Do NOT call reader.cancel() — on a teed
+      // Response.clone() in Bun, cancelling one branch can disturb the
+      // sibling branch the client is reading from, manifesting as a
+      // mid-stream cutoff. Just bail; the reader is released when this
+      // IIFE returns and the tee buffer is freed when the client branch
+      // finishes.
       return;
     }
 
