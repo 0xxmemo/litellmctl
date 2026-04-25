@@ -2,6 +2,26 @@
 
 All notable changes to litellmctl are documented here.
 
+## [1.6.5] - 2026-04-25
+
+### Fixes
+
+- **`codex/gpt-5.4*` returned `400 Missing required parameter: 'tools[n].name'` from Claude Code.** Two coupled bugs in the Anthropic-format → ChatGPT bridge surfaced as the same error:
+  1. **Wrong bridge.** `/v1/messages` requests for `chatgpt/*` models were routing through `LiteLLMMessagesToCompletionTransformationHandler` (chat/completions bridge) instead of `LiteLLMMessagesToResponsesAPIHandler` (responses bridge). ChatGPT's actual endpoint is `https://chatgpt.com/backend-api/codex/responses` and validates Responses-format tools (`{type:"function", name:..., parameters:...}`); the chat bridge produced nested OpenAI-chat-format (`{type:"function", function:{name:...}}`) which the codex backend interpreted as Responses-format with a missing `name`. Fixed by adding `"chatgpt"` to `_RESPONSES_API_PROVIDERS` in the vendored fork (`litellm/llms/anthropic/experimental_pass_through/messages/handler.py`).
+  2. **Hosted-tool name collision.** ChatGPT's codex `/responses` validator silently strips the `name` field from any function tool whose normalised name (lowercased, separators stripped) matches a hosted-tool keyword — `WebSearch`, `web_search`, `FileSearch`, `Computer`, `CodeInterpreter`, `ImageGeneration` — then 400s reporting the missing name. Validator behaviour varies by ChatGPT account cohort: the same payload returned 200 on one account, 400 on another, which is why the issue was not caught locally. Claude Code ships a built-in `WebSearch` tool which trips the collision. Fixed by suffix-renaming colliding names with `__litellm_safe` on outbound (`responses_adapters/transformation.py:_sanitize_chatgpt_tool_name`) and stripping the suffix on inbound in both the non-streaming response translator and the SSE stream wrapper, so the original tool name reaches the client. The two fixes are coupled — without the routing fix, the chat bridge has its own tool-translation function that does not run the sanitizer; verified empirically on production by toggling the routing flag with the sanitizer in place. The captured Claude Code request lives at `tests/claude-requests/claude-request-2026-04-25T17-04-27-377Z.json` and serves as the regression smoke test.
+
+### Features
+
+- **`litellmctl update` command.** New top-level command that does what users were doing by hand on the EC2 box after a fork-side fix: `git pull` the parent repo, `git pull` the litellm submodule, `git submodule update --init --recursive` to sync the pointer, drop stale `__pycache__` directories under the submodule, reinstall the editable fork (`pip install -e litellm[proxy] --no-deps`), then `litellmctl restart proxy`. Plain `litellmctl restart proxy` does not reinstall — if a non-editable copy of `litellm` is shadowing the submodule, restart alone won't pick up fork changes. Flags: `--skip-restart` (reinstall but don't bounce the proxy) and `--force` (reinstall + restart even when both pulls report up-to-date). Wired into bash + zsh tab completion. Tested via a no-op run reporting "Nothing to update" plus an end-to-end pull + reinstall + restart.
+
+- **Gateway: per-user role management.** Admin panel can now promote/demote users between `guest`, `user`, and `admin` roles directly from the UI. Backed by an admin-gated role-update endpoint.
+
+- **Gateway: hide/unhide codebases.** Admins can hide indexed codebases from the search UI without dropping their embeddings — useful for archived projects or codebases that shouldn't surface in plugin queries.
+
+### Operations
+
+- **Restart the proxy after upgrading.** This release ships fork-side fixes in the vendored litellm submodule (`litellm/llms/anthropic/experimental_pass_through/{messages/handler.py,responses_adapters/transformation.py,responses_adapters/streaming_iterator.py}`). `litellmctl restart gateway` only cycles the Bun wrapper — run `litellmctl restart proxy` (or, simpler, `litellmctl update` which does both) so the new routing + sanitizer take effect. Verified end-to-end against `https://llm.0xmemo.com/v1/messages?beta=true` with the saved `claude -p "gm" --model codex/gpt-5.4-mini` payload: 400 before, 200 after.
+
 ## [1.6.4] - 2026-04-23
 
 ### Performance
