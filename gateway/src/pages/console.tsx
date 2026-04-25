@@ -6,11 +6,11 @@ import { WebLinksAddon } from '@xterm/addon-web-links'
 import { SearchAddon } from '@xterm/addon-search'
 import { ClipboardAddon } from '@xterm/addon-clipboard'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { RefreshCw, Eraser, Search, X, Copy, Maximize2, Minimize2, Power, AlertTriangle } from 'lucide-react'
+import { RefreshCw, Eraser, Search, X, Copy, Maximize2, Minimize2, Power, AlertTriangle, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth } from '@/hooks/use-auth'
 import { useHealth } from '@/hooks/use-health'
-import { useRestartGateway } from '@/hooks/use-admin'
+import { useRestartGateway, useKillConsoleSession } from '@/hooks/use-admin'
 import { Button } from '@/components/ui/button'
 
 type ConnState = 'connecting' | 'open' | 'closed' | 'error' | 'denied'
@@ -62,7 +62,9 @@ export function Console() {
   const [searchQuery, setSearchQuery] = useState('')
   const [fullscreen, setFullscreen] = useState(false)
   const [showRestartConfirm, setShowRestartConfirm] = useState(false)
+  const [showKillConfirm, setShowKillConfirm] = useState(false)
   const restartMutation = useRestartGateway()
+  const killMutation = useKillConsoleSession()
 
   // ── Connect / reconnect logic ─────────────────────────────────────────
   const connect = useCallback((term: Terminal) => {
@@ -340,6 +342,12 @@ export function Console() {
           </ToolbarButton>
           <div className="mx-1 h-4 w-px bg-border/50" />
           <ToolbarButton
+            title="Kill session — terminate the persistent shell"
+            onClick={() => setShowKillConfirm(true)}
+          >
+            <Trash2 className="w-3.5 h-3.5 text-ui-danger-fg" />
+          </ToolbarButton>
+          <ToolbarButton
             title="Restart Gateway"
             onClick={() => setShowRestartConfirm(true)}
           >
@@ -390,9 +398,77 @@ export function Console() {
             <kbd className="px-1 rounded bg-muted text-muted-foreground">bun</kbd>{' '}
             all on $PATH
           </span>
+          <span className="text-ui-success-fg/80">
+            Session persists across refresh & nav — use Kill to end it
+          </span>
           <span className="ml-auto">
             Right-click selects word · Shift+click extends selection · URLs are clickable
           </span>
+        </div>
+      )}
+
+      {showKillConfirm && (
+        <div className="glass-overlay fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div className="glass glass--muted w-full max-w-md rounded-xl text-card-foreground shadow-none ring-1 ring-ui-danger-border">
+            <div className="p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <AlertTriangle className="h-6 w-6 text-ui-danger-fg" />
+                <h3 className="text-lg font-bold">Kill terminal session?</h3>
+              </div>
+              <p className="text-muted-foreground mb-4">
+                This terminates the persistent shell on the server. Any
+                running command in this session is killed (SIGHUP), the
+                replay buffer is dropped, and the next reconnect starts a
+                fresh shell.
+              </p>
+              <p className="text-sm text-muted-foreground mb-6">
+                You don&apos;t need this to log out — refreshing or navigating
+                away keeps the session running. Use Kill only when you
+                actually want to end it.
+              </p>
+              <div className="flex gap-3">
+                <Button
+                  variant="outline"
+                  onClick={() => setShowKillConfirm(false)}
+                  disabled={killMutation.isPending}
+                  className="flex-1"
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="destructive"
+                  onClick={() =>
+                    killMutation.mutate(undefined, {
+                      onSuccess: ({ killed }) => {
+                        toast.success(
+                          killed ? 'Session terminated' : 'No active session',
+                        )
+                        setShowKillConfirm(false)
+                        // Force a fresh reconnect so the user sees a new
+                        // shell prompt (server will spawn one on attach).
+                        if (reconnectTimer.current) {
+                          window.clearTimeout(reconnectTimer.current)
+                          reconnectTimer.current = null
+                        }
+                        wsRef.current?.close()
+                        retryCount.current = 0
+                        termRef.current?.clear()
+                        if (termRef.current) connect(termRef.current)
+                      },
+                      onError: (err: unknown) => {
+                        const msg = err instanceof Error ? err.message : String(err)
+                        toast.error(`Kill failed: ${msg}`)
+                      },
+                    })
+                  }
+                  disabled={killMutation.isPending}
+                  className="flex-1"
+                >
+                  {killMutation.isPending ? 'Killing…' : 'Kill session'}
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       )}
 

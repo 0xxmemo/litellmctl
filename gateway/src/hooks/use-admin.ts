@@ -202,6 +202,23 @@ export function useRestartGateway() {
   return useMutation({ mutationFn: restartGatewayApi })
 }
 
+async function killConsoleSessionApi(): Promise<{ killed: boolean }> {
+  const res = await fetch('/api/admin/console', {
+    method: 'DELETE',
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  })
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new Error(data.error || `HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+export function useKillConsoleSession() {
+  return useMutation({ mutationFn: killConsoleSessionApi })
+}
+
 export type UseAdminUsersReturn = ReturnType<typeof useAdminUsers>
 export type UseApproveUserReturn = ReturnType<typeof useApproveUser>
 export type UseRejectUserReturn = ReturnType<typeof useRejectUser>

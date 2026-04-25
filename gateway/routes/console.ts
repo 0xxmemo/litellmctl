@@ -1,5 +1,9 @@
 import { requireAdmin } from "../lib/db";
-import { consoleEnabled, type ConsoleSocketData } from "../lib/pty";
+import {
+  consoleEnabled,
+  killSessionForUser,
+  type ConsoleSocketData,
+} from "../lib/pty";
 import type { Server } from "bun";
 
 /**
@@ -27,9 +31,25 @@ async function consoleUpgradeHandler(
   return Response.json({ error: "WebSocket upgrade failed" }, { status: 400 });
 }
 
+/**
+ * DELETE /api/admin/console — explicitly terminate the caller's persistent
+ * shell session. WebSocket disconnects (refresh, nav) intentionally do NOT
+ * kill the PTY; this endpoint is the only way to end the session early.
+ */
+async function consoleKillHandler(req: Request): Promise<Response> {
+  if (!consoleEnabled()) {
+    return Response.json({ error: "Console disabled" }, { status: 404 });
+  }
+  const auth = await requireAdmin(req);
+  if (auth instanceof Response) return auth;
+  const killed = killSessionForUser(auth.email);
+  return Response.json({ killed });
+}
+
 export const consoleRoutes = {
   "/api/admin/console": {
     GET: (req: Request, server: Server<ConsoleSocketData>) =>
       consoleUpgradeHandler(req, server),
+    DELETE: (req: Request) => consoleKillHandler(req),
   },
 };

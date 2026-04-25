@@ -11,6 +11,15 @@
  *     stdio, and use a tiny length-prefixed frame protocol over stdin to
  *     carry typed input, resize events, and a kill request.
  *
+ * Persistence:
+ *   - PTY sessions are owned by the admin (keyed by email), not by the
+ *     WebSocket connection. Refresh / nav / brief disconnects keep the
+ *     shell running; reconnecting reattaches and replays the recent
+ *     scrollback. Sessions live until the admin clicks "Kill session"
+ *     (DELETE /api/admin/console) or the gateway restarts.
+ *   - Multi-tab: latest WS wins. Opening a second tab kicks the first
+ *     with code 1000 reason "session-moved".
+ *
  * Gating:
  *   1. requireAdmin() at the WebSocket upgrade boundary (routes/console.ts)
  *   2. GATEWAY_CONSOLE_ENABLED !== "false"
@@ -199,7 +208,6 @@ export function spawnConsole(cols = 80, rows = 24): PtyHandle {
 
 export interface ConsoleSocketData {
   email: string;
-  pty?: PtyHandle;
 }
 
 function isStillAdmin(email: string): boolean {
@@ -207,54 +215,191 @@ function isStillAdmin(email: string): boolean {
   return user !== null && user.role === "admin";
 }
 
+// ── Per-admin session registry ─────────────────────────────────────────────
+// One PTY per admin email; survives WebSocket disconnects.
+//
+// REPLAY_BUFFER_BYTES bounds memory for an idle session that's been writing
+// output (e.g. a `tail -f`). 256 KiB ≈ one full xterm scrollback worth, big
+// enough that a quick refresh sees recent context, small enough that ten
+// abandoned sessions cost <3 MiB.
+const REPLAY_BUFFER_BYTES = (() => {
+  const v = Number(process.env.GATEWAY_CONSOLE_REPLAY_BUFFER_BYTES);
+  return Number.isFinite(v) && v > 0 ? Math.floor(v) : 256 * 1024;
+})();
+
+interface PtySession {
+  email: string;
+  handle: PtyHandle;
+  // Bounded scrollback for replay on reattach. Stored as encoded bytes
+  // (the wire format) so replay is a single ws.send() of joined chunks.
+  replay: string;
+  cols: number;
+  rows: number;
+  attached: ServerWebSocket<ConsoleSocketData> | null;
+  exited: boolean;
+}
+
+const sessions = new Map<string, PtySession>();
+
+function appendReplay(session: PtySession, chunk: string): void {
+  if (chunk.length >= REPLAY_BUFFER_BYTES) {
+    // Single chunk bigger than buffer — keep only the tail.
+    session.replay = chunk.slice(chunk.length - REPLAY_BUFFER_BYTES);
+    return;
+  }
+  const combined = session.replay + chunk;
+  session.replay =
+    combined.length > REPLAY_BUFFER_BYTES
+      ? combined.slice(combined.length - REPLAY_BUFFER_BYTES)
+      : combined;
+}
+
+function disposeSession(session: PtySession, reason: string): void {
+  if (sessions.get(session.email) === session) {
+    sessions.delete(session.email);
+  }
+  if (session.attached) {
+    try { session.attached.close(1000, reason); } catch {}
+    session.attached = null;
+  }
+  if (!session.exited) {
+    session.exited = true;
+    try { session.handle.kill(); } catch {}
+  }
+}
+
+function createSession(email: string, cols: number, rows: number): PtySession {
+  const handle = spawnConsole(cols, rows);
+  const session: PtySession = {
+    email,
+    handle,
+    replay: "",
+    cols,
+    rows,
+    attached: null,
+    exited: false,
+  };
+  sessions.set(email, session);
+
+  handle.onData((chunk) => {
+    appendReplay(session, chunk);
+    if (session.attached) {
+      try { session.attached.send(chunk); } catch {}
+    }
+  });
+  handle.onExit((code) => {
+    session.exited = true;
+    const banner = `\r\n[process exited: ${code}]\r\n`;
+    appendReplay(session, banner);
+    if (session.attached) {
+      try { session.attached.send(banner); } catch {}
+      try { session.attached.close(1000, "exited"); } catch {}
+      session.attached = null;
+    }
+    sessions.delete(email);
+  });
+  return session;
+}
+
+/**
+ * Force-terminate the active session for an admin (if any). Called by the
+ * DELETE /api/admin/console route.
+ */
+export function killSessionForUser(email: string): boolean {
+  const session = sessions.get(email);
+  if (!session) return false;
+  disposeSession(session, "killed");
+  return true;
+}
+
 export function attachPty(ws: ServerWebSocket<ConsoleSocketData>): void {
   if (!consoleEnabled()) {
     try { ws.close(1008, "console-disabled"); } catch {}
     return;
   }
-  if (!ws.data?.email || !isStillAdmin(ws.data.email)) {
+  const email = ws.data?.email;
+  if (!email || !isStillAdmin(email)) {
     try { ws.close(1008, "admin-required"); } catch {}
     return;
   }
-  const handle = spawnConsole();
-  ws.data.pty = handle;
-  handle.onData((chunk) => { try { ws.send(chunk); } catch {} });
-  handle.onExit((code) => {
-    try { ws.send(`\r\n[process exited: ${code}]\r\n`); } catch {}
-    try { ws.close(1000, "exited"); } catch {}
-  });
-  try { ws.send(`\r\n[admin console — user=${ws.data.email}]\r\n`); } catch {}
+
+  let session = sessions.get(email);
+  let resumed = false;
+
+  if (session && !session.exited) {
+    // Latest tab wins: kick whichever socket was here before.
+    if (session.attached && session.attached !== ws) {
+      try {
+        session.attached.send("\r\n[session moved to a new tab]\r\n");
+      } catch {}
+      try { session.attached.close(1000, "session-moved"); } catch {}
+    }
+    session.attached = ws;
+    resumed = true;
+  } else {
+    if (session?.exited) sessions.delete(email);
+    session = createSession(email, 80, 24);
+    session.attached = ws;
+  }
+
+  const banner = resumed
+    ? `\r\n[admin console — resumed session for ${email}]\r\n`
+    : `\r\n[admin console — user=${email}]\r\n`;
+  try {
+    if (resumed && session.replay.length > 0) {
+      // Send the replay first so the user sees recent scrollback before
+      // the resume banner — banner sits at the bottom like a status line.
+      ws.send(session.replay);
+    }
+    ws.send(banner);
+  } catch {}
 }
 
 export function detachPty(ws: ServerWebSocket<ConsoleSocketData>): void {
-  ws.data.pty?.kill();
-  ws.data.pty = undefined;
+  // Find the session this ws was attached to and unbind. Do NOT kill the
+  // PTY — the user gets to reattach by reconnecting, and explicit kill is
+  // handled by killSessionForUser via the DELETE route.
+  const email = ws.data?.email;
+  if (!email) return;
+  const session = sessions.get(email);
+  if (session && session.attached === ws) {
+    session.attached = null;
+  }
 }
 
 export function handleClientMessage(
   ws: ServerWebSocket<ConsoleSocketData>,
   message: string | Buffer,
 ): void {
-  const handle = ws.data.pty;
-  if (!handle) return;
-  if (!ws.data?.email || !isStillAdmin(ws.data.email)) {
+  const email = ws.data?.email;
+  if (!email || !isStillAdmin(email)) {
     try { ws.close(1008, "admin-required"); } catch {}
     return;
   }
+  const session = sessions.get(email);
+  if (!session || session.exited) return;
+  // Only accept input from the currently attached socket. A stale socket
+  // (post-"session-moved") shouldn't be able to type into the live shell.
+  if (session.attached !== ws) return;
+
   const text = typeof message === "string" ? message : message.toString("utf8");
 
   if (text.startsWith("{")) {
     try {
       const parsed = JSON.parse(text) as { type: string; data?: string; cols?: number; rows?: number };
       if (parsed.type === "input" && typeof parsed.data === "string") {
-        handle.write(parsed.data);
+        session.handle.write(parsed.data);
         return;
       }
       if (parsed.type === "resize") {
-        handle.resize(parsed.cols ?? 80, parsed.rows ?? 24);
+        const cols = parsed.cols ?? 80;
+        const rows = parsed.rows ?? 24;
+        session.cols = cols;
+        session.rows = rows;
+        session.handle.resize(cols, rows);
         return;
       }
     } catch {}
   }
-  handle.write(text);
+  session.handle.write(text);
 }
