@@ -342,16 +342,22 @@ export function attachPty(ws: ServerWebSocket<ConsoleSocketData>): void {
     session.attached = ws;
   }
 
-  const banner = resumed
-    ? `\r\n[admin console — resumed session for ${email}]\r\n`
-    : `\r\n[admin console — user=${email}]\r\n`;
   try {
-    if (resumed && session.replay.length > 0) {
-      // Send the replay first so the user sees recent scrollback before
-      // the resume banner — banner sits at the bottom like a status line.
-      ws.send(session.replay);
+    if (resumed) {
+      // Replay only — no banner. Inline-rendering TUIs (Ink-based apps
+      // like Claude Code, plus any program that draws into the main
+      // scrollback rather than alt-screen) keep state by writing
+      // relative to the current cursor position. Injecting a banner
+      // below the replayed frame parks the cursor below the TUI; the
+      // TUI's next redraw then clears the wrong region and stacks
+      // frames. The user already knows they reopened the page — they
+      // don't need a terminal-text confirmation.
+      if (session.replay.length > 0) {
+        ws.send(session.replay);
+      }
+    } else {
+      ws.send(`\r\n[admin console — user=${email}]\r\n`);
     }
-    ws.send(banner);
   } catch {}
 
   // Force TUIs (vim, htop, less, top, btop) running in the resumed
