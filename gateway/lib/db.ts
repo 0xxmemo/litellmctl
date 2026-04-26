@@ -732,9 +732,28 @@ export async function initCliSecret() {
 // AUTH HELPERS
 // ============================================================================
 
+/**
+ * Local dev bypass: when GATEWAY_DEV_NO_AUTH=1 is set, every request is
+ * treated as the admin identified by GATEWAY_DEV_AUTH_EMAIL (or
+ * "dev@localhost"). Strictly opt-in — production never has this set.
+ *
+ * The "if email exists in validated_users use that role, else fabricate
+ * admin" behaviour means you can point it at a real admin email to match
+ * production permissions exactly while still skipping OTP.
+ */
+function devNoAuthUser(): { email: string; role: string } | null {
+  if (process.env.GATEWAY_DEV_NO_AUTH !== "1") return null;
+  const email = process.env.GATEWAY_DEV_AUTH_EMAIL || "dev@localhost";
+  const real = loadUser(email);
+  return real ?? { email, role: "admin" };
+}
+
 export async function getAuthenticatedUser(
   req: Request,
 ): Promise<{ email: string; role: string } | null> {
+  const dev = devNoAuthUser();
+  if (dev) return dev;
+
   const cliSecret = req.headers.get("x-gateway-secret");
   if (cliSecret && cliSecret === _cliSecret) {
     return { email: "cli@localhost", role: "admin" };

@@ -1,4 +1,4 @@
-import { signSession, verifySession, getSessionCookie } from "../lib/auth";
+import { signSession } from "../lib/auth";
 import { sendOTPCode } from "../lib/email-service";
 import { generateOTP } from "../lib/otp";
 import {
@@ -9,6 +9,7 @@ import {
   upsertGuestIfMissing,
   createSession,
   userProfileCache,
+  getAuthenticatedUser,
 } from "../lib/db";
 
 async function requestOtpHandler(req: Request) {
@@ -86,18 +87,23 @@ async function verifyOtpHandler(req: Request) {
 }
 
 async function sessionMeHandler(req: Request) {
-  const sessionToken = getSessionCookie(req);
-  if (!sessionToken) return Response.json({ authenticated: false });
-  const session = await verifySession(sessionToken);
-  if (!session) return Response.json({ authenticated: false });
-  const sessionEmail = typeof session.email === "string" ? session.email : null;
-  if (!sessionEmail) return Response.json({ authenticated: false });
-  const user = loadUser(sessionEmail);
-  if (!user) return Response.json({ authenticated: false });
-  return Response.json({
-    authenticated: true,
-    user: { email: sessionEmail, role: user.role, name: user.name, company: user.company },
-  });
+  // Honor GATEWAY_DEV_NO_AUTH (and the cli-secret bypass) the same way as
+  // the require* helpers; without this the frontend useAuth() shows the
+  // login page even when the API would happily authenticate every request.
+  const authed = await getAuthenticatedUser(req);
+  if (authed) {
+    const profile = loadUser(authed.email);
+    return Response.json({
+      authenticated: true,
+      user: {
+        email: authed.email,
+        role: authed.role,
+        name: profile?.name,
+        company: profile?.company,
+      },
+    });
+  }
+  return Response.json({ authenticated: false });
 }
 
 async function logoutHandler() {

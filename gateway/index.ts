@@ -322,3 +322,9 @@ Bun.serve({
 });
 
 console.log(`🚀 Server running at http://localhost:${PORT}`);
+if (process.env.GATEWAY_DEV_NO_AUTH === "1") {
+  const devEmail = process.env.GATEWAY_DEV_AUTH_EMAIL || "dev@localhost";
+  console.warn(
+    `⚠️  GATEWAY_DEV_NO_AUTH=1 — every request authenticates as ${devEmail} (admin). Local dev only.`,
+  );
+}
