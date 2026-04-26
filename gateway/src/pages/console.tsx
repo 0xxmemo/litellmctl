@@ -147,6 +147,11 @@ export function Console() {
   useEffect(() => {
     if (!containerRef.current) return
     if (user?.role !== 'admin') return
+    // Console-feature flag is consulted in the JSX gate below, NOT as an
+    // effect dep. Including it would re-run this effect when /api/health
+    // resolves (undefined → true), which disposes the freshly-built xterm
+    // and opens a SECOND WebSocket — the user's keystrokes hit the dead
+    // first instance and never reach the PTY.
     if (health && !health.features.console) return
 
     const term = new Terminal({
@@ -246,7 +251,9 @@ export function Console() {
       searchRef.current = null
       wsRef.current = null
     }
-  }, [user?.role, health?.features.console, connect])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment
+    // at the top of this effect on why health.features.console is omitted.
+  }, [user?.role, connect])
 
   // ── Toolbar actions ───────────────────────────────────────────────────
   // Toolbar buttons steal keyboard focus when clicked. Painful in a TUI
