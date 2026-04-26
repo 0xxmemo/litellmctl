@@ -56,6 +56,13 @@ export function Console() {
   const reconnectTimer = useRef<number | null>(null)
   const retryCount = useRef(0)
   const unmountedRef = useRef(false)
+  // True from ws.onopen until the replay window closes. Replayed escape
+  // sequences (DA queries like `\e[c`, status reports, OSC color queries)
+  // make xterm emit responses via term.onData; if those responses reach
+  // the PTY, bash's readline parses them as compound key sequences and
+  // ends up displaying literal "1;2c" chars + eating the user's first
+  // few keystrokes. We drop xterm-originated input during this window.
+  const suppressInputRef = useRef(false)
 
   const [state, setState] = useState<ConnState>('connecting')
   const [searchOpen, setSearchOpen] = useState(false)
@@ -84,6 +91,12 @@ export function Console() {
     ws.onopen = () => {
       setState('open')
       retryCount.current = 0
+      // Open the suppression window BEFORE the server's replay arrives.
+      // 350 ms is long enough to absorb the largest replay buffer
+      // (256 KiB) on a typical browser, short enough that real
+      // typing-after-refresh isn't perceptibly dropped.
+      suppressInputRef.current = true
+      window.setTimeout(() => { suppressInputRef.current = false }, 350)
       sendResize()
       term.focus()
       // After the resume replay lands, xterm processes a flood of escape
@@ -200,9 +213,14 @@ export function Console() {
     // xterm renders into a collapsed viewport ("connected but invisible").
     requestAnimationFrame(() => {
       try { fit.fit() } catch {}
+      // Direct refresh on /console can land before the textarea exists in
+      // a focusable state; refocus once layout has settled so the user
+      // can type without clicking.
+      try { term.focus() } catch {}
     })
 
     const onData = term.onData((data) => {
+      if (suppressInputRef.current) return
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(JSON.stringify({ type: 'input', data }))
       }
@@ -403,6 +421,7 @@ export function Console() {
       {/* Terminal */}
       <div
         ref={containerRef}
+        onMouseDown={() => termRef.current?.focus()}
         className="flex-1 min-h-0 bg-[#0a0a0b] overflow-hidden"
       />
 
