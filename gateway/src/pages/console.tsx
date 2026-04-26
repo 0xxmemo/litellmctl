@@ -99,11 +99,6 @@ export function Console() {
       window.setTimeout(() => { suppressInputRef.current = false }, 350)
       sendResize()
       term.focus()
-      // After the resume replay lands, xterm processes a flood of escape
-      // sequences which can drop the keyboard focus class on the
-      // textarea. Refocus once the queue has drained so TUIs receive
-      // keystrokes immediately.
-      window.setTimeout(() => term.focus(), 80)
     }
     ws.onmessage = (ev) => {
       const data =
