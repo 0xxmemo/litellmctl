@@ -94,6 +94,19 @@ log "prompt:  $PROMPT"
 log "proxy:   $BASE_URL  (port $PORT)"
 log "logs:    $LOG_DIR/$RUN_ID.{stdout,stderr,debug}.log"
 
+# Mode: "bare" (default, fast) or "full" (mirrors interactive session).
+#
+# bare: --bare --setting-sources "" — strips MCP, hooks, plugins,
+#   CLAUDE.md, auto-memory. Smaller request, faster, isolates the
+#   proxy from client-side concerns. Good for proxy-only smoke tests.
+#
+# full: keeps user settings (MCP servers, hooks, plugins, CLAUDE.md
+#   discovery) but still injects our BASE_URL via flagSettings. Sends
+#   the SAME request shape the user's interactive session sends, so it
+#   catches bugs that only manifest with rich tool/system payloads
+#   (e.g. cache rehydration of chunks from large prompts).
+MODE="${MODE:-bare}"
+
 # Build inline flagSettings JSON. flagSettings is a TRUSTED_SETTING_SOURCE
 # in managedEnv.ts and is applied AFTER userSettings, so its env wins.
 # We also clear the parent shell's ANTHROPIC_* / CLAUDE_* via `env -i` —
@@ -128,6 +141,18 @@ else
   RUNNER=( perl -e 'alarm shift; exec @ARGV or die "exec: $!"' "$TIMEOUT_SEC" )
 fi
 
+CLAUDE_FLAGS=(
+  -p "$PROMPT"
+  --settings "$SETTINGS_JSON"
+  --model "$MODEL"
+  --debug-file "$DEBUG_LOG"
+  --max-turns 1
+)
+if [ "$MODE" = "bare" ]; then
+  CLAUDE_FLAGS+=( --bare --setting-sources "" )
+fi
+log "mode:    $MODE"
+
 (
   cd "$WORKDIR" && \
   env -i \
@@ -135,13 +160,7 @@ fi
     PATH="$PATH" \
     TERM="${TERM:-xterm-256color}" \
     "${RUNNER[@]}" \
-    claude -p "$PROMPT" \
-      --bare \
-      --setting-sources "" \
-      --settings "$SETTINGS_JSON" \
-      --model "$MODEL" \
-      --debug-file "$DEBUG_LOG" \
-      --max-turns 1 \
+    claude "${CLAUDE_FLAGS[@]}" \
       >"$STDOUT_LOG" 2>"$STDERR_LOG"
 )
 RC=$?
