@@ -2,6 +2,25 @@
 
 All notable changes to litellmctl are documented here.
 
+## [1.6.6] - 2026-04-27
+
+### Fixes
+
+- **`kimi-code/kimi-for-coding` retry-looped Claude Code requests with `500 Internal Server Error`.** Three coupled crash points along the websearch_interception → cache → Anthropic-adapter path, all triggered by the same chunk-shape leak. `websearch_interception` is registered with `kimi_code` in `enabled_providers`; when Claude Code sends its built-in `WebSearch` tool the hook flips `stream=True → False`, runs the agentic loop, and stores the kimi response under a non-stream cache key. The cached payload is `{object: "chat.completion.chunk", choices: [{delta: {...}}]}` — chunk shape, no message field, no usage. On the next identical hit `_async_get_cache` rehydrates that chunk through `convert_to_model_response_object(stream=False)`, which then crashes three places before the user's screen:
+  1. `convert_dict_to_response.py:545` `KeyError 'message'` reading `choice["message"].get("tool_calls", ...)`.
+  2. `transformation.py:1195` `AttributeError: 'StreamingChoices' object has no attribute 'message'` in `_translate_openai_content_to_anthropic`.
+  3. `transformation.py:1327` `AttributeError: 'ModelResponse' object has no attribute 'usage'` because chunks omit the usage block.
+
+  Two-place defensive fix in the vendored fork: at the non-stream branch entry of `convert_to_model_response_object`, normalize chunk shape (`choices[].delta` → `choices[].message`, set `object="chat.completion"`) and synthesize a zero-usage record if missing. In `_translate_openai_content_to_anthropic`, bind `msg = .message or .delta` once per choice and use uniformly so any future leak through this codepath is non-fatal. Surrounding usage extraction also gained defensive `getattr` for the same reason. No behaviour change for healthy responses — both checks short-circuit when `.message` is present.
+
+### Features
+
+- **`tests/claude-harness/`** — runs the host's `claude -p` against a configurable proxy hermetically. Mirrors what the linux-harness gave us for install flows: catch real-client behaviour without the false-positives that come from `~/.claude/settings.json` env clobbering shell exports. The harness uses `--bare --setting-sources "" --settings '<inline-json>'` so `flagSettings` overrides `userSettings`, and `env -i` strips the parent shell's `ANTHROPIC_*` for belt-and-braces. Asserts on retry-loop messages, exit code, output bytes, and known adapter blowup signatures (`StreamingChoices`, `Traceback`, `API Error: 500`). `MODE=full` env var drops `--bare` so the harness sends the same rich request shape your interactive session does — necessary for catching cache-rehydration bugs that only manifest with full MCP/hooks/CLAUDE.md payloads. `API_KEY=...` env var lets the same harness drive a remote endpoint (e.g. prod) with that endpoint's own credentials.
+
+### Operations
+
+- **Restart the proxy after upgrading.** Fork-side fixes in `litellm/litellm_core_utils/llm_response_utils/convert_dict_to_response.py` and `litellm/llms/anthropic/experimental_pass_through/adapters/transformation.py`. `litellmctl restart gateway` only cycles the Bun wrapper — use `litellmctl update` (which pulls submodule + restarts proxy) or manually `litellmctl restart proxy`. Verified end-to-end against `https://llm.0xmemo.com` with `claude -p "hello" --model kimi-code/kimi-for-coding` in both `MODE=bare` and `MODE=full`: retry-loop with 500s before, clean 200 after, on both cache-miss and cache-hit runs.
+
 ## [1.6.5] - 2026-04-25
 
 ### Fixes
