@@ -24,6 +24,7 @@ import { TeamsPanel } from '@/components/teams-panel'
 import { toast } from 'sonner'
 import { PrettyDate } from '@/components/pretty-date'
 import { PrettyAmount } from '@/components/pretty-amount'
+import { UsageSparkline } from '@/components/usage-sparkline'
 import { errorMessage } from '@/lib/utils'
 import { roleBadgeVariant } from '@/lib/role-badge'
 export function Admin() {
@@ -404,6 +405,7 @@ export function Admin() {
                       <TableHead>Role</TableHead>
                       <TableHead className="text-right">Requests</TableHead>
                       <TableHead className="text-right">Tokens</TableHead>
+                      <TableHead className="whitespace-nowrap">Last 24h</TableHead>
                       <TableHead>Approved</TableHead>
                       <TableHead></TableHead>
                     </TableRow>
@@ -430,6 +432,12 @@ export function Admin() {
                           </TableCell>
                           <TableCell className="text-right tabular-nums">
                             <PrettyAmount amountFormatted={user.tokens ?? 0} size="sm" />
+                          </TableCell>
+                          <TableCell>
+                            <UsageSparkline
+                              buckets={user.requests24h ?? new Array(24).fill(0)}
+                              className="text-primary"
+                            />
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                             {user.approvedAt ? <PrettyDate date={user.approvedAt} format="date" size="sm" /> : 'N/A'}

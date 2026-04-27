@@ -610,6 +610,44 @@ export function userUsageTotals(emails: string[]): Record<string, { requests: nu
   return out;
 }
 
+/**
+ * Returns one bucket per hour for the last `hours` hours, oldest → newest.
+ * Buckets count requests (not tokens) — they're for a sparkline preview, so
+ * raw call frequency reads better than token volume which is dominated by a
+ * few fat requests.
+ */
+export function userUsageHistograms(
+  emails: string[],
+  hours: number = 24,
+): Record<string, number[]> {
+  const out: Record<string, number[]> = {};
+  for (const email of emails) out[email.toLowerCase()] = new Array(hours).fill(0);
+  if (!emails.length) return out;
+
+  const now = Date.now();
+  const since = now - hours * 3_600_000;
+  const placeholders = emails.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT email,
+              CAST((? - timestamp) / 3600000 AS INTEGER) AS bucket,
+              COUNT(*) AS reqs
+         FROM usage_logs
+        WHERE email IN (${placeholders})
+          AND timestamp >= ?
+        GROUP BY email, bucket`,
+    )
+    .all(now, ...emails, since) as { email: string; bucket: number; reqs: number }[];
+
+  for (const r of rows) {
+    if (r.bucket < 0 || r.bucket >= hours) continue;
+    const idx = hours - 1 - r.bucket;
+    const arr = out[r.email.toLowerCase()];
+    if (arr) arr[idx] = r.reqs;
+  }
+  return out;
+}
+
 // ============================================================================
 // TEAMS
 // ============================================================================

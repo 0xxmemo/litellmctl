@@ -9,6 +9,7 @@ import {
   revokeAllKeysForEmail,
   revokeAllKeys,
   userUsageTotals,
+  userUsageHistograms,
   loadUser,
   userProfileCache,
   listTeams,
@@ -47,11 +48,14 @@ async function adminListUsersHandler(req: Request) {
   if (auth instanceof Response) return auth;
 
   const users = listAllUsers();
-  const byEmail = userUsageTotals(users.map((u) => u.email.toLowerCase()));
+  const lowered = users.map((u) => u.email.toLowerCase());
+  const byEmail = userUsageTotals(lowered);
+  const histByEmail = userUsageHistograms(lowered, 24);
 
   return Response.json({
     users: users.map((u) => {
-      const st = byEmail[u.email.toLowerCase()] ?? { requests: 0, tokens: 0 };
+      const key = u.email.toLowerCase();
+      const st = byEmail[key] ?? { requests: 0, tokens: 0 };
       return {
         email: u.email,
         role: u.role,
@@ -59,6 +63,7 @@ async function adminListUsersHandler(req: Request) {
         approvedAt: u.approvedAt ? new Date(u.approvedAt).toISOString() : null,
         requests: st.requests,
         tokens: st.tokens,
+        requests24h: histByEmail[key] ?? new Array(24).fill(0),
       };
     }),
   });

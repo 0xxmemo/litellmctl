@@ -12,6 +12,8 @@ export interface UserRecord {
   requests?: number
   /** Total tokens from usage_logs for this user (admin list only). */
   tokens?: number
+  /** Per-hour request counts for the last 24 hours, oldest → newest. */
+  requests24h?: number[]
 }
 
 // ── Fetch helpers (internal) ─────────────────────────────────────────────────
