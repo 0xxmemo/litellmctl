@@ -1,4 +1,4 @@
-import { db, requireAuth, requireUser, listUserKeyHashes } from "../lib/db";
+import { db, requireAuth, requireUser, listUserKeyHashes, globalUsageStats } from "../lib/db";
 import { errorMessage } from "../lib/errors";
 import { extractProvider } from "../lib/models";
 
@@ -34,6 +34,8 @@ async function userStatsHandler(req: Request) {
       )
       .get(...m.params) as any;
 
+    // Single grouped query: per-model totals + aliases via GROUP_CONCAT.
+    // GROUP_CONCAT(DISTINCT x) deduplicates inside SQLite — no JS-side dedup loop.
     const modelRows = db
       .prepare(
         `SELECT
@@ -41,28 +43,33 @@ async function userStatsHandler(req: Request) {
            COUNT(*) AS requests,
            COALESCE(SUM(tokens), 0) AS tokens,
            COALESCE(SUM(prompt_tokens), 0) AS promptTokens,
-           COALESCE(SUM(completion_tokens), 0) AS completionTokens
+           COALESCE(SUM(completion_tokens), 0) AS completionTokens,
+           GROUP_CONCAT(
+             DISTINCT CASE
+               WHEN requested_model IS NOT NULL AND requested_model != model
+               THEN requested_model
+             END
+           ) AS aliases
          FROM usage_logs
          WHERE ${m.where}
          GROUP BY model
          ORDER BY tokens DESC`,
       )
-      .all(...m.params) as any[];
+      .all(...m.params) as Array<{
+        model: string;
+        requests: number;
+        tokens: number;
+        promptTokens: number;
+        completionTokens: number;
+        aliases: string | null;
+      }>;
 
-    // Requested alias expansion per model
-    const aliasStmt = db.prepare(
-      `SELECT DISTINCT requested_model FROM usage_logs
-       WHERE ${m.where} AND model = ? AND requested_model IS NOT NULL AND requested_model != model`,
-    );
-    const modelBreakdown = modelRows.map((r) => {
-      const aliasRows = aliasStmt.all(...m.params, r.model) as { requested_model: string }[];
-      return {
-        ...r,
-        requestedAliases: aliasRows.map((a) => a.requested_model).filter(Boolean),
-      };
-    });
+    const modelBreakdown = modelRows.map((r) => ({
+      ...r,
+      requestedAliases: r.aliases ? r.aliases.split(",").filter(Boolean) : [],
+    }));
 
-    const totalModelTokens = modelBreakdown.reduce((s, m) => s + (m.tokens || 0), 0);
+    const totalModelTokens = totals?.tokens || 0;
 
     // 30-day daily histogram (cutoff = 00:00 local 29 days ago)
     const thirtyStart = new Date();
@@ -352,8 +359,17 @@ async function groupItemsHandler(req: Request) {
   }
 }
 
+// GET /api/stats/global — aggregated, anonymized usage across all users.
+// Available to any authenticated, non-guest user.
+async function globalStatsHandler(req: Request) {
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
+  return Response.json(globalUsageStats(30));
+}
+
 export const statsRoutes = {
   "/api/stats/user":            { GET: userStatsHandler },
+  "/api/stats/global":          { GET: globalStatsHandler },
   "/api/stats/requests":        { GET: groupedRequestsHandler },
   "/api/stats/requests/items":  { GET: groupItemsHandler },
 };

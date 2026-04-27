@@ -648,6 +648,120 @@ export function userUsageHistograms(
   return out;
 }
 
+/**
+ * Aggregated, anonymized usage across all users.
+ * Totals are all-time (matching the personal /api/stats/user shape).
+ * `dailyRequests` is a `dailyDays`-day window so the chart stays readable.
+ * Returns no per-user identifiers — safe for any non-guest user.
+ */
+export interface GlobalUsageStats {
+  requests: number;
+  tokens: number;
+  promptTokens: number;
+  completionTokens: number;
+  activeUsers: number;
+  totalUsers: number;
+  totalKeys: number;
+  /** One entry per day, oldest → newest. */
+  dailyRequests: Array<{ date: string; requests: number }>;
+  /** Top models by token volume (all-time). */
+  modelUsage: Array<{
+    model_name: string;
+    requests: number;
+    tokens: number;
+    percentage: string;
+  }>;
+}
+
+export function globalUsageStats(dailyDays: number = 30): GlobalUsageStats {
+  const start = new Date();
+  start.setDate(start.getDate() - (dailyDays - 1));
+  start.setHours(0, 0, 0, 0);
+  const since = start.getTime();
+
+  const totals = db
+    .prepare(
+      `SELECT
+         COUNT(*) AS requests,
+         COALESCE(SUM(tokens), 0) AS tokens,
+         COALESCE(SUM(prompt_tokens), 0) AS promptTokens,
+         COALESCE(SUM(completion_tokens), 0) AS completionTokens
+       FROM usage_logs`,
+    )
+    .get() as {
+      requests: number;
+      tokens: number;
+      promptTokens: number;
+      completionTokens: number;
+    } | undefined;
+
+  // Distinct users who made a request inside the daily window — "active".
+  const activeUsers = (db
+    .prepare(
+      `SELECT COUNT(DISTINCT email) AS n FROM usage_logs WHERE timestamp >= ?`,
+    )
+    .get(since) as { n: number }).n;
+
+  const totalUsers = (db.prepare(`SELECT COUNT(*) AS n FROM validated_users`).get() as { n: number }).n;
+  const totalKeys = (db.prepare(`SELECT COUNT(*) AS n FROM api_keys WHERE revoked = 0`).get() as { n: number }).n;
+
+  const modelRows = db
+    .prepare(
+      `SELECT
+         model,
+         COUNT(*) AS requests,
+         COALESCE(SUM(tokens), 0) AS tokens
+       FROM usage_logs
+       GROUP BY model
+       ORDER BY tokens DESC`,
+    )
+    .all() as { model: string; requests: number; tokens: number }[];
+
+  const dailyRows = db
+    .prepare(
+      `SELECT
+         strftime('%Y-%m-%d', timestamp / 1000, 'unixepoch', 'localtime') AS day,
+         COUNT(*) AS requests
+       FROM usage_logs
+       WHERE timestamp >= ?
+       GROUP BY day`,
+    )
+    .all(since) as { day: string; requests: number }[];
+  const dailyMap: Record<string, number> = {};
+  for (const r of dailyRows) dailyMap[r.day] = r.requests;
+
+  const dailyRequests: Array<{ date: string; requests: number }> = [];
+  for (let i = dailyDays - 1; i >= 0; i--) {
+    const d = new Date();
+    d.setDate(d.getDate() - i);
+    d.setHours(0, 0, 0, 0);
+    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    dailyRequests.push({
+      date: d.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+      requests: dailyMap[key] || 0,
+    });
+  }
+
+  const tokensTotal = totals?.tokens || 0;
+
+  return {
+    requests: totals?.requests || 0,
+    tokens: tokensTotal,
+    promptTokens: totals?.promptTokens || 0,
+    completionTokens: totals?.completionTokens || 0,
+    activeUsers,
+    totalUsers,
+    totalKeys,
+    dailyRequests,
+    modelUsage: modelRows.map((m) => ({
+      model_name: m.model || "unknown",
+      requests: m.requests,
+      tokens: m.tokens,
+      percentage: tokensTotal > 0 ? ((m.tokens / tokensTotal) * 100).toFixed(1) : "0.0",
+    })),
+  };
+}
+
 // ============================================================================
 // TEAMS
 // ============================================================================

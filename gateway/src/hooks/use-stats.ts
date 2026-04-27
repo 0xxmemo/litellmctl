@@ -77,3 +77,44 @@ export function useUserStatsAnalytics() {
 
 export type UseUserStatsReturn = ReturnType<typeof useUserStats>
 export type UseUserStatsAnalyticsReturn = ReturnType<typeof useUserStatsAnalytics>
+
+// ── Global usage (anonymized, available to any non-guest user) ──────────────
+
+export interface GlobalStats {
+  requests: number
+  tokens: number
+  promptTokens: number
+  completionTokens: number
+  activeUsers: number
+  totalUsers: number
+  totalKeys: number
+  dailyRequests: Array<{ date: string; requests: number }>
+  modelUsage: Array<{
+    model_name: string
+    requests: number
+    tokens: number
+    percentage: string
+  }>
+}
+
+async function fetchGlobalStats(): Promise<GlobalStats> {
+  const res = await fetch('/api/stats/global', {
+    credentials: 'include',
+    headers: { Accept: 'application/json' },
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return res.json()
+}
+
+export function useGlobalStats(enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.globalStats,
+    queryFn: fetchGlobalStats,
+    enabled,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
+    refetchIntervalInBackground: false,
+  })
+}
+
+export type UseGlobalStatsReturn = ReturnType<typeof useGlobalStats>

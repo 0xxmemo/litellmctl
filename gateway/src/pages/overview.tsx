@@ -1,7 +1,7 @@
 'use client'
 import { useEffect, useState } from 'react'
 import { StatCard } from '@/components/stat-card'
-import { Activity, Key, Zap, TrendingUp, RefreshCw, Puzzle, BarChart3 } from 'lucide-react'
+import { Activity, Key, Zap, TrendingUp, RefreshCw, Puzzle, BarChart3, Users, Globe } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { PrettyAmount } from '@/components/pretty-amount'
@@ -9,7 +9,7 @@ import { ModelUsagePieChart } from '@/components/model-usage-pie-chart'
 import { RequestsTable } from '@/components/requests-table'
 import { PluginsOverview } from '@/components/plugins/plugins-overview'
 import { getDisplayName, formatProviderName, extractProvider, resolveProvider } from '@lib/models'
-import { useUserStats } from '@/hooks/use-stats'
+import { useUserStats, useGlobalStats } from '@/hooks/use-stats'
 import { useAuth } from '@/hooks/use-auth'
 import { useRequestsTable } from '@/hooks/use-requests'
 import { CartesianGrid, Line, LineChart, XAxis, YAxis } from 'recharts'
@@ -44,12 +44,22 @@ const usageLineConfig = {
   },
 } satisfies ChartConfig
 
-function UsageChart({ data, loading }: { data: Array<{ date: string; requests: number }>; loading: boolean }) {
+function UsageChart({
+  data,
+  loading,
+  title = 'Your Requests Over Time',
+  description = 'Daily API request volume',
+}: {
+  data: Array<{ date: string; requests: number }>
+  loading: boolean
+  title?: string
+  description?: string
+}) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg">Your Requests Over Time</CardTitle>
-        <CardDescription>Daily API request volume</CardDescription>
+        <CardTitle className="text-lg">{title}</CardTitle>
+        <CardDescription>{description}</CardDescription>
       </CardHeader>
       <CardContent>
         {loading ? (
@@ -123,11 +133,15 @@ export function Overview() {
     userStatsSpinning,
   } = useUserStats({ enabled: authChecked && canSeeUsage })
 
+  const [activeTab, setActiveTab] = useState<string>('usage')
+
+  const globalStatsQuery = useGlobalStats(authChecked && canSeeUsage && activeTab === 'global')
+  const globalStats = globalStatsQuery.data ?? null
+  const globalStatsLoading = globalStatsQuery.isLoading
+
   const rateLimited = false // react-query retry handles backoff
 
   const userChartData = buildUserChart(userStats)
-
-  const [activeTab, setActiveTab] = useState<string>('usage')
 
   return (
     <div className="space-y-6">
@@ -157,10 +171,14 @@ export function Overview() {
       {/* Signed-in user / admin: personal usage + plugins */}
       {authChecked && canSeeUsage && (
         <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <TabsList className="grid w-full grid-cols-2 max-w-md">
+          <TabsList className="grid w-full grid-cols-3 max-w-xl">
             <TabsTrigger value="usage" className="gap-1.5">
               <BarChart3 className="h-4 w-4" />
               Usage
+            </TabsTrigger>
+            <TabsTrigger value="global" className="gap-1.5">
+              <Globe className="h-4 w-4" />
+              Global
             </TabsTrigger>
             <TabsTrigger value="plugins" className="gap-1.5">
               <Puzzle className="h-4 w-4" />
@@ -223,6 +241,71 @@ export function Overview() {
 
             <RequestsTable requestsTable={requestsTable} />
           </TabsContent>
+
+          <TabsContent value="global" className="mt-6 space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Globe className="h-5 w-5 text-primary" />
+                    Global Usage
+                  </CardTitle>
+                  <CardDescription>
+                    Aggregate activity across the gateway. No personal information is shown.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+                    <StatCard
+                      title="Active Users (30d)"
+                      value={<PrettyAmount amountFormatted={globalStatsLoading ? '...' : (globalStats?.activeUsers ?? 0)} size="2xl" normalPrecision={0} />}
+                      icon={Users}
+                    />
+                    <StatCard
+                      title="Total Users"
+                      value={<PrettyAmount amountFormatted={globalStatsLoading ? '...' : (globalStats?.totalUsers ?? 0)} size="2xl" normalPrecision={0} />}
+                      icon={Users}
+                    />
+                    <StatCard
+                      title="API Keys"
+                      value={<PrettyAmount amountFormatted={globalStatsLoading ? '...' : (globalStats?.totalKeys ?? 0)} size="2xl" normalPrecision={0} />}
+                      icon={Key}
+                    />
+                    <StatCard
+                      title="Requests"
+                      value={<PrettyAmount amountFormatted={globalStatsLoading ? '...' : (globalStats?.requests ?? 0)} size="2xl" />}
+                      icon={Activity}
+                    />
+                    <StatCard
+                      title="Tokens"
+                      value={<PrettyAmount amountFormatted={globalStatsLoading ? '...' : (globalStats?.tokens ?? 0)} size="2xl" />}
+                      icon={Zap}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <UsageChart
+                data={globalStats?.dailyRequests ?? []}
+                loading={globalStatsLoading}
+                title="Gateway Requests Over Time"
+                description="Daily API request volume across all users"
+              />
+
+              {!globalStatsLoading && globalStats?.modelUsage && globalStats.modelUsage.length > 0 ? (
+                <ModelUsagePieChart
+                  data={globalStats.modelUsage.map(m => {
+                    const provider = extractProvider(m.model_name) || resolveProvider(m.model_name, '')
+                    return {
+                      name: getDisplayName(m.model_name),
+                      value: m.requests ?? 0,
+                      percentage: m.percentage || '0',
+                      provider,
+                      providerName: formatProviderName(provider),
+                    }
+                  })}
+                />
+              ) : null}
+            </TabsContent>
 
           <TabsContent value="plugins" className="mt-6">
             <PluginsOverview

@@ -19,6 +19,7 @@ export const queryKeys = {
   // Dashboard / Stats
   userStats: ['dashboard', 'user-stats'] as const,
   userStatsAnalytics: ['dashboard', 'user-stats-analytics'] as const,
+  globalStats: ['dashboard', 'global-stats'] as const,
 
   // Requests
   groupedRequests: (page: number) => ['overview', 'grouped-requests', page] as const,
