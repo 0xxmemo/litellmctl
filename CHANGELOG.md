@@ -2,6 +2,22 @@
 
 All notable changes to litellmctl are documented here.
 
+## [1.6.7] - 2026-04-27
+
+### Features
+
+- **Gateway: per-user 24h usage sparklines in the admin panel.** The "Approved Users" table grew a "Last 24h" column showing each user's request volume as 24 hourly bars. Backed by `userUsageHistograms()` — one grouped query that buckets `usage_logs` rows for all users in a single round-trip (`CAST((? - timestamp) / 3600000 AS INTEGER) AS bucket`, `GROUP BY email, bucket`), riding the existing `idx_usage_email_ts` index. The sparkline is hand-rolled SVG (no chart-library dependency) — bars scale to the per-row max, and a faint baseline replaces the chart when there's been no activity. Native `<title>` tooltip reports the 24h request total.
+
+- **Gateway: Global Usage tab on the Overview page.** New tab visible to any non-guest user, alongside Usage and Plugins. Surfaces aggregate gateway activity — total requests, total tokens, active users (30d), total users, total API keys — plus a 30-day request line chart and a model usage pie. Aggregates only — no emails, key strings, or per-user breakdown ever leave the API. Endpoint is `/api/stats/global` gated by `requireUser`, computed by `globalUsageStats()` in `lib/db.ts`. Totals match the personal `/api/stats/user` endpoint exactly: same `usage_logs` source, same all-time window, same `model` (not `actual_model`) grouping — so global ≥ personal always holds. The query only fires when the tab is actually open (`enabled: activeTab === 'global'`).
+
+### Performance
+
+- **Stats endpoints fully aggregated in SQL.** Two post-fetch aggregations were folded into the database:
+  1. **N+1 alias lookup in `/api/stats/user`.** The model breakdown was running one extra `SELECT DISTINCT requested_model` per model row to attach `requestedAliases`. Replaced with a single `GROUP_CONCAT(DISTINCT CASE WHEN requested_model IS NOT NULL AND requested_model != model THEN requested_model END) AS aliases` in the main aggregation — SQLite dedups inside the query, JS just splits on `,`. One round-trip instead of `1 + N_models`.
+  2. **`reduce()` for percentage denominator.** Both `userStatsHandler` and `globalUsageStats` were summing `modelRows.tokens` in JS to compute the per-model percentage. The same SUM is already returned by the totals query — switched both to use `totals.tokens` directly. No JS-side aggregation across query results.
+
+  Result: every stats query path (`userUsageTotals`, `userUsageHistograms`, `globalUsageStats`, `userStatsHandler`, `adminListUsersHandler`) does its aggregation in a single grouped SQL statement. The only remaining row-level loop is `groupedRequestsHandler`, which is intentional — proximity-merge grouping is a stateful streaming computation that doesn't reduce to a pure SQL aggregation.
+
 ## [1.6.6] - 2026-04-27
 
 ### Fixes
