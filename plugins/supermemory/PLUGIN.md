@@ -45,15 +45,19 @@ GATEWAY_URL=__GATEWAY_URL__
 API_KEY=__API_KEY__
 ```
 
-The MCP server is registered in `~/.claude/settings.json` under
-`mcpServers.supermemory` and runs via
-`bun run /Users/anon/.litellm/plugins/supermemory/src/index.ts`.
+The MCP server is registered in `~/.claude.json` (Claude Code's MCP loader
+ignores `settings.json`) via `claude mcp add-json -s user supermemory ...`
+and runs via `bun run /Users/anon/.litellm/plugins/supermemory/src/index.ts`.
+
+The `UserPromptSubmit` hook lives in `~/.claude/settings.json` (where hooks
+do belong) and is identified by the path substring
+`supermemory/hooks/recall-on-prompt.sh` so uninstall can strip it cleanly.
 
 ## Auto-recall hook (the "efficient" path)
 
-Install also registers a `hooks.UserPromptSubmit` entry (tagged
-`_tag: "supermemory"` for clean uninstall) that runs
-`hooks/recall-on-prompt.sh` on every user prompt. The hook:
+Install also registers a `hooks.UserPromptSubmit` entry (matched by the
+`supermemory/hooks/recall-on-prompt.sh` path substring for clean uninstall)
+that runs `hooks/recall-on-prompt.sh` on every user prompt. The hook:
 
 1. Reads the prompt from the event JSON.
 2. Skips trivial prompts (< 6 chars or starting with `!`).

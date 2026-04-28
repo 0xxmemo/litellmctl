@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
-# supermemory plugin install — registers MCP server in ~/.claude/settings.json
-# Cross-OS: macOS (BSD) and Linux (GNU). Called inline by the gateway-generated wrapper.
+# supermemory plugin install.
+#
+# Wires two things into Claude Code:
+#   1. MCP server  → ~/.claude.json      (via `claude mcp add-json -s user`)
+#   2. Hook        → ~/.claude/settings.json  (UserPromptSubmit auto-recall)
+#
+# The MCP entry MUST live in ~/.claude.json — Claude Code's MCP loader ignores
+# settings.json. The hook legitimately belongs in settings.json.
 set -euo pipefail
 
 # --- Configuration from wrapper ---
@@ -18,15 +24,17 @@ if [ -z "$PLUGIN_SRC_DIR" ]; then
     exit 1
 fi
 
-if ! command -v bun >/dev/null 2>&1; then
-    echo "Error: 'bun' is required but not found on PATH." >&2
-    echo "Install from https://bun.sh" >&2
-    exit 1
-fi
+for bin in bun claude python3; do
+    if ! command -v "$bin" >/dev/null 2>&1; then
+        echo "Error: '$bin' is required but not found on PATH." >&2
+        exit 1
+    fi
+done
 
 SETTINGS_FILE="${SETTINGS_DIR}/settings.json"
 mkdir -p "$SETTINGS_DIR"
 
+# --- Create settings.json if missing (hook lives here) ---
 if [ ! -f "$SETTINGS_FILE" ]; then
     cat > "$SETTINGS_FILE" << 'EOF'
 {
@@ -37,14 +45,35 @@ EOF
     echo "  Created settings.json"
 fi
 
-configure_settings() {
-    local settings_file="$1"
-    if command -v python3 >/dev/null 2>&1; then
-        python3 - "$settings_file" "$PLUGIN_SRC_DIR" "$GATEWAY_ORIGIN" "$API_KEY" << 'PYEOF'
-import json, os, shlex, sys
+# --- Register MCP server in ~/.claude.json ---
+# TODO: add LITELLMCTL_URL / LITELLMCTL_API_KEY when we migrate env names.
+MCP_JSON=$(
+  PLUGIN_SRC_DIR="$PLUGIN_SRC_DIR" \
+  GATEWAY_ORIGIN="$GATEWAY_ORIGIN" \
+  API_KEY="$API_KEY" \
+  python3 -c '
+import json, os
+print(json.dumps({
+    "command": "bun",
+    "args": ["run", os.path.join(os.environ["PLUGIN_SRC_DIR"], "src", "index.ts")],
+    "env": {
+        "LLM_GATEWAY_URL": os.environ["GATEWAY_ORIGIN"],
+        "LLM_GATEWAY_API_KEY": os.environ["API_KEY"],
+    },
+}))
+'
+)
+
+# Idempotent: remove (ignore failure — may not exist) then add.
+claude mcp remove -s user supermemory >/dev/null 2>&1 || true
+claude mcp add-json -s user supermemory "$MCP_JSON" >/dev/null
+echo "  Registered MCP server via \`claude mcp add-json\` (user scope)"
+
+# --- Register UserPromptSubmit auto-recall hook in settings.json ---
+python3 - "$SETTINGS_FILE" "$PLUGIN_SRC_DIR" "$GATEWAY_ORIGIN" "$API_KEY" << 'PYEOF'
+import json, sys
 
 settings_file, plugin_src, gateway_url, api_key = sys.argv[1:5]
-entry_name = "supermemory"
 
 try:
     with open(settings_file, "r") as f:
@@ -52,86 +81,42 @@ try:
 except Exception:
     settings = {"env": {}, "permissions": {"allow": [], "deny": [], "ask": []}}
 
-settings.setdefault("mcpServers", {})
-# TODO: add LITELLMCTL_URL / LITELLMCTL_API_KEY when we migrate env names.
-settings["mcpServers"][entry_name] = {
-    "command": "bun",
-    "args": ["run", os.path.join(plugin_src, "src", "index.ts")],
-    "env": {
-        "LLM_GATEWAY_URL": gateway_url,
-        "LLM_GATEWAY_API_KEY": api_key,
-    },
+hook_env = {
+    "LLM_GATEWAY_URL": gateway_url,
+    "LLM_GATEWAY_API_KEY": api_key,
 }
+hook_cmd = plugin_src + "/hooks/recall-on-prompt.sh"
+marker = "supermemory/hooks/recall-on-prompt.sh"
 
-# Auto-recall UserPromptSubmit hook. Injects relevant memories as additional
-# context on every prompt so the agent doesn't have to call `recall` itself.
-# We keep a single supermemory-tagged entry, replacing any previous one.
-hook_script = os.path.join(plugin_src, "hooks", "recall-on-prompt.sh")
-hook_cmd = (
-    f"LLM_GATEWAY_URL={shlex.quote(gateway_url)} "
-    f"LLM_GATEWAY_API_KEY={shlex.quote(api_key)} "
-    f"bash {shlex.quote(hook_script)}"
+settings.setdefault("hooks", {})
+
+def _replace_or_append(group_key, marker_substr, hook_obj, matcher=None):
+    group = settings["hooks"].setdefault(group_key, [])
+    for entry in group:
+        for h in entry.get("hooks", []):
+            if marker_substr in (h.get("command") or ""):
+                h.update(hook_obj)
+                if matcher is not None:
+                    entry["matcher"] = matcher
+                return
+    block = {"hooks": [hook_obj]}
+    if matcher is not None:
+        block["matcher"] = matcher
+    group.append(block)
+
+env_prefix = " ".join(f"{k}={json.dumps(v)}" for k, v in hook_env.items())
+_replace_or_append(
+    "UserPromptSubmit", marker,
+    {"type": "command", "command": f"env {env_prefix} {hook_cmd}", "timeout": 5},
 )
-hook_entry = {
-    "_tag": "supermemory",  # marker so uninstall can strip only ours
-    "hooks": [
-        {
-            "type": "command",
-            "command": hook_cmd,
-            "timeout": 5,
-        }
-    ],
-}
-
-hooks = settings.setdefault("hooks", {})
-ups = hooks.setdefault("UserPromptSubmit", [])
-if not isinstance(ups, list):
-    ups = []
-    hooks["UserPromptSubmit"] = ups
-ups[:] = [h for h in ups if not (isinstance(h, dict) and h.get("_tag") == "supermemory")]
-ups.append(hook_entry)
 
 with open(settings_file, "w") as f:
     json.dump(settings, f, indent=2)
-print(f"  Registered mcpServers.{entry_name}")
-print(f"  Registered hooks.UserPromptSubmit (auto-recall)")
+print("  Registered UserPromptSubmit auto-recall hook in settings.json")
 PYEOF
-    elif command -v jq >/dev/null 2>&1; then
-        local tmp
-        tmp=$(mktemp)
-        jq --arg plugin_src "$PLUGIN_SRC_DIR" \
-           --arg gateway "$GATEWAY_ORIGIN" \
-           --arg key "$API_KEY" '
-            (if .mcpServers == null then .mcpServers = {} else . end) |
-            .mcpServers["supermemory"] = {
-                "command": "bun",
-                "args": ["run", ($plugin_src + "/src/index.ts")],
-                "env": {
-                    "LLM_GATEWAY_URL": $gateway,
-                    "LLM_GATEWAY_API_KEY": $key
-                }
-            } |
-            (if .hooks == null then .hooks = {} else . end) |
-            (if .hooks.UserPromptSubmit == null then .hooks.UserPromptSubmit = [] else . end) |
-            .hooks.UserPromptSubmit = ([ .hooks.UserPromptSubmit[] | select(._tag != "supermemory") ]) |
-            .hooks.UserPromptSubmit += [{
-                "_tag": "supermemory",
-                "hooks": [{
-                    "type": "command",
-                    "command": ("LLM_GATEWAY_URL=\x27" + $gateway + "\x27 LLM_GATEWAY_API_KEY=\x27" + $key + "\x27 bash \x27" + $plugin_src + "/hooks/recall-on-prompt.sh\x27"),
-                    "timeout": 5
-                }]
-            }]
-        ' "$settings_file" > "$tmp" && mv "$tmp" "$settings_file"
-        echo "  Registered mcpServers.supermemory"
-        echo "  Registered hooks.UserPromptSubmit (auto-recall)"
-    else
-        echo "  Error: need python3 or jq to mutate settings.json" >&2
-        exit 1
-    fi
-}
 
-configure_settings "$SETTINGS_FILE"
+# --- Ensure hook script is executable ---
+[ -f "${PLUGIN_SRC_DIR}/hooks/recall-on-prompt.sh" ] && chmod +x "${PLUGIN_SRC_DIR}/hooks/recall-on-prompt.sh"
 
 # --- Hydrate plugin node_modules (one-time) ---
 if [ -f "${PLUGIN_SRC_DIR}/package.json" ] && [ ! -d "${PLUGIN_SRC_DIR}/node_modules" ]; then

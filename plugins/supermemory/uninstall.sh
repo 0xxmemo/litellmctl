@@ -1,14 +1,31 @@
 #!/usr/bin/env bash
-# supermemory plugin uninstall — removes the MCP entry from settings.json.
+# supermemory plugin uninstall.
+#   1. MCP server   → removed from ~/.claude.json via `claude mcp remove`
+#   2. Hook         → stripped from ~/.claude/settings.json
+#   3. Plugin dir   → deleted
 set -euo pipefail
 
 SETTINGS_DIR="${SETTINGS_DIR:-$HOME/.claude}"
 PLUGIN_DIR="${PLUGIN_DIR:-$SETTINGS_DIR/plugins/supermemory}"
 SETTINGS_FILE="${SETTINGS_DIR}/settings.json"
 
+for bin in claude python3; do
+    if ! command -v "$bin" >/dev/null 2>&1; then
+        echo "Error: '$bin' is required but not found on PATH." >&2
+        exit 1
+    fi
+done
+
+# --- Remove MCP server registration ---
+if claude mcp remove -s user supermemory >/dev/null 2>&1; then
+    echo "  Removed MCP server via \`claude mcp remove\`"
+else
+    echo "  MCP server not registered (nothing to remove)"
+fi
+
+# --- Strip hook from settings.json ---
 if [ -f "$SETTINGS_FILE" ]; then
-    if command -v python3 >/dev/null 2>&1; then
-        python3 - "$SETTINGS_FILE" << 'PYEOF'
+    python3 - "$SETTINGS_FILE" << 'PYEOF'
 import json, sys
 settings_file = sys.argv[1]
 try:
@@ -16,47 +33,46 @@ try:
         settings = json.load(f)
 except Exception:
     settings = {}
-removed_mcp = False
-if "mcpServers" in settings and "supermemory" in settings["mcpServers"]:
-    del settings["mcpServers"]["supermemory"]
-    removed_mcp = True
 
-# Strip the auto-recall hook by the _tag marker written at install time.
-removed_hook = False
-hooks = settings.get("hooks") or {}
-ups = hooks.get("UserPromptSubmit")
+removed_hooks = []
+def _strip(group_key, marker_substr):
+    group = settings.get("hooks", {}).get(group_key)
+    if not isinstance(group, list):
+        return
+    new_group = []
+    for entry in group:
+        kept_hooks = [h for h in entry.get("hooks", [])
+                      if marker_substr not in (h.get("command") or "")]
+        if kept_hooks:
+            new_entry = dict(entry)
+            new_entry["hooks"] = kept_hooks
+            new_group.append(new_entry)
+        elif entry.get("hooks"):
+            removed_hooks.append(group_key)
+    settings["hooks"][group_key] = new_group
+
+_strip("UserPromptSubmit", "supermemory/hooks/recall-on-prompt.sh")
+
+# Also strip legacy `_tag: "supermemory"` entries from previous install.sh versions
+ups = settings.get("hooks", {}).get("UserPromptSubmit")
 if isinstance(ups, list):
     before = len(ups)
-    ups = [h for h in ups if not (isinstance(h, dict) and h.get("_tag") == "supermemory")]
-    if not ups:
-        del hooks["UserPromptSubmit"]
-    else:
-        hooks["UserPromptSubmit"] = ups
+    ups[:] = [h for h in ups if not (isinstance(h, dict) and h.get("_tag") == "supermemory")]
     if len(ups) != before:
-        removed_hook = True
-if hooks is not None and not hooks:
-    settings.pop("hooks", None)
+        removed_hooks.append("UserPromptSubmit (legacy _tag)")
+
+# Also strip a legacy mcpServers.supermemory entry from settings.json if a
+# previous install.sh wrote it there (it was always inert, so just clean up).
+mcp = settings.get("mcpServers")
+if isinstance(mcp, dict) and "supermemory" in mcp:
+    del mcp["supermemory"]
+    print("  Cleaned legacy mcpServers.supermemory from settings.json")
 
 with open(settings_file, "w") as f:
     json.dump(settings, f, indent=2)
-print("  Removed mcpServers.supermemory" if removed_mcp else "  mcpServers.supermemory not registered")
-print("  Removed hooks.UserPromptSubmit (auto-recall)" if removed_hook else "  hooks.UserPromptSubmit (auto-recall) not registered")
+if removed_hooks:
+    print(f"  Removed supermemory hooks from: {', '.join(sorted(set(removed_hooks)))}")
 PYEOF
-    elif command -v jq >/dev/null 2>&1; then
-        local tmp
-        tmp=$(mktemp)
-        jq '
-            (if .mcpServers then .mcpServers |= del(.["supermemory"]) else . end) |
-            (if (.hooks // {}).UserPromptSubmit then
-                .hooks.UserPromptSubmit |= [ .[] | select(._tag != "supermemory") ]
-             else . end) |
-            (if (.hooks // {}).UserPromptSubmit == [] then .hooks |= del(.UserPromptSubmit) else . end) |
-            (if .hooks == {} then del(.hooks) else . end)
-        ' "$SETTINGS_FILE" > "$tmp" && mv "$tmp" "$SETTINGS_FILE"
-        echo "  Removed mcpServers.supermemory + hooks.UserPromptSubmit (via jq)"
-    else
-        echo "  Warning: neither python3 nor jq available; skipping settings.json edit" >&2
-    fi
 fi
 
 if [ -d "$PLUGIN_DIR" ]; then
