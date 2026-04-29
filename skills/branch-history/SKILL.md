@@ -22,15 +22,41 @@ Each invocation **recomputes from scratch**. Do not blindly re-emit the previous
 
 ### 1. Detect branch + base
 
-Run, in parallel, with the Bash tool:
+The base is the integration branch this feature branch was actually forked from — **not** automatically `main`. Many repos keep a long-lived `dev` / `develop` / `staging` line that sits between feature branches and `main`; using `main` for those produces a 200-commit, multi-month "history" that's mostly other people's work and obscures the actual branch story.
+
+Step 1a — get the current branch and the candidate set:
 
 ```bash
 git rev-parse --abbrev-ref HEAD
 git symbolic-ref refs/remotes/origin/HEAD --short 2>/dev/null | sed 's@^origin/@@'   # default branch
-git rev-parse --verify main 2>/dev/null || git rev-parse --verify master 2>/dev/null
 ```
 
-Pick the base branch as `origin/HEAD` if available, else `main` if it exists, else `master`. If the current branch IS the base branch, abort with a message — there is no "branch history" for the trunk.
+Step 1b — for **every** candidate that exists locally or on `origin`, compute its merge-base with HEAD and the commit count from that base to HEAD. Candidates, in this order:
+
+1. `dev`, `develop`, `staging`, `integration`, `next` — long-lived integration branches, if any exist.
+2. The default branch from `origin/HEAD` (usually `main`).
+3. `main`, `master` — fallback if neither of the above resolves.
+
+For each candidate, prefer `origin/<name>` over the local ref when both exist (the remote is more authoritative for "where did this branch fork from"). Run, in parallel:
+
+```bash
+for c in dev develop staging integration next main master; do
+  ref=$(git rev-parse --verify --quiet "origin/$c" || git rev-parse --verify --quiet "$c") || continue
+  base=$(git merge-base HEAD "$ref")
+  count=$(git rev-list --count "$base..HEAD")
+  echo "$c $ref $base $count"
+done
+```
+
+Step 1c — **pick the candidate with the smallest commit count** (i.e. the closest fork point). That is the branch's real base. In the rare case of a tie, prefer the candidate earliest in the priority list above (`dev` before `main`).
+
+Sanity-check the choice with the user before generating, when:
+- The chosen base is not `main` / `master` (i.e. you picked an integration branch). Show "Detected base: `<base>` — `<count>` commits ahead of HEAD; main would be `<main-count>`. Use `<base>`?" via `AskUserQuestion`.
+- The commit count is suspiciously high (e.g. > 200). The base is probably wrong — surface the alternatives and ask.
+
+Skip the confirmation when the chosen base is `main` / `master` and the commit count is reasonable (< 50 commits) — that's the common case and doesn't need a prompt.
+
+If the current branch IS the chosen base branch, abort with a message — there is no "branch history" for the trunk.
 
 ### 2. Check existing file for branch tag
 
