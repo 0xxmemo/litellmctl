@@ -16,33 +16,29 @@ import * as fs from "fs";
 import * as path from "path";
 import * as crypto from "crypto";
 import { execSync } from "child_process";
+import {
+  buildEmbedText,
+  chunkFile,
+  chunksExists,
+  collectionName as sharedCollectionName,
+  embedBatch,
+  EMBED_BATCH_SIZE,
+  fetchOverlay,
+  gatewayFetch,
+  MAX_FILE_BYTES,
+  PROGRESS_INTERVAL_MS,
+  pushChunks,
+  setOverlay,
+  type GatewayConfig,
+  type OverlayEntry,
+  type PendingChunk,
+} from "./shared/sync";
 
-// ── Config ────────────────────────────────────────────────────────────────────
+// ── Code-specific config ──────────────────────────────────────────────────────
 
-const EMBEDDING_MODEL = "bedrock/titan-embed-v2";
-const EMBEDDING_DIMENSIONS = 1024;
-const CHUNK_LINES = 150;
-const CHUNK_OVERLAP = 30;
-// Titan v2 caps at 8192 input tokens. Char-to-token ratio varies wildly —
-// ASCII code averages ~3.5 chars/token, but CJK / emoji / minified / base64
-// can drop to ~1 char/token. We size the cap to stay safe under 8192 even in
-// the worst case (7500 chars * 1 char/token = 7500 tokens, leaving headroom
-// for the `// file: <path>` prefix we prepend at embed time). embedBatch
-// below also retries a failing batch item by splitting it, so pathological
-// content still indexes rather than killing the whole sync.
-const MAX_CHUNK_CHARS = 7500;
-const EMBED_BATCH_SIZE = 32;
-const EXISTS_BATCH_SIZE = 800;
-const PROGRESS_INTERVAL_MS = 2000;
-const MAX_FILE_BYTES = 512 * 1024; // skip files >512 KB
-
-// Prefix the embedded text with the file path so the embedder picks up
-// location signal ("this lives under gateway/plugins/") even when the chunk
-// body doesn't mention it. The raw content is still what's stored in the DB
-// and returned in search results — only the embedding input is enriched.
-function buildEmbedText(relPath: string, content: string): string {
-  return `// file: ${relPath}\n\n${content}`;
-}
+// Path prefix for this plugin's gateway routes. Shared sync helpers are
+// generic over this so the same code serves the docs-context plugin too.
+const PLUGIN_PATH = "/api/plugins/claude-context";
 
 const SUPPORTED_EXTENSIONS = new Set([
   ".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
@@ -53,30 +49,6 @@ const SUPPORTED_EXTENSIONS = new Set([
   ".sh", ".bash", ".zsh", ".sql", ".graphql",
   ".proto", ".tf", ".hcl", ".vue", ".svelte",
 ]);
-
-
-// ── Gateway client ─────────────────────────────────────────────────────────────
-
-interface GatewayConfig {
-  baseUrl: string;
-  apiKey: string;
-}
-
-async function gatewayFetch(
-  config: GatewayConfig,
-  method: string,
-  path: string,
-  body?: unknown,
-): Promise<Response> {
-  return fetch(`${config.baseUrl}${path}`, {
-    method,
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-}
 
 interface JobUpdate {
   codebaseId: string;
@@ -92,160 +64,7 @@ interface JobUpdate {
 }
 
 async function upsertJob(config: GatewayConfig, job: JobUpdate): Promise<void> {
-  await gatewayFetch(config, "POST", "/api/plugins/claude-context/jobs", job);
-}
-
-async function embedOne(config: GatewayConfig, text: string): Promise<number[]> {
-  const res = await gatewayFetch(config, "POST", "/v1/embeddings", {
-    model: EMBEDDING_MODEL,
-    input: [text],
-    dimensions: EMBEDDING_DIMENSIONS,
-  });
-  if (res.ok) {
-    const data = (await res.json()) as { data: Array<{ embedding: number[] }> };
-    return data.data[0].embedding;
-  }
-  // Only split on context-window errors, not on auth / quota / network failures.
-  // Titan surfaces "Too many input tokens" with a 400; everything else bubbles up.
-  const body = await res.text().catch(() => "");
-  const isContextWindow = res.status === 400 && /Too many input tokens|context.?window/i.test(body);
-  if (!isContextWindow || text.length <= 500) {
-    throw new Error(`Embedding error ${res.status}: ${body}`);
-  }
-  // Over-budget chunk slipped past the chunker cap. Halve and average — the
-  // content still contributes to search (both halves get a vector that points
-  // to the same chunk) instead of poisoning the whole batch.
-  const mid = Math.floor(text.length / 2);
-  const [left, right] = await Promise.all([
-    embedOne(config, text.slice(0, mid)),
-    embedOne(config, text.slice(mid)),
-  ]);
-  return averageVectors(left, right);
-}
-
-function averageVectors(a: number[], b: number[]): number[] {
-  const out = new Array<number>(a.length);
-  for (let i = 0; i < a.length; i++) out[i] = (a[i] + b[i]) / 2;
-  return out;
-}
-
-async function embedBatch(config: GatewayConfig, texts: string[]): Promise<number[][]> {
-  const res = await gatewayFetch(config, "POST", "/v1/embeddings", {
-    model: EMBEDDING_MODEL,
-    input: texts,
-    dimensions: EMBEDDING_DIMENSIONS,
-  });
-  if (res.ok) {
-    const data = (await res.json()) as {
-      data: Array<{ embedding: number[]; index: number }>;
-    };
-    return data.data.sort((a, b) => a.index - b.index).map((d) => d.embedding);
-  }
-  const body = await res.text().catch(() => "");
-  const isContextWindow = res.status === 400 && /Too many input tokens|context.?window/i.test(body);
-  if (!isContextWindow) {
-    throw new Error(`Embedding error ${res.status}: ${body}`);
-  }
-  // One (or more) item in the batch is oversized — the whole batch 400s. Fall
-  // back to per-item embedding so the offender can be halved without taking
-  // the other 31 chunks down with it.
-  const vectors: number[][] = [];
-  for (const text of texts) vectors.push(await embedOne(config, text));
-  return vectors;
-}
-
-async function chunksExists(
-  config: GatewayConfig,
-  codebaseId: string,
-  chunkIds: string[],
-): Promise<Set<string>> {
-  const existing = new Set<string>();
-  for (let i = 0; i < chunkIds.length; i += EXISTS_BATCH_SIZE) {
-    const slice = chunkIds.slice(i, i + EXISTS_BATCH_SIZE);
-    const res = await gatewayFetch(config, "POST", "/api/plugins/claude-context/chunks/exists", {
-      codebaseId,
-      chunkIds: slice,
-    });
-    if (!res.ok) continue; // non-fatal — we'll just re-embed
-    const data = (await res.json()) as { existing: string[] };
-    for (const id of data.existing ?? []) existing.add(id);
-  }
-  return existing;
-}
-
-async function pushChunks(
-  config: GatewayConfig,
-  codebaseId: string,
-  documents: Array<{
-    id: string;
-    vector: number[];
-    content: string;
-    relativePath: string;
-    startLine: number;
-    endLine: number;
-    fileExtension: string;
-    metadata: Record<string, unknown>;
-  }>,
-): Promise<void> {
-  if (documents.length === 0) return;
-  const res = await gatewayFetch(config, "POST", "/api/plugins/claude-context/chunks", {
-    codebaseId,
-    documents,
-  });
-  if (!res.ok) {
-    const msg = await res.text().catch(() => "");
-    throw new Error(`Chunk push error ${res.status}: ${msg}`);
-  }
-}
-
-interface OverlayEntry {
-  filePath: string;
-  chunkIds: string[];
-  fileHash?: string;
-}
-
-async function setOverlay(
-  config: GatewayConfig,
-  codebaseId: string,
-  branch: string,
-  entries: OverlayEntry[],
-): Promise<void> {
-  const res = await gatewayFetch(config, "POST", "/api/plugins/claude-context/overlay", {
-    codebaseId,
-    branch,
-    entries,
-  });
-  if (!res.ok) {
-    const msg = await res.text().catch(() => "");
-    throw new Error(`Overlay update failed ${res.status}: ${msg}`);
-  }
-}
-
-/**
- * Pull the current overlay for (codebase, branch). Returns empty on 404
- * (first-time index). Carries fileHash per entry so the caller can skip
- * re-reading unchanged files.
- */
-async function fetchOverlay(
-  config: GatewayConfig,
-  codebaseId: string,
-  branch: string,
-): Promise<{ entries: OverlayEntry[]; headCommit: string | null }> {
-  const res = await gatewayFetch(
-    config,
-    "GET",
-    `/api/plugins/claude-context/overlay?codebaseId=${encodeURIComponent(codebaseId)}&branch=${encodeURIComponent(branch)}`,
-  );
-  if (res.status === 404) return { entries: [], headCommit: null };
-  if (!res.ok) {
-    const msg = await res.text().catch(() => "");
-    throw new Error(`Overlay fetch failed ${res.status}: ${msg}`);
-  }
-  const data = (await res.json()) as {
-    entries: OverlayEntry[];
-    headCommit: string | null;
-  };
-  return { entries: data.entries ?? [], headCommit: data.headCommit ?? null };
+  await gatewayFetch(config, "POST", `${PLUGIN_PATH}/jobs`, job);
 }
 
 // ── Git identity resolution ────────────────────────────────────────────────────
@@ -439,94 +258,11 @@ export async function buildSearchRefs(
   return refs;
 }
 
-export function collectionName(codebaseId: string): string {
-  const hash = crypto
-    .createHash("sha256")
-    .update(codebaseId)
-    .digest("hex")
-    .slice(0, 16);
-  return `code_chunks_${hash}`;
-}
-
-interface PendingChunk {
-  id: string;
-  content: string;
-  relativePath: string;
-  startLine: number;
-  endLine: number;
-  extension: string;
-}
-
-/**
- * Content-addressed chunk IDs. Same content at the same rel-path+line yields
- * the same ID across users, machines, and branches — so unchanged files reuse
- * existing embeddings when switching branches.
- */
-function chunkFile(
-  relPath: string,
-  content: string,
-  ext: string,
-): PendingChunk[] {
-  const lines = content.split("\n");
-  const chunks: PendingChunk[] = [];
-
-  // charOffset is only present in IDs for character-split pieces of a single
-  // oversized line. This keeps the ID format for normal chunks unchanged so
-  // previously-embedded content still reuses via chunksExists.
-  const pushChunk = (
-    startLine: number,
-    endLine: number,
-    text: string,
-    charOffset: number,
-  ): void => {
-    const idInput =
-      charOffset === 0
-        ? `${relPath}|${startLine}|${text}`
-        : `${relPath}|${startLine}|co${charOffset}|${text}`;
-    const id = crypto.createHash("sha256").update(idInput).digest("hex").slice(0, 32);
-    chunks.push({
-      id,
-      content: text,
-      relativePath: relPath,
-      startLine,
-      endLine,
-      extension: ext,
-    });
-  };
-
-  const emit = (start: number, end: number): void => {
-    const text = lines.slice(start, end).join("\n");
-    if (text.trim().length === 0) return;
-
-    if (text.length <= MAX_CHUNK_CHARS) {
-      pushChunk(start + 1, end, text, 0);
-      return;
-    }
-
-    // Oversized slice: prefer bisecting by lines so chunks stay semantically
-    // coherent. Fall through to character splitting only when we're already
-    // down to a single line (minified bundle, one-line JSON blob, etc.).
-    if (end - start > 1) {
-      const mid = Math.floor((start + end) / 2);
-      emit(start, mid);
-      emit(mid, end);
-      return;
-    }
-
-    for (let off = 0; off < text.length; off += MAX_CHUNK_CHARS) {
-      const sub = text.slice(off, off + MAX_CHUNK_CHARS);
-      if (sub.trim().length === 0) continue;
-      pushChunk(start + 1, end, sub, off);
-    }
-  };
-
-  for (let start = 0; start < lines.length; start += CHUNK_LINES - CHUNK_OVERLAP) {
-    const end = Math.min(start + CHUNK_LINES, lines.length);
-    emit(start, end);
-    if (end >= lines.length) break;
-  }
-  return chunks;
-}
+// `collectionName` is shared with the docs pipeline — both compute it from a
+// SHA-256 of the codebaseId, so the table key stays stable when the same id
+// shows up in either plugin's job table. Re-exported here for external callers
+// (src/index.ts uses it for signal-handler bookkeeping during a sync).
+export const collectionName = sharedCollectionName;
 
 // ── Sync (diff-based indexing) ─────────────────────────────────────────────────
 
@@ -600,7 +336,7 @@ export async function runSync(
 
   // Fetch the prior overlay so we can carry unchanged files forward without
   // reading them. Missing overlay (first index) just leaves the map empty.
-  const prior = await fetchOverlay(config, codebaseId, branch).catch(() => ({
+  const prior = await fetchOverlay(config, PLUGIN_PATH, codebaseId, branch).catch(() => ({
     entries: [] as OverlayEntry[],
     headCommit: null as string | null,
   }));
@@ -682,6 +418,7 @@ export async function runSync(
   // files carry their overlay entries forward without touching the gateway.
   const existing = await chunksExists(
     config,
+    PLUGIN_PATH,
     codebaseId,
     changedChunks.map((c) => c.id),
   );
@@ -730,7 +467,7 @@ export async function runSync(
       fileExtension: c.extension,
       metadata: {},
     }));
-    await pushChunks(config, codebaseId, docs);
+    await pushChunks(config, PLUGIN_PATH, codebaseId, docs);
     embedded += batch.length;
 
     const t = now();
@@ -742,7 +479,7 @@ export async function runSync(
 
   // Atomically replace the overlay for this (codebase, branch). Files that
   // disappeared from the working tree drop out automatically.
-  await setOverlay(config, codebaseId, branch, overlayEntries);
+  await setOverlay(config, PLUGIN_PATH, codebaseId, branch, overlayEntries);
 
   await upsertJob(config, {
     codebaseId,

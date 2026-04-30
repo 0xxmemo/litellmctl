@@ -91,6 +91,7 @@ hook_env = {
 }
 session_start_cmd = os.path.join(plugin_src, "hooks", "session-start.sh")
 prompt_submit_cmd = os.path.join(plugin_src, "hooks", "prompt-search.sh")
+prompt_docs_cmd = os.path.join(plugin_src, "hooks", "prompt-docs-detect.sh")
 grep_nudge_cmd = os.path.join(plugin_src, "hooks", "grep-nudge.sh")
 
 settings.setdefault("hooks", {})
@@ -119,6 +120,10 @@ _replace_or_append(
     {"type": "command", "command": f"env {env_prefix} {prompt_submit_cmd}", "timeout": 5},
 )
 _replace_or_append(
+    "UserPromptSubmit", "claude-context/hooks/prompt-docs-detect.sh",
+    {"type": "command", "command": f"env {env_prefix} {prompt_docs_cmd}", "timeout": 3},
+)
+_replace_or_append(
     "PreToolUse", "claude-context/hooks/grep-nudge.sh",
     {"type": "command", "command": f"env {env_prefix} {grep_nudge_cmd}", "timeout": 3},
     matcher="Grep|Glob|Bash",
@@ -133,6 +138,7 @@ PYEOF
 for hook in \
     "${PLUGIN_SRC_DIR}/hooks/session-start.sh" \
     "${PLUGIN_SRC_DIR}/hooks/prompt-search.sh" \
+    "${PLUGIN_SRC_DIR}/hooks/prompt-docs-detect.sh" \
     "${PLUGIN_SRC_DIR}/hooks/grep-nudge.sh"; do
     [ -f "$hook" ] && chmod +x "$hook"
 done

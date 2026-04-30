@@ -256,6 +256,147 @@ export function useUnhideClaudeContextCodebase() {
 
 export type UseUnhideClaudeContextCodebaseReturn = ReturnType<typeof useUnhideClaudeContextCodebase>
 
+// ── Docs Context (parallel pipeline to claude-context, scoped to docs sites) ─
+
+export interface DocsContextSite {
+  codebaseId: string
+  baseUrl: string
+  ref: string
+  collection: string
+  pages: number
+  chunks: number
+  updatedAt: number
+  hidden?: boolean
+}
+
+export interface DocsContextIndexingJob {
+  codebaseId: string
+  ref: string
+  baseUrl: string
+  status: 'indexing' | 'failed' | 'cancelled'
+  percentage: number
+  pagesTotal: number | null
+  pagesIndexed: number | null
+  totalChunks: number | null
+  error: string | null
+  updatedAt: number
+  hidden?: boolean
+}
+
+export interface DocsContextUsage {
+  totals: { sites: number; pages: number; chunks: number }
+  sites: DocsContextSite[]
+  indexing: DocsContextIndexingJob[]
+}
+
+async function fetchDocsContextUsage(): Promise<DocsContextUsage> {
+  const res = await apiFetch('/api/plugins/docs-context/usage')
+  return (await res.json()) as DocsContextUsage
+}
+
+export function useDocsContextUsage(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: queryKeys.docsContextUsage,
+    queryFn: fetchDocsContextUsage,
+    enabled: options?.enabled ?? true,
+    refetchOnWindowFocus: false,
+    refetchInterval: (query) =>
+      query.state.data?.indexing?.length ? 3000 : false,
+  })
+}
+
+export type UseDocsContextUsageReturn = ReturnType<typeof useDocsContextUsage>
+
+async function deleteDocsCodebaseApi(codebaseId: string): Promise<void> {
+  const res = await fetch(
+    `/api/plugins/docs-context/jobs?codebaseId=${encodeURIComponent(codebaseId)}`,
+    { method: 'DELETE', credentials: 'include' },
+  )
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}
+
+async function cancelDocsJobApi(params: { codebaseId: string; ref?: string }): Promise<void> {
+  const res = await fetch('/api/plugins/docs-context/jobs/cancel', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(params),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}
+
+async function clearDocsJobApi(params: { codebaseId: string; ref: string }): Promise<void> {
+  const qs = `codebaseId=${encodeURIComponent(params.codebaseId)}&ref=${encodeURIComponent(params.ref)}`
+  const res = await fetch(`/api/plugins/docs-context/jobs?${qs}`, {
+    method: 'DELETE',
+    credentials: 'include',
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}
+
+async function hideDocsCodebaseApi(codebaseId: string): Promise<void> {
+  const res = await fetch('/api/plugins/docs-context/hidden', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ codebaseId }),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}
+
+async function unhideDocsCodebaseApi(codebaseId: string): Promise<void> {
+  const res = await fetch(
+    `/api/plugins/docs-context/hidden?codebaseId=${encodeURIComponent(codebaseId)}`,
+    { method: 'DELETE', credentials: 'include' },
+  )
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+}
+
+export function useRemoveDocsContextCodebase() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: deleteDocsCodebaseApi,
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.docsContextUsage }),
+  })
+}
+export type UseRemoveDocsContextCodebaseReturn = ReturnType<typeof useRemoveDocsContextCodebase>
+
+export function useStopDocsContextJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: cancelDocsJobApi,
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.docsContextUsage }),
+  })
+}
+export type UseStopDocsContextJobReturn = ReturnType<typeof useStopDocsContextJob>
+
+export function useClearDocsContextJob() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: clearDocsJobApi,
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.docsContextUsage }),
+  })
+}
+export type UseClearDocsContextJobReturn = ReturnType<typeof useClearDocsContextJob>
+
+export function useHideDocsContextCodebase() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: hideDocsCodebaseApi,
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.docsContextUsage }),
+  })
+}
+export type UseHideDocsContextCodebaseReturn = ReturnType<typeof useHideDocsContextCodebase>
+
+export function useUnhideDocsContextCodebase() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: unhideDocsCodebaseApi,
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.docsContextUsage }),
+  })
+}
+export type UseUnhideDocsContextCodebaseReturn = ReturnType<typeof useUnhideDocsContextCodebase>
+
 export function useSupermemoryUsage(
   limit = 20,
   options?: { enabled?: boolean; project?: string },

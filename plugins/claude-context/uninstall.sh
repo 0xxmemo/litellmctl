@@ -53,6 +53,7 @@ def _strip(group_key, marker_substr):
 
 _strip("SessionStart", "claude-context/hooks/session-start.sh")
 _strip("UserPromptSubmit", "claude-context/hooks/prompt-search.sh")
+_strip("UserPromptSubmit", "claude-context/hooks/prompt-docs-detect.sh")
 _strip("PreToolUse", "claude-context/hooks/grep-nudge.sh")
 
 with open(settings_file, "w") as f:

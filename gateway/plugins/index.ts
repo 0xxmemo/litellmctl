@@ -5,9 +5,11 @@
 
 import type { GatewayPlugin } from "../lib/plugin-registry";
 import { claudeContextPlugin } from "./claude-context";
+import { docsContextPlugin } from "./docs-context";
 import { supermemoryPlugin } from "./supermemory";
 
 export const gatewayPlugins: GatewayPlugin[] = [
   claudeContextPlugin,
+  docsContextPlugin,
   supermemoryPlugin,
 ];

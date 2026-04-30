@@ -23,6 +23,12 @@ import {
   runSync,
   syncSubmodules,
 } from "./tools/claude-context";
+import {
+  deriveDocsBase,
+  docsContextToolDefs,
+  handleDocsContextTool,
+  runDocsSync,
+} from "./tools/docs-context";
 
 // ── Gateway credentials ───────────────────────────────────────────────────────
 
@@ -42,6 +48,7 @@ function resolveGatewayConfig(): { baseUrl: string; apiKey: string } {
 
 const allToolDefs = [
   ...claudeContextToolDefs,
+  ...docsContextToolDefs,
 ];
 
 async function dispatchTool(
@@ -51,6 +58,9 @@ async function dispatchTool(
 ) {
   if (claudeContextToolDefs.some((t) => t.name === name)) {
     return handleClaudeContextTool(name, args, config);
+  }
+  if (docsContextToolDefs.some((t) => t.name === name)) {
+    return handleDocsContextTool(name, args, config);
   }
   return { content: [{ type: "text", text: `Unknown tool: ${name}` }], isError: true };
 }
@@ -66,6 +76,7 @@ async function runCli(argv: string[]): Promise<void> {
   for (let i = 1; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--path") args.path = argv[++i];
+    else if (a === "--url") args.url = argv[++i];
     else if (a === "--query") args.query = argv[++i];
     else if (a === "--limit") args.limit = parseInt(argv[++i], 10);
     else if (a === "--force") args.force = true;
@@ -74,6 +85,70 @@ async function runCli(argv: string[]): Promise<void> {
   const config = resolveGatewayConfig();
   const log = (m: string) => process.stderr.write(`[cli] ${m}\n`);
   const emit = (obj: unknown) => process.stdout.write(JSON.stringify(obj) + "\n");
+
+  // The index-docs subcommand is its own short path: hook hands us a URL,
+  // we run a one-shot sync against the docs-context plugin, exit. No git
+  // identity needed, so we branch out before the path-required guard below.
+  if (sub === "index-docs") {
+    const url = String(args.url ?? "");
+    if (!url) { log("index-docs: --url required"); process.exit(1); }
+    const base = deriveDocsBase(url);
+    if (!base) {
+      log(`index-docs: '${url}' is not a recognizable docs URL — skipping`);
+      process.exit(0);
+    }
+
+    if (args.force) {
+      await fetch(
+        `${config.baseUrl}/api/plugins/docs-context/jobs?codebaseId=${encodeURIComponent(base.codebaseId)}`,
+        { method: "DELETE", headers: { Authorization: `Bearer ${config.apiKey}` } },
+      ).catch(() => {});
+    } else {
+      const existing = await gatewayGet(
+        config,
+        `/api/plugins/docs-context/jobs?codebaseId=${encodeURIComponent(base.codebaseId)}&ref=latest`,
+      );
+      if (existing.ok) {
+        const job = (await existing.json()) as { status: string };
+        if (job.status === "indexing") {
+          emit({ skipped: true, reason: "already_indexing", codebaseId: base.codebaseId });
+          return;
+        }
+        if (job.status === "indexed") {
+          // Already indexed and clean — short-circuit so the hook doesn't
+          // re-crawl on every prompt that mentions the same URL.
+          emit({ skipped: true, reason: "already_indexed", codebaseId: base.codebaseId });
+          return;
+        }
+      }
+    }
+
+    log(`docs sync ${base.codebaseId} (base ${base.baseUrl})`);
+    try {
+      const result = await runDocsSync(config, base);
+      log(
+        `synced ${base.codebaseId}: ${result.embeddedChunks} embedded, ${result.reusedChunks} reused, ${result.totalPages} pages`,
+      );
+      emit({ done: true, codebaseId: base.codebaseId, ...result });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      await fetch(`${config.baseUrl}/api/plugins/docs-context/jobs`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          codebaseId: base.codebaseId,
+          ref: "latest",
+          collection: collectionName(base.codebaseId),
+          baseUrl: base.baseUrl,
+          status: "failed",
+          error: msg,
+        }),
+      }).catch(() => {});
+      emit({ error: msg });
+      process.exit(1);
+    }
+    return;
+  }
 
   if (!args.path) { log(`${sub}: --path required`); process.exit(1); }
   const absPath = String(args.path);
@@ -298,7 +373,7 @@ async function gatewayPost(
 void collectionName;
 
 const argv = process.argv.slice(2);
-if (argv.length > 0 && ["index", "search", "status"].includes(argv[0])) {
+if (argv.length > 0 && ["index", "search", "status", "index-docs"].includes(argv[0])) {
   await runCli(argv);
 } else {
   // MCP server mode — redirect console to stderr so stdout stays clean for JSON-RPC.
