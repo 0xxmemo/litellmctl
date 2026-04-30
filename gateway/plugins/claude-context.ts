@@ -410,7 +410,13 @@ async function handleOverlay(req: Request): Promise<Response> {
 
   const collection = resolveCollection(codebaseId as string);
   if (!collection) return errJson("no active indexing job for this codebaseId", 409);
-  if (!hasCollection(collection)) return errJson("collection does not exist", 409);
+  // Collections are created lazily on the first /chunks write. A sync that
+  // produces zero new chunks (every file reused a prior content hash, repo
+  // has only unsupported extensions, etc.) reaches /overlay before any
+  // /chunks call has fired — bootstrap the collection at the known embedding
+  // dimension so the overlay can be written. Subsequent /chunks calls
+  // populate it; until then it stays empty.
+  if (!hasCollection(collection)) createCollection(collection, EMBEDDING_DIMENSIONS);
 
   const result = setRefOverlay(collection, buildRefId(codebaseId as string, branch as string), entries);
   return Response.json(result);
