@@ -42,7 +42,11 @@ const DEFAULT_REF = "latest";
 
 // ── Validation ────────────────────────────────────────────────────────────────
 
-const CODEBASE_ID_RE = /^[a-z0-9][a-z0-9._/-]{2,199}$/;
+// Docs codebase ids have the form `docs:<host>[/<prefix>]`. The colon is the
+// distinguishing prefix that separates them from git origins (which use the
+// shared `plugin_hidden_codebases` table). The character class explicitly
+// includes ':' so `docs:bun.sh/docs` validates.
+const CODEBASE_ID_RE = /^[a-z0-9][a-z0-9._:/-]{2,199}$/;
 const REF_RE = /^[A-Za-z0-9_:.\/@-]{1,128}$/;
 const URL_RE = /^https?:\/\/[a-z0-9._-]{1,255}(\/[A-Za-z0-9._~%/-]{0,2048})?$/i;
 

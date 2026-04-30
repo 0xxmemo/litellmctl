@@ -66,7 +66,33 @@ const STRIP_SELECTORS = [
   "[role=navigation]", "[role=banner]", "[role=contentinfo]",
   ".navigation", ".sidebar", ".menu", ".toc", ".breadcrumb",
   ".header", ".footer", ".nav", ".site-header", ".site-footer",
+  // Framework-specific chrome — confirmed by probing real sites.
+  ".VPNav", ".VPLocalNav", ".VPSidebar",                 // VitePress
+  ".navbar", ".theme-doc-sidebar-container",             // Docusaurus
+  ".md-header", ".md-tabs", ".md-sidebar",               // MkDocs Material
+  ".sphinxsidebar", "[role=search]",                     // Sphinx
+  ".nextra-nav-container", ".nextra-sidebar-container",  // Nextra
+  "[class*=DocSearch]", "[class*=algolia]",              // Algolia search bars
+  "[data-testid=page.search]", ".search-bar",            // Generic search
 ];
+
+// Ordered content-root selectors — first hit wins. Listed in rough specificity
+// order so framework-specific containers beat generic <main>/<article>. The
+// Mintlify entries (#content-area / #content) come first because Bun, Mintlify
+// themselves, and many SaaS dev-tools use Mintlify and don't expose a clean
+// <main> tag.
+const CONTENT_SELECTORS = [
+  "#content-area",                                  // Mintlify
+  ".VPDoc", ".vp-doc",                              // VitePress (Bun, Vue, Vite)
+  ".theme-doc-markdown",                            // Docusaurus
+  ".md-content", "article.md-content__inner",       // MkDocs Material
+  '[itemprop="articleBody"]', ".document",          // Sphinx (Python, RTD)
+  ".nextra-content", "main.nextra-content",         // Nextra
+  ".docMainContainer", "[class*=docMainContainer]", // Docusaurus alt
+  ".prose",                                         // Tailwind-typography docs
+  "main", "article", "[role=main]",                 // Standard semantic HTML
+  ".content", ".main", ".docs-content", "#content", // Generic fallbacks
+].join(", ");
 
 // File extensions we never crawl — they're either binary or non-documentation.
 const SKIP_EXTENSIONS = new Set([
@@ -200,6 +226,7 @@ function extractContentAndLinks(
   html: string,
   pageUrl: string,
   base: DocsBase,
+  aliasOrigins: Set<string>,
 ): { markdown: string; title: string; links: string[] } {
   const $ = cheerio.load(html);
   const title = $("title").first().text().trim() || $("h1").first().text().trim() || pageUrl;
@@ -212,7 +239,13 @@ function extractContentAndLinks(
     if (!href) return;
     const norm = normalizeLink(href, pageUrl);
     if (!norm) return;
-    if (!norm.startsWith(base.origin)) return;
+    // Accept any of the origins discovered via sitemap (handles bun.sh→bun.com
+    // style domain rebrands where both hosts serve the same docs).
+    let inAnyOrigin = false;
+    for (const origin of aliasOrigins) {
+      if (norm.startsWith(origin)) { inAnyOrigin = true; break; }
+    }
+    if (!inAnyOrigin) return;
     if (base.pathPrefix && !new URL(norm).pathname.startsWith(base.pathPrefix)) return;
     const ext = norm.match(/\.[a-z0-9]+$/i)?.[0]?.toLowerCase();
     if (ext && SKIP_EXTENSIONS.has(ext)) return;
@@ -220,7 +253,7 @@ function extractContentAndLinks(
   });
 
   for (const sel of STRIP_SELECTORS) $(sel).remove();
-  const main = $("main, article, [role=main], .content, .main, .docs-content").first();
+  const main = $(CONTENT_SELECTORS).first();
   const html2 = (main.length > 0 ? main : $("body")).html() ?? "";
 
   const td = new TurndownService({ headingStyle: "atx", codeBlockStyle: "fenced" });
@@ -230,6 +263,112 @@ function extractContentAndLinks(
   markdown = markdown.replace(/\n{3,}/g, "\n\n").trim();
 
   return { markdown, title, links: Array.from(links) };
+}
+
+// ── Sitemap discovery ────────────────────────────────────────────────────────
+//
+// Most modern docs frameworks (Docusaurus, VitePress, MkDocs, Mintlify, Nextra,
+// Astro Starlight) publish a sitemap.xml. Pulling it gives us the canonical
+// list of pages without relying on link discovery, which can miss orphan pages
+// reachable only from search/filter widgets. We treat sitemap URLs as a SEED
+// for the BFS queue, not a replacement — pages without sitemap entries still
+// get picked up via link extraction.
+
+const SITEMAP_PATHS = [
+  "/sitemap.xml",
+  "/sitemap_index.xml",
+  "/sitemap-index.xml",
+  "/docs/sitemap.xml",
+];
+
+async function fetchSitemapUrls(base: DocsBase): Promise<{ urls: string[]; aliasOrigins: Set<string> }> {
+  const seen = new Set<string>();
+  // raw URLs we'd accept under "strict" scope (same origin), all URLs grouped
+  // by origin so we can detect domain-redirect sitemaps (e.g., bun.sh's
+  // sitemap lists bun.com URLs after the project rebranded).
+  const collected = new Map<string, string[]>();
+
+  const tryFetch = async (url: string, depth: number): Promise<void> => {
+    if (depth > 2 || seen.has(url)) return;
+    seen.add(url);
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, {
+        headers: { "User-Agent": USER_AGENT, Accept: "application/xml,text/xml,*/*" },
+        signal: ctrl.signal,
+      });
+      if (!res.ok) return;
+      const xml = await res.text();
+      if (xml.length > MAX_PAGE_BYTES) return;
+
+      // Sitemap index → recurse into nested sitemap files.
+      if (/<sitemapindex/i.test(xml)) {
+        const nested = [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1]);
+        for (const n of nested) await tryFetch(n, depth + 1);
+        return;
+      }
+      const urls = [...xml.matchAll(/<loc>\s*([^<\s]+)\s*<\/loc>/gi)].map((m) => m[1]);
+      for (const u of urls) {
+        try {
+          const parsed = new URL(u);
+          const origin = `${parsed.protocol}//${parsed.host}`;
+          if (!collected.has(origin)) collected.set(origin, []);
+          collected.get(origin)!.push(u);
+        } catch {
+          // skip malformed
+        }
+      }
+    } catch {
+      // sitemap is best-effort — never fatal
+    } finally {
+      clearTimeout(t);
+    }
+  };
+
+  // Try sitemap paths at both the base prefix and the origin (some sites only
+  // publish the sitemap at the root even when docs live under /docs/).
+  const candidates = new Set<string>();
+  for (const p of SITEMAP_PATHS) {
+    candidates.add(base.origin + p);
+    if (base.pathPrefix) candidates.add(base.baseUrl + p);
+  }
+  for (const c of candidates) await tryFetch(c, 0);
+
+  // Decide the accepted origin set. Default = base.origin only. But if every
+  // URL in the sitemap lives under a *different* origin (bun.sh → bun.com
+  // rebrand), that origin is the canonical doc home — accept it as an alias.
+  // The alias is also used by the BFS link filter so cross-domain links
+  // discovered on a page get crawled.
+  const aliasOrigins = new Set<string>([base.origin]);
+  const sameOriginCount = (collected.get(base.origin) ?? []).length;
+  if (sameOriginCount === 0) {
+    // No URLs in base.origin — adopt every other origin we found that has a
+    // meaningful number of URLs (≥3 to ignore stray cross-links).
+    for (const [origin, list] of collected) {
+      if (list.length >= 3) aliasOrigins.add(origin);
+    }
+  }
+
+  const out: string[] = [];
+  for (const origin of aliasOrigins) {
+    const list = collected.get(origin) ?? [];
+    for (const u of list) {
+      // If we have a path prefix, only accept URLs whose pathname starts
+      // with it (after migrating to the alias origin if present).
+      try {
+        const parsed = new URL(u);
+        if (base.pathPrefix && !parsed.pathname.startsWith(base.pathPrefix)) continue;
+      } catch {
+        continue;
+      }
+      let norm = u.split("#")[0];
+      if (norm.endsWith("/") && !/:\/\/[^/]+\/$/.test(norm)) norm = norm.slice(0, -1);
+      out.push(norm);
+    }
+  }
+  // dedupe while preserving insertion order
+  return { urls: Array.from(new Set(out)), aliasOrigins };
 }
 
 interface CrawlOptions {
@@ -242,8 +381,26 @@ interface CrawlOptions {
 async function crawlSite(opts: CrawlOptions): Promise<CrawledPage[]> {
   const { base, startUrl } = opts;
   const seen = new Set<string>();
-  const queue: Array<{ url: string; depth: number }> = [{ url: startUrl, depth: 0 }];
-  seen.add(startUrl);
+  const queue: Array<{ url: string; depth: number }> = [];
+
+  // Seed from sitemap.xml when one's available. Each sitemap URL is enqueued
+  // at depth 0 so we still BFS-link-discover from each page (catches anything
+  // the sitemap missed). Capped at maxPages — sitemaps for big docs sites can
+  // be tens of thousands of URLs. aliasOrigins captures cross-domain redirects
+  // (e.g. bun.sh's sitemap lists bun.com URLs) so the BFS link filter accepts
+  // links to either host.
+  const sitemap = await fetchSitemapUrls(base).catch(() => ({ urls: [], aliasOrigins: new Set([base.origin]) }));
+  for (const u of sitemap.urls.slice(0, opts.maxPages)) {
+    if (seen.has(u)) continue;
+    seen.add(u);
+    queue.push({ url: u, depth: 0 });
+  }
+  // Always include the user-mentioned URL (might not be in the sitemap, e.g.
+  // landing-page-only sites or a deep link the model wants to anchor on).
+  if (!seen.has(startUrl)) {
+    seen.add(startUrl);
+    queue.push({ url: startUrl, depth: 0 });
+  }
   const pages: CrawledPage[] = [];
 
   while (queue.length > 0 && pages.length < opts.maxPages) {
@@ -253,7 +410,7 @@ async function crawlSite(opts: CrawlOptions): Promise<CrawledPage[]> {
       batch.map(async (item) => {
         const fetched = await fetchPage(item.url);
         if (!fetched) return null;
-        const { markdown, title, links } = extractContentAndLinks(fetched.html, item.url, base);
+        const { markdown, title, links } = extractContentAndLinks(fetched.html, item.url, base, sitemap.aliasOrigins);
         return { item, markdown, title, links };
       }),
     );

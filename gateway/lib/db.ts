@@ -40,8 +40,33 @@ function tryLoadVec() {
   );
 }
 
+// Bun's bundled sqlite is built without `SQLITE_OMIT_LOAD_EXTENSION`-disable
+// support — `db.loadExtension()` raises "this build of sqlite3 does not
+// support dynamic extension loading". Point Bun at a system libsqlite3 that
+// has extension loading enabled (Homebrew's keg-only sqlite, system /usr/lib).
+// Must run BEFORE the first `new Database(...)`. No-op if no candidate exists.
+function trySwapInSystemSqlite(): void {
+  const override = process.env.SQLITE_LIB_PATH;
+  const candidates = [
+    override,
+    "/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib", // Homebrew on Apple silicon
+    "/usr/local/opt/sqlite/lib/libsqlite3.dylib",    // Homebrew on Intel macOS
+    "/usr/lib/x86_64-linux-gnu/libsqlite3.so.0",     // Debian/Ubuntu
+    "/usr/lib/aarch64-linux-gnu/libsqlite3.so.0",    // Debian/Ubuntu arm
+    "/usr/lib64/libsqlite3.so.0",                    // RHEL/Fedora
+  ].filter(Boolean) as string[];
+
+  for (const p of candidates) {
+    try {
+      Database.setCustomSQLite(p);
+      return;
+    } catch {}
+  }
+}
+
 export async function connectDB(): Promise<void> {
   if (db) return;
+  trySwapInSystemSqlite();
   const path = resolveDbPath();
   db = new Database(path, { create: true });
   db.run("PRAGMA journal_mode=WAL;");
