@@ -100,45 +100,45 @@ async function runCli(argv: string[]): Promise<void> {
 
     if (args.force) {
       await fetch(
-        `${config.baseUrl}/api/plugins/docs-context/jobs?codebaseId=${encodeURIComponent(base.codebaseId)}`,
+        `${config.baseUrl}/api/plugins/docs-context/jobs?sourceId=${encodeURIComponent(base.sourceId)}`,
         { method: "DELETE", headers: { Authorization: `Bearer ${config.apiKey}` } },
       ).catch(() => {});
     } else {
       const existing = await gatewayGet(
         config,
-        `/api/plugins/docs-context/jobs?codebaseId=${encodeURIComponent(base.codebaseId)}&ref=latest`,
+        `/api/plugins/docs-context/jobs?sourceId=${encodeURIComponent(base.sourceId)}&ref=latest`,
       );
       if (existing.ok) {
         const job = (await existing.json()) as { status: string };
         if (job.status === "indexing") {
-          emit({ skipped: true, reason: "already_indexing", codebaseId: base.codebaseId });
+          emit({ skipped: true, reason: "already_indexing", sourceId: base.sourceId });
           return;
         }
         if (job.status === "indexed") {
           // Already indexed and clean — short-circuit so the hook doesn't
           // re-crawl on every prompt that mentions the same URL.
-          emit({ skipped: true, reason: "already_indexed", codebaseId: base.codebaseId });
+          emit({ skipped: true, reason: "already_indexed", sourceId: base.sourceId });
           return;
         }
       }
     }
 
-    log(`docs sync ${base.codebaseId} (base ${base.baseUrl})`);
+    log(`docs sync ${base.sourceId} (base ${base.baseUrl})`);
     try {
       const result = await runDocsSync(config, base);
       log(
-        `synced ${base.codebaseId}: ${result.embeddedChunks} embedded, ${result.reusedChunks} reused, ${result.totalPages} pages`,
+        `synced ${base.sourceId}: ${result.embeddedChunks} embedded, ${result.reusedChunks} reused, ${result.totalPages} pages`,
       );
-      emit({ done: true, codebaseId: base.codebaseId, ...result });
+      emit({ done: true, sourceId: base.sourceId, ...result });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       await fetch(`${config.baseUrl}/api/plugins/docs-context/jobs`, {
         method: "POST",
         headers: { Authorization: `Bearer ${config.apiKey}`, "Content-Type": "application/json" },
         body: JSON.stringify({
-          codebaseId: base.codebaseId,
+          sourceId: base.sourceId,
           ref: "latest",
-          collection: collectionName(base.codebaseId),
+          collection: collectionName(base.sourceId),
           baseUrl: base.baseUrl,
           status: "failed",
           error: msg,

@@ -110,7 +110,7 @@ export interface DocsBase {
   baseUrl: string;       // canonical "https://host[/prefix]" with no trailing slash
   origin: string;        // "https://host"
   pathPrefix: string;    // "/prefix" or "" (empty for origin-only)
-  codebaseId: string;    // "docs:host[/prefix]"
+  sourceId: string;      // "docs:host[/prefix]"
 }
 
 /**
@@ -140,12 +140,13 @@ export function deriveDocsBase(rawUrl: string): DocsBase | null {
   const pathPrefix = useFirstSegment ? `/${segments[0]}` : "";
   const origin = `${parsed.protocol}//${host}`;
   const baseUrl = origin + pathPrefix;
-  // codebase_id format must satisfy the gateway's CODEBASE_ID_RE and start
-  // with "docs:" so it shares the hidden-codebases namespace cleanly.
+  // source_id format must satisfy the gateway's SOURCE_ID_RE and start with
+  // "docs:" so it lives in its own namespace, distinct from the code plugin's
+  // git-origin codebase ids.
   const idPath = useFirstSegment ? `/${segments[0].toLowerCase()}` : "";
-  const codebaseId = `docs:${host}${idPath}`;
+  const sourceId = `docs:${host}${idPath}`;
 
-  return { baseUrl, origin, pathPrefix, codebaseId };
+  return { baseUrl, origin, pathPrefix, sourceId };
 }
 
 function normalizeLink(href: string, pageUrl: string): string | null {
@@ -445,7 +446,7 @@ async function crawlSite(opts: CrawlOptions): Promise<CrawledPage[]> {
 // ── Sync (carryover-based, mirrors runSync in claude-context.ts) ─────────────
 
 interface DocsJobUpdate {
-  codebaseId: string;
+  sourceId: string;
   ref: string;
   collection: string;
   baseUrl?: string;
@@ -474,14 +475,14 @@ export async function runDocsSync(
   base: DocsBase,
 ): Promise<DocsSyncResult> {
   const ref = DEFAULT_REF;
-  const collection = collectionName(base.codebaseId);
+  const collection = collectionName(base.sourceId);
   const now = () => Date.now();
 
   // Heartbeat the job alive — don't reset the previous run's counters.
   const updateJob = async (fields: Partial<DocsJobUpdate>): Promise<void> => {
     try {
       await upsertJob(config, {
-        codebaseId: base.codebaseId,
+        sourceId: base.sourceId,
         ref,
         collection,
         baseUrl: base.baseUrl,
@@ -494,7 +495,7 @@ export async function runDocsSync(
   };
   await updateJob({});
 
-  const prior = await fetchOverlay(config, PLUGIN_PATH, base.codebaseId, ref).catch(() => ({
+  const prior = await fetchOverlay(config, PLUGIN_PATH, base.sourceId, ref).catch(() => ({
     entries: [] as OverlayEntry[],
     headCommit: null as string | null,
   }));
@@ -549,7 +550,7 @@ export async function runDocsSync(
   const existing = await chunksExists(
     config,
     PLUGIN_PATH,
-    base.codebaseId,
+    base.sourceId,
     changedChunks.map((c) => c.id),
   );
   const missing = changedChunks.filter((c) => !existing.has(c.id));
@@ -579,9 +580,9 @@ export async function runDocsSync(
       startLine: c.startLine,
       endLine: c.endLine,
       fileExtension: c.extension,
-      metadata: { kind: "docs", codebaseId: base.codebaseId },
+      metadata: { kind: "docs", sourceId: base.sourceId },
     }));
-    await pushChunks(config, PLUGIN_PATH, base.codebaseId, docs);
+    await pushChunks(config, PLUGIN_PATH, base.sourceId, docs);
     embedded += batch.length;
 
     const t = now();
@@ -591,10 +592,10 @@ export async function runDocsSync(
     }
   }
 
-  await setOverlay(config, PLUGIN_PATH, base.codebaseId, ref, overlayEntries);
+  await setOverlay(config, PLUGIN_PATH, base.sourceId, ref, overlayEntries);
 
   await upsertJob(config, {
-    codebaseId: base.codebaseId,
+    sourceId: base.sourceId,
     ref,
     collection,
     baseUrl: base.baseUrl,
@@ -692,13 +693,13 @@ export async function handleDocsContextTool(
       if (!url) return errRes("url required");
       const base = deriveDocsBase(url);
       if (!base) return errRes(`Cannot index '${url}' — not an indexable docs URL.`);
-      const collection = collectionName(base.codebaseId);
+      const collection = collectionName(base.sourceId);
 
       if (force) {
         await gatewayFetch(
           config,
           "DELETE",
-          `${PLUGIN_PATH}/jobs?codebaseId=${encodeURIComponent(base.codebaseId)}`,
+          `${PLUGIN_PATH}/jobs?sourceId=${encodeURIComponent(base.sourceId)}`,
         ).catch(() => {});
       }
 
@@ -706,17 +707,17 @@ export async function handleDocsContextTool(
       const statusRes = await gatewayFetch(
         config,
         "GET",
-        `${PLUGIN_PATH}/jobs?codebaseId=${encodeURIComponent(base.codebaseId)}&ref=${encodeURIComponent(DEFAULT_REF)}`,
+        `${PLUGIN_PATH}/jobs?sourceId=${encodeURIComponent(base.sourceId)}&ref=${encodeURIComponent(DEFAULT_REF)}`,
       );
       if (statusRes.ok) {
         const existing = (await statusRes.json()) as { status?: string };
         if (existing.status === "indexing" && !force) {
-          return errRes(`Already indexing '${base.codebaseId}'. Use force=true to restart.`);
+          return errRes(`Already indexing '${base.sourceId}'. Use force=true to restart.`);
         }
       }
 
       await upsertJob(config, {
-        codebaseId: base.codebaseId,
+        sourceId: base.sourceId,
         ref: DEFAULT_REF,
         collection,
         baseUrl: base.baseUrl,
@@ -731,7 +732,7 @@ export async function handleDocsContextTool(
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           await upsertJob(config, {
-            codebaseId: base.codebaseId,
+            sourceId: base.sourceId,
             ref: DEFAULT_REF,
             collection,
             baseUrl: base.baseUrl,
@@ -741,7 +742,7 @@ export async function handleDocsContextTool(
         }
       })();
 
-      return textRes(`Started crawl for '${base.baseUrl}' (codebase '${base.codebaseId}'). Use get_docs_indexing_status to track progress.`);
+      return textRes(`Started crawl for '${base.baseUrl}' (codebase '${base.sourceId}'). Use get_docs_indexing_status to track progress.`);
     }
 
     case "search_docs": {
@@ -754,7 +755,7 @@ export async function handleDocsContextTool(
       if (url) {
         const base = deriveDocsBase(url);
         if (!base) return errRes(`Cannot search '${url}' — not a recognizable docs URL.`);
-        payload = { ...payload, codebaseId: base.codebaseId, ref: DEFAULT_REF };
+        payload = { ...payload, sourceId: base.sourceId, ref: DEFAULT_REF };
       }
       const res = await gatewayFetch(config, "POST", `${PLUGIN_PATH}/search`, payload);
       if (res.status === 404) {
@@ -770,7 +771,7 @@ export async function handleDocsContextTool(
         results: Array<{
           document: { relativePath: string; startLine: number; endLine: number; content: string; fileExtension: string };
           score: number;
-          codebaseId?: string;
+          sourceId?: string;
         }>;
         indexing: boolean;
       };
@@ -782,7 +783,7 @@ export async function handleDocsContextTool(
 
       const formatted = data.results
         .map((r, i) => {
-          const tag = r.codebaseId ? ` [${r.codebaseId}]` : "";
+          const tag = r.sourceId ? ` [${r.sourceId}]` : "";
           return (
             `${i + 1}. ${r.document.relativePath}:${r.document.startLine}-${r.document.endLine}${tag}\n` +
             `\`\`\`md\n${r.document.content}\n\`\`\``
@@ -803,9 +804,9 @@ export async function handleDocsContextTool(
       const res = await gatewayFetch(
         config,
         "GET",
-        `${PLUGIN_PATH}/jobs?codebaseId=${encodeURIComponent(base.codebaseId)}&ref=${encodeURIComponent(DEFAULT_REF)}`,
+        `${PLUGIN_PATH}/jobs?sourceId=${encodeURIComponent(base.sourceId)}&ref=${encodeURIComponent(DEFAULT_REF)}`,
       );
-      if (res.status === 404) return textRes(`'${base.codebaseId}' is not indexed.`);
+      if (res.status === 404) return textRes(`'${base.sourceId}' is not indexed.`);
       if (!res.ok) return errRes(`Status check failed: ${res.status}`);
 
       const job = (await res.json()) as {
@@ -822,7 +823,7 @@ export async function handleDocsContextTool(
 
       if (job.status === "indexed") {
         return textRes(
-          `✅ '${base.codebaseId}' is indexed.\n` +
+          `✅ '${base.sourceId}' is indexed.\n` +
             `Pages: ${job.pages_indexed ?? "?"} | Chunks: ${job.total_chunks ?? "?"} | Updated ${since}`,
         );
       }
@@ -846,11 +847,11 @@ export async function handleDocsContextTool(
       const res = await gatewayFetch(
         config,
         "DELETE",
-        `${PLUGIN_PATH}/jobs?codebaseId=${encodeURIComponent(base.codebaseId)}`,
+        `${PLUGIN_PATH}/jobs?sourceId=${encodeURIComponent(base.sourceId)}`,
       );
-      if (res.status === 404) return textRes(`'${base.codebaseId}' is not indexed.`);
+      if (res.status === 404) return textRes(`'${base.sourceId}' is not indexed.`);
       if (!res.ok) return errRes(`Clear failed: ${res.status}`);
-      return textRes(`Cleared docs index for '${base.codebaseId}'.`);
+      return textRes(`Cleared docs index for '${base.sourceId}'.`);
     }
 
     default:

@@ -13,11 +13,11 @@ import {
   useHideClaudeContextCodebase,
   useUnhideClaudeContextCodebase,
   useDocsContextUsage,
-  useRemoveDocsContextCodebase,
+  useRemoveDocsContextSource,
   useStopDocsContextJob,
   useClearDocsContextJob,
-  useHideDocsContextCodebase,
-  useUnhideDocsContextCodebase,
+  useHideDocsContextSource,
+  useUnhideDocsContextSource,
 } from "@/hooks/use-plugins";
 
 interface Props {
@@ -35,11 +35,11 @@ export function PluginsOverview({ enabled, isAdmin }: Props) {
   const clearJob = useClearClaudeContextJob();
   const hideCodebase = useHideClaudeContextCodebase();
   const unhideCodebase = useUnhideClaudeContextCodebase();
-  const removeDocsCodebase = useRemoveDocsContextCodebase();
+  const removeDocsSource = useRemoveDocsContextSource();
   const stopDocsJob = useStopDocsContextJob();
   const clearDocsJob = useClearDocsContextJob();
-  const hideDocsCodebase = useHideDocsContextCodebase();
-  const unhideDocsCodebase = useUnhideDocsContextCodebase();
+  const hideDocsSource = useHideDocsContextSource();
+  const unhideDocsSource = useUnhideDocsContextSource();
 
   return (
     <Tabs value={active} onValueChange={setActive} className="w-full">
@@ -67,11 +67,11 @@ export function PluginsOverview({ enabled, isAdmin }: Props) {
         <DocsContextStats
           query={docsContextQuery}
           isAdmin={isAdmin}
-          removeCodebase={removeDocsCodebase}
+          removeSource={removeDocsSource}
           stopJob={stopDocsJob}
           clearJob={clearDocsJob}
-          hideCodebase={hideDocsCodebase}
-          unhideCodebase={unhideDocsCodebase}
+          hideSource={hideDocsSource}
+          unhideSource={unhideDocsSource}
         />
       </TabsContent>
 

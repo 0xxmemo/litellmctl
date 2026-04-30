@@ -35,21 +35,21 @@ import { StatCard } from "@/components/stat-card";
 import { PrettyAmount } from "@/components/pretty-amount";
 import type {
   UseDocsContextUsageReturn,
-  UseRemoveDocsContextCodebaseReturn,
+  UseRemoveDocsContextSourceReturn,
   UseStopDocsContextJobReturn,
   UseClearDocsContextJobReturn,
-  UseHideDocsContextCodebaseReturn,
-  UseUnhideDocsContextCodebaseReturn,
+  UseHideDocsContextSourceReturn,
+  UseUnhideDocsContextSourceReturn,
 } from "@/hooks/use-plugins";
 
 interface Props {
   query: UseDocsContextUsageReturn;
   isAdmin: boolean;
-  removeCodebase: UseRemoveDocsContextCodebaseReturn;
+  removeSource: UseRemoveDocsContextSourceReturn;
   stopJob: UseStopDocsContextJobReturn;
   clearJob: UseClearDocsContextJobReturn;
-  hideCodebase: UseHideDocsContextCodebaseReturn;
-  unhideCodebase: UseUnhideDocsContextCodebaseReturn;
+  hideSource: UseHideDocsContextSourceReturn;
+  unhideSource: UseUnhideDocsContextSourceReturn;
 }
 
 function formatRelative(timestamp: number): string {
@@ -63,18 +63,18 @@ function formatRelative(timestamp: number): string {
   return `${days}d ago`;
 }
 
-type StopTarget = { codebaseId: string; ref: string };
-type RemoveTarget = { codebaseId: string };
-type ClearTarget = { codebaseId: string; ref: string };
+type StopTarget = { sourceId: string; ref: string };
+type RemoveTarget = { sourceId: string };
+type ClearTarget = { sourceId: string; ref: string };
 
 export function DocsContextStats({
   query,
   isAdmin,
-  removeCodebase,
+  removeSource,
   stopJob,
   clearJob,
-  hideCodebase,
-  unhideCodebase,
+  hideSource,
+  unhideSource,
 }: Props) {
   const { data, isLoading, error } = query;
   const [stopTarget, setStopTarget] = useState<StopTarget | null>(null);
@@ -95,7 +95,7 @@ export function DocsContextStats({
       </p>
     );
   }
-  const hasIndexed = data && data.totals.sites > 0;
+  const hasIndexed = data && data.totals.sources > 0;
   const hasActive = data && data.indexing && data.indexing.length > 0;
   if (!hasIndexed && !hasActive) return null;
 
@@ -112,7 +112,7 @@ export function DocsContextStats({
           <CardContent className="space-y-3">
             {data!.indexing.map((job) => (
               <div
-                key={`${job.codebaseId}#${job.ref}`}
+                key={`${job.sourceId}#${job.ref}`}
                 className={`space-y-1 ${job.hidden ? "opacity-50" : ""}`}
               >
                 <div className="flex items-center justify-between gap-2 text-xs">
@@ -122,7 +122,7 @@ export function DocsContextStats({
                     ) : (
                       <AlertCircle className="w-3 h-3 shrink-0 text-destructive" />
                     )}
-                    <span className="truncate">{job.codebaseId}</span>
+                    <span className="truncate">{job.sourceId}</span>
                     {job.baseUrl && (
                       <a
                         href={job.baseUrl}
@@ -172,7 +172,7 @@ export function DocsContextStats({
                                 size="sm"
                                 className="justify-start h-8 px-2 text-xs"
                                 onClick={() =>
-                                  setStopTarget({ codebaseId: job.codebaseId, ref: job.ref })
+                                  setStopTarget({ sourceId: job.sourceId, ref: job.ref })
                                 }
                                 disabled={stopJob.isPending}
                               >
@@ -186,7 +186,7 @@ export function DocsContextStats({
                                 size="sm"
                                 className="justify-start h-8 px-2 text-xs"
                                 onClick={() =>
-                                  setClearTarget({ codebaseId: job.codebaseId, ref: job.ref })
+                                  setClearTarget({ sourceId: job.sourceId, ref: job.ref })
                                 }
                                 disabled={clearJob.isPending}
                               >
@@ -199,8 +199,8 @@ export function DocsContextStats({
                                 variant="ghost"
                                 size="sm"
                                 className="justify-start h-8 px-2 text-xs"
-                                onClick={() => unhideCodebase.mutate(job.codebaseId)}
-                                disabled={unhideCodebase.isPending}
+                                onClick={() => unhideSource.mutate(job.sourceId)}
+                                disabled={unhideSource.isPending}
                               >
                                 <Eye className="w-3 h-3 mr-2" />
                                 Unhide
@@ -210,8 +210,8 @@ export function DocsContextStats({
                                 variant="ghost"
                                 size="sm"
                                 className="justify-start h-8 px-2 text-xs"
-                                onClick={() => hideCodebase.mutate(job.codebaseId)}
-                                disabled={hideCodebase.isPending}
+                                onClick={() => hideSource.mutate(job.sourceId)}
+                                disabled={hideSource.isPending}
                               >
                                 <EyeOff className="w-3 h-3 mr-2" />
                                 Hide
@@ -244,8 +244,8 @@ export function DocsContextStats({
         <>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <StatCard
-              title="Docs Sites"
-              value={<PrettyAmount amountFormatted={data!.totals.sites} size="2xl" normalPrecision={0} />}
+              title="Docs Sources"
+              value={<PrettyAmount amountFormatted={data!.totals.sources} size="2xl" normalPrecision={0} />}
               icon={BookOpen}
             />
             <StatCard
@@ -264,8 +264,9 @@ export function DocsContextStats({
             <CardHeader>
               <CardTitle className="text-base">Indexed Docs</CardTitle>
               <CardDescription>
-                Documentation sites crawled and embedded for semantic search. Re-mentioning a base
-                URL in chat re-checks the index — unchanged pages are kept, changed pages re-embed.
+                Documentation sources crawled and embedded for semantic search. Re-mentioning a
+                base URL in chat re-checks the index — unchanged pages are kept, changed pages
+                re-embed.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -273,7 +274,7 @@ export function DocsContextStats({
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-xs text-muted-foreground border-b">
-                      <th className="py-2 pr-4 font-medium">Site</th>
+                      <th className="py-2 pr-4 font-medium">Source</th>
                       <th className="py-2 pr-4 font-medium">Base URL</th>
                       <th className="py-2 pr-4 font-medium">Pages</th>
                       <th className="py-2 pr-4 font-medium">Chunks</th>
@@ -282,14 +283,14 @@ export function DocsContextStats({
                     </tr>
                   </thead>
                   <tbody>
-                    {data!.sites.map((s) => (
+                    {data!.sources.map((s) => (
                       <tr
-                        key={`${s.codebaseId}#${s.ref}`}
+                        key={`${s.sourceId}#${s.ref}`}
                         className={`border-b last:border-b-0 align-top ${s.hidden ? "opacity-50" : ""}`}
                       >
                         <td className="py-2 pr-4 font-mono text-xs break-all">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span title={s.collection}>{s.codebaseId}</span>
+                            <span title={s.collection}>{s.sourceId}</span>
                             {s.hidden && (
                               <span
                                 className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px]"
@@ -339,8 +340,8 @@ export function DocsContextStats({
                                       variant="ghost"
                                       size="sm"
                                       className="justify-start h-8 px-2 text-xs"
-                                      onClick={() => unhideCodebase.mutate(s.codebaseId)}
-                                      disabled={unhideCodebase.isPending}
+                                      onClick={() => unhideSource.mutate(s.sourceId)}
+                                      disabled={unhideSource.isPending}
                                     >
                                       <Eye className="w-3 h-3 mr-2" />
                                       Unhide
@@ -350,8 +351,8 @@ export function DocsContextStats({
                                       variant="ghost"
                                       size="sm"
                                       className="justify-start h-8 px-2 text-xs"
-                                      onClick={() => hideCodebase.mutate(s.codebaseId)}
-                                      disabled={hideCodebase.isPending}
+                                      onClick={() => hideSource.mutate(s.sourceId)}
+                                      disabled={hideSource.isPending}
                                     >
                                       <EyeOff className="w-3 h-3 mr-2" />
                                       Hide
@@ -361,8 +362,8 @@ export function DocsContextStats({
                                     variant="ghost"
                                     size="sm"
                                     className="justify-start h-8 px-2 text-xs text-destructive hover:text-destructive"
-                                    onClick={() => setRemoveTarget({ codebaseId: s.codebaseId })}
-                                    disabled={removeCodebase.isPending}
+                                    onClick={() => setRemoveTarget({ sourceId: s.sourceId })}
+                                    disabled={removeSource.isPending}
                                   >
                                     <Trash2 className="w-3 h-3 mr-2" />
                                     Remove
@@ -392,7 +393,7 @@ export function DocsContextStats({
             </DialogTitle>
             <DialogDescription>
               Stop the running crawl for{" "}
-              <strong className="font-mono break-all">{stopTarget?.codebaseId}</strong>?
+              <strong className="font-mono break-all">{stopTarget?.sourceId}</strong>?
             </DialogDescription>
           </DialogHeader>
           <div className="py-2">
@@ -436,7 +437,7 @@ export function DocsContextStats({
             </DialogTitle>
             <DialogDescription>
               Remove the job row for{" "}
-              <strong className="font-mono break-all">{clearTarget?.codebaseId}</strong> from the
+              <strong className="font-mono break-all">{clearTarget?.sourceId}</strong> from the
               panel?
             </DialogDescription>
           </DialogHeader>
@@ -476,11 +477,11 @@ export function DocsContextStats({
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-destructive">
               <AlertTriangle className="h-5 w-5" />
-              Remove Docs Site
+              Remove Docs Source
             </DialogTitle>
             <DialogDescription>
               Permanently drop all pages, overlays, and chunks for{" "}
-              <strong className="font-mono break-all">{removeTarget?.codebaseId}</strong>?
+              <strong className="font-mono break-all">{removeTarget?.sourceId}</strong>?
             </DialogDescription>
           </DialogHeader>
           <div className="py-2">
@@ -499,15 +500,15 @@ export function DocsContextStats({
             <Button
               variant="destructive"
               className="w-full sm:w-auto"
-              disabled={!removeTarget || removeCodebase.isPending}
+              disabled={!removeTarget || removeSource.isPending}
               onClick={() => {
                 if (!removeTarget) return;
-                removeCodebase.mutate(removeTarget.codebaseId, {
+                removeSource.mutate(removeTarget.sourceId, {
                   onSettled: () => setRemoveTarget(null),
                 });
               }}
             >
-              {removeCodebase.isPending ? "Removing…" : "Remove Docs Site"}
+              {removeSource.isPending ? "Removing…" : "Remove Docs Source"}
             </Button>
           </DialogFooter>
         </DialogContent>
