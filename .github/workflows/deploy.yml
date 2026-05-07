@@ -10,7 +10,7 @@ on:
       instance_type:
         description: "EC2 instance type (ARM64)"
         required: false
-        default: "c7g.xlarge"
+        default: "c7g.medium"
 
 permissions:
   id-token: write
@@ -91,7 +91,7 @@ jobs:
               GithubOrg="${REPO_OWNER}" \
               GithubRepo="${REPO_NAME}" \
               GithubBranch="${{ github.ref_type == 'tag' && 'main' || github.ref_name }}" \
-              InstanceType="${{ inputs.instance_type || 'c7g.xlarge' }}" \
+              InstanceType="${{ inputs.instance_type || 'c7g.medium' }}" \
               AppDomain="${{ secrets.APP_DOMAIN }}" \
               AdminEmails="${{ secrets.GATEWAY_ADMIN_EMAILS }}" \
               LitellmMasterKey="${{ secrets.LITELLM_MASTER_KEY }}" \

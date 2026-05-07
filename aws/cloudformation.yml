@@ -29,13 +29,17 @@ Parameters:
 
   InstanceType:
     Type: String
-    Default: c7g.xlarge
+    Default: c7g.medium
     AllowedValues:
-      - c7g.xlarge       # 4 vCPU / 8 GB  (default, matches spec)
+      - c7g.medium       # 1 vCPU / 2 GB   (default — no local embedding/transcription)
+      - c7g.large        # 2 vCPU / 4 GB   (extra headroom)
+      - c7g.xlarge       # 4 vCPU / 8 GB   (needed for local Ollama + whisper)
       - c7g.2xlarge      # 8 vCPU / 16 GB
-      - m7g.xlarge       # 4 vCPU / 16 GB (more RAM)
-      - t4g.xlarge       # 4 vCPU / 16 GB burstable (cheaper when idle)
-    Description: Graviton (ARM64) instance. c7g.xlarge matches the 4 vCPU / 8 GB spec.
+    Description: >
+      Graviton (ARM64) instance. c7g.medium is the default — the gateway
+      runs comfortably on 1 vCPU / 2 GB now that local embedding and
+      transcription are off by default. Bump to c7g.xlarge or larger if
+      you re-enable local Ollama / whisper.
 
   SwapSizeGb:
     Type: Number
@@ -51,10 +55,11 @@ Parameters:
     Description: >
       Root EBS volume size (GB). This is the *only* volume — it holds OS
       + /swapfile (32 GB default) + repo + sqlite + docker images +
-      ollama nomic ≈ 1.2 GB + whisper large-v3-turbo ≈ 1.5 GB + Caddy
-      certs + room to grow. 120 GB gives comfortable headroom. Growing
-      this value in the template forces instance replacement — prefer
-      `aws ec2 modify-volume` out of band.
+      Caddy certs + room to grow. Local embedding/transcription are off
+      by default; if you opt in (ollama nomic ≈ 1.2 GB + whisper
+      large-v3-turbo ≈ 1.5 GB) 120 GB still gives comfortable headroom.
+      Growing this value in the template forces instance replacement —
+      prefer `aws ec2 modify-volume` out of band.
 
   RootSnapshotId:
     Type: String

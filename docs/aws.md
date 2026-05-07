@@ -8,15 +8,17 @@ SSM exec of `git pull && litellmctl restart`.
 
 ## What you end up with
 
-- One `c7g.xlarge` EC2 (4 vCPU / 8 GB / 40 GB root + 120 GB data volume / 32 GB swap)
+- One `c7g.medium` EC2 (1 vCPU / 2 GB / 120 GB gp3 root / 32 GB swap)
 - Stable Elastic IP
 - Ports `80`, `443`, `14041` open; Caddy handles the first two
 - Systemd-managed services: LiteLLM proxy, bun gateway, hydroxide
   (ProtonMail bridge), Caddy
 - Auto-deploy on every published GitHub Release from `main`
 
-Running cost: **~$60–80/month** on-demand. EBS is ~$12/mo for the 120 GB
-data volume, ~$4 for the 40 GB root.
+Running cost: **~$30–40/month** on-demand (c7g.medium ≈ $26/mo + 120 GB
+gp3 root ≈ $10/mo). Local embedding/transcription are off by default —
+if you opt in, bump to `c7g.xlarge` or larger (see "Need to resize the
+instance" below); cost there is closer to $80–100/month.
 
 ## Prerequisites
 
@@ -206,9 +208,14 @@ for service logs.
 
 **Need to resize the instance.** Re-run the workflow via
 `workflow_dispatch` with the `instance_type` input set to a different
-value (`c7g.2xlarge` etc.), or edit the default in
-`aws/cloudformation.yml`. CloudFormation handles the resize with brief
-downtime.
+value, or edit the default in `aws/cloudformation.yml`. CloudFormation
+handles the resize with brief downtime. Common ramps from the
+`c7g.medium` default:
+
+- `c7g.large` (2 vCPU / 4 GB) — extra headroom for heavier proxy traffic
+- `c7g.xlarge` (4 vCPU / 8 GB) — required if you re-enable local Ollama
+  embeddings or whisper transcription
+- `c7g.2xlarge` (8 vCPU / 16 GB) — bigger still
 
 ## Teardown
 
