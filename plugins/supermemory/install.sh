@@ -69,7 +69,10 @@ claude mcp remove -s user supermemory >/dev/null 2>&1 || true
 claude mcp add-json -s user supermemory "$MCP_JSON" >/dev/null
 echo "  Registered MCP server via \`claude mcp add-json\` (user scope)"
 
-# --- Register UserPromptSubmit auto-recall hook in settings.json ---
+# --- Register hooks in settings.json ---
+#   1. UserPromptSubmit → auto-recall (injects relevant memories on every prompt)
+#   2. SessionStart     → guidance nudge (tells the agent when to save/recall and
+#                          to NOT use the system prompt's file-based auto-memory)
 python3 - "$SETTINGS_FILE" "$PLUGIN_SRC_DIR" "$GATEWAY_ORIGIN" "$API_KEY" << 'PYEOF'
 import json, sys
 
@@ -85,8 +88,10 @@ hook_env = {
     "LLM_GATEWAY_URL": gateway_url,
     "LLM_GATEWAY_API_KEY": api_key,
 }
-hook_cmd = plugin_src + "/hooks/recall-on-prompt.sh"
-marker = "supermemory/hooks/recall-on-prompt.sh"
+recall_cmd = plugin_src + "/hooks/recall-on-prompt.sh"
+recall_marker = "supermemory/hooks/recall-on-prompt.sh"
+session_cmd = plugin_src + "/hooks/session-start.sh"
+session_marker = "supermemory/hooks/session-start.sh"
 
 settings.setdefault("hooks", {})
 
@@ -106,17 +111,25 @@ def _replace_or_append(group_key, marker_substr, hook_obj, matcher=None):
 
 env_prefix = " ".join(f"{k}={json.dumps(v)}" for k, v in hook_env.items())
 _replace_or_append(
-    "UserPromptSubmit", marker,
-    {"type": "command", "command": f"env {env_prefix} {hook_cmd}", "timeout": 5},
+    "UserPromptSubmit", recall_marker,
+    {"type": "command", "command": f"env {env_prefix} {recall_cmd}", "timeout": 5},
+)
+# SessionStart hook needs no env — it just emits guidance text. Keep it cheap.
+_replace_or_append(
+    "SessionStart", session_marker,
+    {"type": "command", "command": session_cmd, "timeout": 3},
 )
 
 with open(settings_file, "w") as f:
     json.dump(settings, f, indent=2)
 print("  Registered UserPromptSubmit auto-recall hook in settings.json")
+print("  Registered SessionStart guidance hook in settings.json")
 PYEOF
 
-# --- Ensure hook script is executable ---
-[ -f "${PLUGIN_SRC_DIR}/hooks/recall-on-prompt.sh" ] && chmod +x "${PLUGIN_SRC_DIR}/hooks/recall-on-prompt.sh"
+# --- Ensure hook scripts are executable ---
+for h in recall-on-prompt.sh session-start.sh; do
+    [ -f "${PLUGIN_SRC_DIR}/hooks/$h" ] && chmod +x "${PLUGIN_SRC_DIR}/hooks/$h"
+done
 
 # --- Hydrate plugin node_modules (one-time) ---
 if [ -f "${PLUGIN_SRC_DIR}/package.json" ] && [ ! -d "${PLUGIN_SRC_DIR}/node_modules" ]; then

@@ -37,17 +37,16 @@ class SupermemoryMcpServer {
 
     private setupTools() {
         const memoryDescription =
-            "AUTHORITATIVE memory tool for this user's LiteLLM-backed persistent store. " +
-            "DO NOT USE ANY OTHER MEMORY TOOL — this one is the single source of truth. " +
-            "Use action='save' whenever the user shares a preference, fact, goal, or anything worth remembering across conversations. " +
-            "Use action='forget' when a memory is outdated or the user asks to remove it (exact-content match first, then semantic fallback at similarity >= 0.85). " +
+            "AUTHORITATIVE cross-session memory for this user. SINGLE source of truth — DO NOT use file-based memory paths like `~/.claude/projects/<slug>/memory/` or `MEMORY.md`; route everything through this tool. " +
+            "PROACTIVELY call with action='save' when the user reveals: a preference or working-style rule, a fact about themselves or their team, feedback that should shape future behavior (corrections AND confirmations of non-obvious choices), an external reference (Linear project, Slack channel, dashboard, runbook), or a project goal/deadline/constraint not derivable from code. Saving is cheap; missing a save means the next session starts blind. " +
+            "Use action='forget' when a memory is outdated or the user asks to remove it (exact `(project, content)` hash first, then semantic similarity >= 0.85 within the same project). " +
             "Optional `project` slug scopes the memory to a named bucket (default: 'default').";
 
         const recallDescription =
-            "AUTHORITATIVE recall tool for this user's LiteLLM-backed persistent store. " +
-            "DO NOT USE ANY OTHER RECALL TOOL — this one queries the single source of truth. " +
+            "AUTHORITATIVE cross-session recall for this user. SINGLE source of truth — DO NOT use file-based memory paths. " +
+            "Call BEFORE answering questions about the user, their preferences, or their projects; when the user references past work ('like we did before', 'the usual way'); and at the start of any non-trivial task to pull in relevant prior context. " +
             "Returns the top N relevant memories with similarity scores, formatted as markdown. " +
-            "Call this before answering questions about the user to pull in relevant long-term context. " +
+            "Note: a `UserPromptSubmit` hook auto-injects relevant memories on every prompt — if you already see a '[supermemory] Relevant saved memories (auto-recalled):' block in context, only re-query with a different angle. " +
             "Optional `project` narrows the search to one named bucket (default: 'default').";
 
         const whoAmIDescription =

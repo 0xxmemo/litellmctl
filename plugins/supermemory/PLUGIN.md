@@ -49,9 +49,30 @@ The MCP server is registered in `~/.claude.json` (Claude Code's MCP loader
 ignores `settings.json`) via `claude mcp add-json -s user supermemory ...`
 and runs via `bun run /Users/anon/.litellm/plugins/supermemory/src/index.ts`.
 
-The `UserPromptSubmit` hook lives in `~/.claude/settings.json` (where hooks
-do belong) and is identified by the path substring
-`supermemory/hooks/recall-on-prompt.sh` so uninstall can strip it cleanly.
+Two hooks live in `~/.claude/settings.json` (where hooks do belong) and are
+identified by path substrings so uninstall can strip them cleanly:
+
+- `supermemory/hooks/recall-on-prompt.sh` — `UserPromptSubmit` auto-recall
+- `supermemory/hooks/session-start.sh`    — `SessionStart` guidance nudge
+
+## Session-start guidance hook (the "make the agent actually use it" path)
+
+Install registers a `hooks.SessionStart` entry that runs
+`hooks/session-start.sh` once per session and emits an `additionalContext`
+block telling the agent:
+
+- Memory is wired through the supermemory MCP tools (`memory`, `recall`,
+  `whoAmI`) — this is the SINGLE source of truth.
+- Do NOT use the system prompt's built-in file-based "auto memory" path
+  (`~/.claude/projects/<slug>/memory/`, `MEMORY.md`). That backend is
+  disabled in favor of MCP.
+- Concrete triggers for `save` (preferences, working-style rules, feedback,
+  external references, project facts) and `recall` (questions about the
+  user, references to past work, start of non-trivial tasks).
+
+Without this nudge, the system-prompt's file-based auto-memory section wins
+by default and the agent never reaches for the MCP tools. Override via
+`SUPERMEMORY_SESSION_NUDGE=0` in the hook env if you need to disable it.
 
 ## Auto-recall hook (the "efficient" path)
 

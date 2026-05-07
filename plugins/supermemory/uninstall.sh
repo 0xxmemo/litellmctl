@@ -52,6 +52,7 @@ def _strip(group_key, marker_substr):
     settings["hooks"][group_key] = new_group
 
 _strip("UserPromptSubmit", "supermemory/hooks/recall-on-prompt.sh")
+_strip("SessionStart", "supermemory/hooks/session-start.sh")
 
 # Also strip legacy `_tag: "supermemory"` entries from previous install.sh versions
 ups = settings.get("hooks", {}).get("UserPromptSubmit")
