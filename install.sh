@@ -346,6 +346,21 @@ as_user "'$VENV_DIR/bin/pip' install --upgrade pip --quiet 2>/dev/null"
 as_user "'$VENV_DIR/bin/pip' install -e '$SUBMODULE_DIR[proxy]' --quiet 2>/dev/null"
 ok "litellm installed"
 
+# CLI deps — MUST stay in sync with bin/install (litellmctl install path).
+# Root install.sh historically only installed the litellm submodule; users who
+# never ran `litellmctl install` ended up with a venv missing questionary/typer/rich.
+info "Installing litellmctl CLI dependencies (questionary, typer, rich) ..."
+as_user "'$VENV_DIR/bin/pip' install --quiet questionary typer rich" \
+  || warn "CLI deps failed — run: $VENV_DIR/bin/pip install questionary typer rich"
+
+info "Installing test dependencies (pytest, optional) ..."
+as_user "'$VENV_DIR/bin/pip' install --quiet pytest pytest-timeout" \
+  || warn "pytest not installed — bun tests for bin/ may be unavailable"
+
+info "Ensuring prisma (optional, for litellmctl DB migrations) ..."
+as_user "'$VENV_DIR/bin/pip' install --quiet prisma" \
+  || warn "prisma not installed — DB migrations may be skipped until fixed"
+
 # ── 8. .env + sqlite-vec + shell completions ─────────────────────────────
 
 if [ ! -f "$INSTALL_DIR/.env" ] && [ -f "$INSTALL_DIR/.env.example" ]; then

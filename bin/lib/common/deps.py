@@ -10,6 +10,13 @@ def require_questionary():
         return questionary
     except ModuleNotFoundError:
         from .formatting import error
-        error("Missing dependency: questionary")
-        error("Run:  pip install questionary   (inside the litellm venv)")
+        from .paths import PROJECT_DIR, VENV_DIR
+
+        error("Missing dependency: questionary (interactive prompts)")
+        pip_exe = VENV_DIR / "bin" / "pip"
+        if pip_exe.is_file():
+            error(f"Run:  {pip_exe} install questionary typer rich")
+        else:
+            error("Run:  bash install.sh   from your checkout")
+            error(f"(Creates venv + deps under {PROJECT_DIR})")
         raise SystemExit(1)
