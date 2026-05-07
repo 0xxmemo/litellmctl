@@ -13,6 +13,7 @@ import {
   flushUsageQueue,
   rateLimitMap,
   otpRateLimitMap,
+  OTP_RATE_LIMIT_WINDOW_MS,
   sweepExpiredOtpsAndSessions,
 } from "./lib/db";
 import { authRoutes } from "./routes/auth";
@@ -129,7 +130,7 @@ setInterval(() => {
       if (now - record.startTime > 3600000) rateLimitMap.delete(ip);
     }
     for (const [email, record] of otpRateLimitMap.entries()) {
-      if (now - record.startTime > 3600000) otpRateLimitMap.delete(email);
+      if (now - record.startTime > OTP_RATE_LIMIT_WINDOW_MS) otpRateLimitMap.delete(email);
     }
     sweepExpiredOtpsAndSessions();
   } catch (err) {

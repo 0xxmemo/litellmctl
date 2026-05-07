@@ -4,6 +4,7 @@ import { generateOTP } from "../lib/otp";
 import {
   loadUser,
   checkOtpRateLimit,
+  resetOtpRateLimit,
   createOtp,
   consumeOtp,
   upsertGuestIfMissing,
@@ -11,6 +12,12 @@ import {
   userProfileCache,
   getAuthenticatedUser,
 } from "../lib/db";
+
+function formatRetryAfter(sec: number): string {
+  if (sec < 60) return `${sec} second${sec === 1 ? "" : "s"}`;
+  const min = Math.ceil(sec / 60);
+  return `${min} minute${min === 1 ? "" : "s"}`;
+}
 
 async function requestOtpHandler(req: Request) {
   const { email } = await req.json();
@@ -21,9 +28,11 @@ async function requestOtpHandler(req: Request) {
 
   const limit = checkOtpRateLimit(email);
   if (!limit.allowed) {
+    const retryAfterSec = limit.retryAfterSec ?? 60;
+    const headers = new Headers({ "Retry-After": String(retryAfterSec) });
     return Response.json(
-      { error: `Too many attempts. Try again in ${limit.retryAfterMin} minutes.` },
-      { status: 429 },
+      { error: `Too many attempts. Try again in ${formatRetryAfter(retryAfterSec)}.` },
+      { status: 429, headers },
     );
   }
 
@@ -50,6 +59,10 @@ async function verifyOtpHandler(req: Request) {
   if (!consumeOtp(email, otp)) {
     return Response.json({ error: "Invalid or expired code" }, { status: 400 });
   }
+
+  // Successful verification clears the request-otp limiter so a user who
+  // hit "resend" a few times isn't blocked from re-requesting later.
+  resetOtpRateLimit(email);
 
   upsertGuestIfMissing(email);
   userProfileCache.delete(email.toLowerCase());

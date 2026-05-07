@@ -982,33 +982,37 @@ export async function requireAdmin(req: Request): Promise<{ email: string; role:
 export const rateLimitMap = new Map<string, { count: number; startTime: number }>();
 export const otpRateLimitMap = new Map<string, { count: number; startTime: number }>();
 
+// OTP request limiter: a generous sliding window. The frontend already enforces
+// a 60s per-click resend cooldown, and verify-otp is single-use, so this is
+// strictly a brute-force / abuse guard — not a UX gate. Keep it loose.
+export const OTP_RATE_LIMIT_WINDOW_MS = 10 * 60 * 1000;
+export const OTP_RATE_LIMIT_MAX = 10;
+
 export function checkOtpRateLimit(email: string): {
   allowed: boolean;
   remaining?: number;
-  retryAfterMin?: number;
+  retryAfterSec?: number;
 } {
   const now = Date.now();
   const key = email.toLowerCase();
   const record = otpRateLimitMap.get(key);
 
-  if (!record) {
+  if (!record || now - record.startTime > OTP_RATE_LIMIT_WINDOW_MS) {
     otpRateLimitMap.set(key, { count: 1, startTime: now });
-    return { allowed: true, remaining: 3 };
+    return { allowed: true, remaining: OTP_RATE_LIMIT_MAX - 1 };
   }
 
-  if (now - record.startTime > 3600000) {
-    record.count = 1;
-    record.startTime = now;
-    return { allowed: true, remaining: 3 };
-  }
-
-  if (record.count >= 3) {
-    const retryAfterMs = 3600000 - (now - record.startTime);
-    return { allowed: false, retryAfterMin: Math.ceil(retryAfterMs / 60000) };
+  if (record.count >= OTP_RATE_LIMIT_MAX) {
+    const retryAfterMs = OTP_RATE_LIMIT_WINDOW_MS - (now - record.startTime);
+    return { allowed: false, retryAfterSec: Math.max(1, Math.ceil(retryAfterMs / 1000)) };
   }
 
   record.count++;
-  return { allowed: true, remaining: 3 - record.count };
+  return { allowed: true, remaining: OTP_RATE_LIMIT_MAX - record.count };
+}
+
+export function resetOtpRateLimit(email: string): void {
+  otpRateLimitMap.delete(email.toLowerCase());
 }
 
 // ============================================================================
