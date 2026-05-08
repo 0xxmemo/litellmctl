@@ -52,6 +52,10 @@ export function PluginFreshness({
         format="relative"
         size="xs"
         className="text-xs"
+        // Without showSeconds, PrettyDate's relative format omits the seconds
+        // unit and falls back to "0s" for any duration < 1 minute — which is
+        // most of the freshness indicator's life since polling is 30 s.
+        showSeconds
       />
     </>
   );
