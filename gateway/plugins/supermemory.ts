@@ -114,12 +114,42 @@ function normalizeProjectList(raw: unknown): string[] {
   return Array.from(new Set(out));
 }
 
-function memoryId(project: string, content: string): string {
+/**
+ * Stable chunk id keyed on (saver email, content). Project does NOT enter the
+ * hash — the chunk lives once even when it surfaces in multiple project
+ * buckets via a `projects: string[]` metadata array. Re-saving the same
+ * content by the same user is therefore an upsert (merge projects, append any
+ * new team refs, skip the embedding call).
+ */
+function memoryId(email: string, content: string): string {
   const hash = crypto
     .createHash("sha256")
-    .update(`${project}\0${content}`)
+    .update(`${email.toLowerCase()}\0${content}`)
     .digest("hex");
   return `mem_${hash.slice(0, 16)}`;
+}
+
+interface ExistingChunk {
+  rowid: number;
+  metadata: Record<string, unknown>;
+}
+
+function readChunk(id: string): ExistingChunk | null {
+  const row = db
+    .prepare(
+      `SELECT rowid, metadata FROM plugin_chunks
+        WHERE collection = ? AND chunk_id = ?`,
+    )
+    .get(COLLECTION, id) as { rowid: number; metadata: string | null } | undefined;
+  if (!row) return null;
+  return { rowid: row.rowid, metadata: safeJson(row.metadata, {}) };
+}
+
+function writeChunkMetadata(id: string, metadata: Record<string, unknown>): void {
+  db.prepare(
+    `UPDATE plugin_chunks SET metadata = ?
+      WHERE collection = ? AND chunk_id = ?`,
+  ).run(JSON.stringify(metadata), COLLECTION, id);
 }
 
 async function embed(text: string): Promise<number[]> {
@@ -143,7 +173,19 @@ async function embed(text: string): Promise<number[]> {
 // ── Route handlers ────────────────────────────────────────────────────────────
 
 // POST /api/plugins/supermemory/save
-// Body: { content: string, project?: string, id?: string, metadata?: object }
+// Body: {
+//   content,
+//   project?,  projects?,    // single + list, merged into metadata.projects[]
+//   team?,     teams?,       // single + list, validated against listUserTeams
+//   id?, metadata?
+// }
+//
+// Memory model (post-collapse): each saved fact is a SINGLE chunk per
+// (saver email, content). The chunk surfaces in multiple project buckets via
+// `metadata.projects: string[]` and is shared with multiple teams via
+// additional ref-overlay tags. Re-saving the same content by the same user
+// is an upsert: union the projects array, append any new team refs, and SKIP
+// the embedding call entirely. No data duplication, no double-embedding.
 async function handleSave(req: Request): Promise<Response> {
   const auth = await requireUser(req);
   if (auth instanceof Response) return auth;
@@ -151,6 +193,9 @@ async function handleSave(req: Request): Promise<Response> {
   let body: {
     content?: string;
     project?: string;
+    projects?: string[];
+    team?: string;
+    teams?: string[];
     id?: string;
     metadata?: Record<string, unknown>;
   };
@@ -169,38 +214,109 @@ async function handleSave(req: Request): Promise<Response> {
       );
     }
 
-    const project = normalizeProject(body.project);
+    // Project destinations: union of `project` + `projects[]`. Empty input
+    // means "default" (one bucket). Slugs are normalized + deduped.
+    const projectInputs: string[] = [];
+    if (body.project !== undefined) projectInputs.push(normalizeProject(body.project));
+    if (body.projects !== undefined) {
+      projectInputs.push(...normalizeProjectList(body.projects));
+    }
+    let requestedProjects = Array.from(new Set(projectInputs));
+    if (requestedProjects.length === 0) requestedProjects = [DEFAULT_PROJECT];
+
+    // Team destinations: validate against the caller's membership.
+    const teamInputs = new Set<string>();
+    if (typeof body.team === "string" && body.team.trim()) {
+      teamInputs.add(body.team.trim());
+    }
+    if (Array.isArray(body.teams)) {
+      for (const t of body.teams) {
+        if (typeof t === "string" && t.trim()) teamInputs.add(t.trim());
+      }
+    }
+    let validatedTeamIds: string[] = [];
+    if (teamInputs.size > 0) {
+      const memberOf = new Set(listUserTeams(auth.email).map((t) => t.id));
+      for (const id of teamInputs) {
+        if (!memberOf.has(id)) {
+          return errJson(
+            `not a member of team ${id} (or team does not exist)`,
+            403,
+          );
+        }
+      }
+      validatedTeamIds = Array.from(teamInputs);
+    }
 
     ensureCollection();
 
-    const id = body.id ?? memoryId(project, content);
-    const vector = await embed(content);
+    const id = body.id ?? memoryId(auth.email, content);
 
-    const doc: VectorDocument = {
-      id,
-      vector,
-      content,
-      relativePath: MEMORY_REF_FILE,
-      startLine: 0,
-      endLine: 0,
-      fileExtension: "",
-      metadata: {
-        source: body.metadata?.source ?? "api",
-        createdAt: new Date().toISOString(),
+    const existing = readChunk(id);
+    let projectsAfter: string[];
+    if (existing) {
+      // Upsert path — same content already stored. Union projects in place;
+      // do not call embed(), do not touch the vector table.
+      const prevProjects = Array.isArray(existing.metadata.projects)
+        ? (existing.metadata.projects as unknown[]).filter(
+            (p): p is string => typeof p === "string",
+          )
+        : typeof existing.metadata.project === "string"
+          ? [existing.metadata.project]
+          : [];
+      projectsAfter = Array.from(
+        new Set([...prevProjects, ...requestedProjects]),
+      ).sort();
+
+      const mergedMetadata: Record<string, unknown> = {
+        ...existing.metadata,
         ...body.metadata,
-        project,
-      },
-    };
+        projects: projectsAfter,
+        // Drop the legacy singular field — `projects` is canonical now.
+      };
+      delete (mergedMetadata as Record<string, unknown>).project;
+      writeChunkMetadata(id, mergedMetadata);
+    } else {
+      // Fresh chunk — embed once, insert once.
+      projectsAfter = [...requestedProjects].sort();
+      const vector = await embed(content);
+      const doc: VectorDocument = {
+        id,
+        vector,
+        content,
+        relativePath: MEMORY_REF_FILE,
+        startLine: 0,
+        endLine: 0,
+        fileExtension: "",
+        metadata: {
+          source: body.metadata?.source ?? "api",
+          createdAt: new Date().toISOString(),
+          ...body.metadata,
+          projects: projectsAfter,
+        },
+      };
+      insertDocuments(COLLECTION, [doc]);
+    }
 
-    insertDocuments(COLLECTION, [doc]);
+    // Ref overlays. appendRefOverlay is INSERT OR IGNORE — already-attached
+    // refs are no-ops.
     appendRefOverlay(
       COLLECTION,
       userMemoryRefId(auth.email),
       MEMORY_REF_FILE,
       [id],
     );
+    for (const teamId of validatedTeamIds) {
+      appendRefOverlay(COLLECTION, teamRefId(teamId), MEMORY_REF_FILE, [id]);
+    }
 
-    return Response.json({ id, project, status: "saved" });
+    return Response.json({
+      id,
+      projects: projectsAfter,
+      teams: validatedTeamIds,
+      reused: existing !== null,
+      status: "saved",
+    });
   } catch (err) {
     return handleThrown(err);
   }
@@ -253,8 +369,59 @@ async function handleForget(req: Request): Promise<Response> {
     const ownedIds = owned.map((r) => r.chunk_id);
     if (ownedIds.length === 0) return Response.json({ deleted: 0 });
 
-    const res = deleteByIds(COLLECTION, ownedIds);
-    return Response.json(res);
+    // Ref-counted forget. A chunk may be referenced by:
+    //   - the caller's own user ref (always — that's how we got here)
+    //   - other users' user refs (a teammate co-saved the same content)
+    //   - one or more team refs (the chunk is shared into team buckets)
+    //
+    // Rules:
+    //   1. Always drop the caller's user-ref overlay row for ownedIds.
+    //   2. For each chunk, drop any team-ref overlay rows where the caller
+    //      is a current member (their contribution to that team).
+    //   3. If, after (1)+(2), the chunk still has any other user-ref or
+    //      team-ref overlay row, leave the underlying chunk intact —
+    //      another user/team still wants it. Otherwise call deleteByIds
+    //      to remove the chunk + its remaining overlay rows entirely.
+    const ownedPhs = placeholders(ownedIds.length);
+    const callerTeamIds = listUserTeams(auth.email).map((t) => t.id);
+    const callerTeamRefs = callerTeamIds.map((id) => teamRefId(id));
+
+    const tx = db.transaction(() => {
+      // 1. Drop caller's user-ref overlay.
+      db.prepare(
+        `DELETE FROM plugin_ref_chunks
+          WHERE collection = ? AND ref_id = ? AND chunk_id IN (${ownedPhs})`,
+      ).run(COLLECTION, ownRef, ...ownedIds);
+
+      // 2. Drop the caller's team-ref overlays for these chunks.
+      if (callerTeamRefs.length > 0) {
+        const teamPhs = placeholders(callerTeamRefs.length);
+        db.prepare(
+          `DELETE FROM plugin_ref_chunks
+            WHERE collection = ?
+              AND ref_id IN (${teamPhs})
+              AND chunk_id IN (${ownedPhs})`,
+        ).run(COLLECTION, ...callerTeamRefs, ...ownedIds);
+      }
+    });
+    tx();
+
+    // 3. Identify chunks that no overlay still references, and nuke them.
+    const survivors = db
+      .prepare(
+        `SELECT DISTINCT chunk_id FROM plugin_ref_chunks
+          WHERE collection = ? AND chunk_id IN (${ownedPhs})`,
+      )
+      .all(COLLECTION, ...ownedIds) as { chunk_id: string }[];
+    const survivorIds = new Set(survivors.map((r) => r.chunk_id));
+    const orphaned = ownedIds.filter((id) => !survivorIds.has(id));
+
+    let deleted = 0;
+    if (orphaned.length > 0) {
+      const res = deleteByIds(COLLECTION, orphaned);
+      deleted = res.deleted;
+    }
+    return Response.json({ deleted });
   } catch (err) {
     return handleThrown(err);
   }
@@ -290,9 +457,10 @@ async function handleSearch(req: Request): Promise<Response> {
       ? normalizeProjectList(body.projects)
       : [normalizeProject(body.project)];
 
-    // parseFilterExpr accepts `metadata.project in ["a","b"]`. Escape nothing —
-    // we've already run each slug through PROJECT_RE which rejects quotes etc.
-    const filterExpr = `metadata.project in [${projectList
+    // Chunks now store their bucket(s) in metadata.projects (string[]).
+    // Match if ANY of the requested projects appear in the chunk's array.
+    // Slugs went through PROJECT_RE so quote escaping isn't needed.
+    const filterExpr = `metadata.projects[] in [${projectList
       .map((p) => `"${p}"`)
       .join(",")}]`;
 
@@ -312,12 +480,19 @@ async function handleSearch(req: Request): Promise<Response> {
         const meta = (r.document.metadata ?? {}) as {
           createdAt?: string;
           project?: string;
+          projects?: unknown;
         };
+        const projects = Array.isArray(meta.projects)
+          ? meta.projects.filter((p): p is string => typeof p === "string")
+          : typeof meta.project === "string"
+            ? [meta.project]
+            : [DEFAULT_PROJECT];
         return {
           id: r.document.id,
           content: r.document.content,
           similarity: r.score,
-          project: meta.project ?? DEFAULT_PROJECT,
+          project: projects[0] ?? DEFAULT_PROJECT,
+          projects,
           createdAt: meta.createdAt ?? null,
         };
       }),
@@ -358,12 +533,22 @@ async function handleUsage(req: Request): Promise<Response> {
       ? normalizeProject(rawProject)
       : null;
 
+    // Match the requested project against either the canonical
+    // metadata.projects[] array or — for chunks predating the migration —
+    // the legacy metadata.project scalar. The migrate() routine converts
+    // legacy chunks at startup, so the second clause is just a safety net.
     const projectClause = projectFilter !== null
-      ? "AND json_extract(pc.metadata, '$.project') = ?"
+      ? `AND (
+            EXISTS (
+              SELECT 1 FROM json_each(json_extract(pc.metadata, '$.projects'))
+               WHERE value = ?
+            )
+            OR json_extract(pc.metadata, '$.project') = ?
+          )`
       : "";
 
     const totalArgs: (string | number)[] = [COLLECTION, ...refs];
-    if (projectFilter !== null) totalArgs.push(projectFilter);
+    if (projectFilter !== null) totalArgs.push(projectFilter, projectFilter);
 
     const { total } = db
       .prepare(
@@ -378,7 +563,7 @@ async function handleUsage(req: Request): Promise<Response> {
       .get(...totalArgs) as { total: number };
 
     const listArgs: (string | number)[] = [COLLECTION, ...refs];
-    if (projectFilter !== null) listArgs.push(projectFilter);
+    if (projectFilter !== null) listArgs.push(projectFilter, projectFilter);
     listArgs.push(limit);
 
     const rows = db
@@ -406,13 +591,20 @@ async function handleUsage(req: Request): Promise<Response> {
         createdAt?: string;
         source?: string;
         project?: string;
+        projects?: unknown;
       }>(r.metadata, {});
+      const projects = Array.isArray(meta.projects)
+        ? meta.projects.filter((p): p is string => typeof p === "string")
+        : typeof meta.project === "string"
+          ? [meta.project]
+          : [DEFAULT_PROJECT];
       return {
         id: r.id,
         content: r.content,
         createdAt: meta.createdAt ?? null,
         source: meta.source ?? null,
-        project: meta.project ?? DEFAULT_PROJECT,
+        project: projects[0] ?? DEFAULT_PROJECT,
+        projects,
       };
     });
 
@@ -424,6 +616,57 @@ async function handleUsage(req: Request): Promise<Response> {
       project: projectFilter,
       memories,
     });
+  } catch (err) {
+    return handleThrown(err);
+  }
+}
+
+// GET /api/plugins/supermemory/projects
+// Returns the distinct project slugs the caller has any read access to —
+// own memories plus team-shared memories. Used by the routing extractor so
+// the LLM can pick an existing slug rather than inventing variants.
+async function handleProjects(req: Request): Promise<Response> {
+  const auth = await requireUser(req);
+  if (auth instanceof Response) return auth;
+
+  try {
+    if (!hasCollection(COLLECTION)) {
+      return Response.json({ projects: [] });
+    }
+    const refs = memoryReadRefs(auth.email);
+    const refPh = placeholders(refs.length);
+    // Enumerate slugs from the canonical metadata.projects[] array, plus a
+    // safety-net union with the legacy scalar metadata.project (kept for
+    // anything pre-migration).
+    const rows = db
+      .prepare(
+        `SELECT DISTINCT slug FROM (
+            SELECT je.value AS slug
+              FROM plugin_chunks pc
+              JOIN plugin_ref_chunks prc
+                ON prc.collection = pc.collection AND prc.chunk_id = pc.chunk_id,
+                   json_each(json_extract(pc.metadata, '$.projects')) je
+             WHERE pc.collection = ?
+               AND prc.ref_id IN (${refPh})
+            UNION
+            SELECT json_extract(pc.metadata, '$.project') AS slug
+              FROM plugin_chunks pc
+              JOIN plugin_ref_chunks prc
+                ON prc.collection = pc.collection AND prc.chunk_id = pc.chunk_id
+             WHERE pc.collection = ?
+               AND prc.ref_id IN (${refPh})
+               AND json_extract(pc.metadata, '$.project') IS NOT NULL
+         )
+         WHERE slug IS NOT NULL AND slug != ''`,
+      )
+      .all(COLLECTION, ...refs, COLLECTION, ...refs) as Array<{
+        slug: string | null;
+      }>;
+    const projects = rows
+      .map((r) => r.slug)
+      .filter((p): p is string => typeof p === "string" && p.length > 0)
+      .sort();
+    return Response.json({ projects });
   } catch (err) {
     return handleThrown(err);
   }
@@ -451,6 +694,7 @@ export const supermemoryPlugin: GatewayPlugin = {
     "/forget": { POST: handleForget },
     "/search": { POST: handleSearch },
     "/usage": { GET: handleUsage },
+    "/projects": { GET: handleProjects },
     "/whoami": { GET: handleWhoami },
   },
   migrate: () => {
@@ -465,6 +709,32 @@ export const supermemoryPlugin: GatewayPlugin = {
       console.log(
         `[supermemory] dropped legacy '${COLLECTION}' collection (dimension ${row.dimension} → ${EMBEDDING_DIMENSIONS})`,
       );
+    }
+
+    // Project shape cutover: legacy chunks store `metadata.project` (string).
+    // The new model uses `metadata.projects` (string[]) so a chunk can live
+    // in many buckets without duplicating the embedding. This is a one-shot
+    // upgrade — once converted, the WHERE clause filters every row out and
+    // the UPDATE is a no-op on subsequent boots.
+    if (hasCollection(COLLECTION)) {
+      const res = db
+        .prepare(
+          `UPDATE plugin_chunks
+              SET metadata = json_set(
+                json_remove(metadata, '$.project'),
+                '$.projects',
+                json_array(json_extract(metadata, '$.project'))
+              )
+            WHERE collection = ?
+              AND json_extract(metadata, '$.project') IS NOT NULL
+              AND json_extract(metadata, '$.projects') IS NULL`,
+        )
+        .run(COLLECTION);
+      if (res.changes > 0) {
+        console.log(
+          `[supermemory] migrated ${res.changes} chunk(s) from metadata.project → metadata.projects[]`,
+        );
+      }
     }
   },
 };

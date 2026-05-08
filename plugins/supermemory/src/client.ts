@@ -31,7 +31,14 @@ export interface WhoamiResult {
 }
 
 export interface SaveOptions {
+    /** Single project slug — merged with `projects` server-side. */
     project?: string;
+    /** Multiple project slugs — chunk surfaces in every named bucket. */
+    projects?: string[];
+    /** Single team id — merged with `teams` server-side. Caller must be a member. */
+    team?: string;
+    /** Multiple team ids — chunk is shared with every listed team. */
+    teams?: string[];
 }
 
 export interface SearchOptions {
@@ -69,16 +76,38 @@ export class MemoryClient {
         return (await res.json()) as T;
     }
 
-    /** Save a memory. Server hashes (project, content) to a stable id, so re-saves are upserts. */
+    /**
+     * Save a memory. The chunk is keyed on (saver email, content) — so
+     * re-saving the same content unions the projects/teams server-side
+     * without re-embedding. One stored chunk; many destinations expressed as
+     * metadata.projects[] + ref overlays.
+     */
     async save(
         content: string,
         opts: SaveOptions = {},
-    ): Promise<{ id: string; project: string; status: "saved" }> {
+    ): Promise<{
+        id: string;
+        projects: string[];
+        teams: string[];
+        reused: boolean;
+        status: "saved";
+    }> {
         if (!content.trim()) throw new Error("content is required");
-        return this.request("POST", "/api/plugins/supermemory/save", {
-            content,
-            ...(opts.project ? { project: opts.project } : {}),
-        });
+        const body: Record<string, unknown> = { content };
+        if (opts.project) body.project = opts.project;
+        if (opts.projects && opts.projects.length > 0) body.projects = opts.projects;
+        if (opts.team) body.team = opts.team;
+        if (opts.teams && opts.teams.length > 0) body.teams = opts.teams;
+        return this.request("POST", "/api/plugins/supermemory/save", body);
+    }
+
+    /** List the distinct project slugs the caller can read. */
+    async listProjects(): Promise<string[]> {
+        const res = await this.request<{ projects: string[] }>(
+            "GET",
+            "/api/plugins/supermemory/projects",
+        );
+        return Array.isArray(res?.projects) ? res.projects : [];
     }
 
     /**

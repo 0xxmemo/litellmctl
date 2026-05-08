@@ -9,27 +9,53 @@ type: mcp
 Registers an MCP server that gives Claude Code three tools for building
 persistent memory across conversations:
 
-- `memory({ content, action: "save" | "forget", project? })` — save a fact
-  the user shares (preferences, goals, project info) or forget one that's
-  outdated. Forget resolves by exact `(project, content)` hash first, then
-  semantic similarity (threshold 0.85) inside the same project.
+- `memory({ content, action: "save" | "forget", project?, destinations? })` —
+  save a fact the user shares (preferences, goals, project info) or forget
+  one that's outdated. The chunk is keyed on `(saver email, content)` —
+  one stored row, one embedding, regardless of how many destinations it
+  lives in. Pass `destinations: [{project?, team?}, ...]` to surface the
+  same memory in multiple project buckets and/or share with one or more
+  teams; the agent's destinations array collapses client-side to a single
+  `projects[]` + `teams[]` save call. Re-saving the same content from
+  the same user upserts in place — projects unioned, new team refs
+  attached, no re-embed. Forget removes the saver's user-ref + their
+  team-ref overlays; the underlying chunk only disappears once no other
+  user-ref still owns it (so a teammate's co-save is preserved).
 - `recall({ query, limit?, project? })` — semantic search over saved
-  memories, markdown-formatted with percent-match and project tag.
+  memories (own + team-shared), markdown-formatted with percent-match and
+  project tag.
 - `whoAmI()` — identify which gateway account/email/teams this MCP is
-  bound to. Useful for debugging.
+  bound to. Useful both for debugging and for discovering team ids you can
+  pass back as a destination.
 
 All embeddings are generated via the LiteLLM gateway's `/v1/embeddings`
 and vectors are persisted in the gateway's sqlite-vec store. Your API key
 scopes the collection — nothing is sent to `api.supermemory.ai` or any
 third party.
 
-### Project scoping
+### Project scoping (no duplicate data)
 
-Every memory lives in a named bucket. If you omit `project`, it lands in
-`default`. Named buckets (e.g. `work`, `personal`, `gateway`) let you keep
-facts about different contexts separate: `recall` with a project returns
-only memories from that bucket. Slugs must match
-`^[a-z0-9][a-z0-9._-]{0,63}$`.
+Project membership is a property of the chunk, not of the storage row.
+Each chunk carries `metadata.projects: string[]` — the buckets it
+surfaces in. `recall` with a project filters by array containment
+(`metadata.projects[] in ["x", ...]`), so a single chunk can appear in
+`default`, the cwd-derived project, *and* a topic bucket without any
+data being copied. Re-saving the same content with a new bucket unions
+the array in place; no new embedding is computed. Slugs must match
+`^[a-z0-9][a-z0-9._-]{0,63}$`. Omit project entirely to land in
+`default`.
+
+### Team scoping (pointers, not copies)
+
+Team sharing rides on the same chunk via additional ref-overlay tags.
+Pass `team`/`teams` (or include `team` inside a `destinations` entry on
+the MCP tool) and the gateway calls `appendRefOverlay` for each team —
+no second insert, no second embedding. Team members read the chunk
+through overlay union (their own user-ref ∪ every team-ref they hold).
+The saver always keeps a personal user-ref so they can `forget`, and
+forget is ref-counted: the chunk vanishes only when no other user-ref
+still owns it. The gateway `/projects` endpoint enumerates the distinct
+project slugs the caller can read across personal + team scopes.
 
 ### Limits
 
@@ -116,16 +142,26 @@ What it does:
 3. Throttles per session: skips if the transcript byte size is unchanged
    since the last extraction, or if `SUPERMEMORY_AUTO_MIN_INTERVAL`
    seconds haven't passed.
-4. Reads the last N transcript turns + the top existing memories for the
-   project, and asks the extractor LLM to emit JSON with two arrays:
-   - `save` — items the user has clearly concluded (own statement, assent
-     to assistant proposal, concrete corrective feedback). Speculation
-     and rejected ideas are excluded.
+4. Pre-fetches `/whoami` (team list) and `/projects` (known slugs the
+   caller can read) so the LLM has real destinations to route to. Failures
+   here are non-fatal — the hook falls back to project-only routing
+   scoped to the cwd-derived slug.
+5. Reads the last N transcript turns + the top existing memories for the
+   current project, and asks the extractor LLM to emit JSON:
+   - `save` — `[{content, destinations: [{project?, team?}, ...]}]`. The
+     model picks one or more destinations per save: personal `default`,
+     the cwd-derived project, another known project, and/or a team the
+     user belongs to. Speculation and rejected ideas are excluded.
+     Hallucinated team ids are dropped client-side; the project leg of
+     the destination is kept.
    - `forget` — existing memories the latest exchange contradicts,
      supersedes, or invalidates. Update flows naturally: refining a
      preference yields `forget(old) + save(new)`.
-5. Applies forgets first, then saves with semantic dedupe.
-6. All work happens in a detached child — Stop returns immediately.
+6. Applies forgets first, then saves — ONE save per memory item.
+   Destinations collapse to `(projects[], teams[])` so the gateway stores
+   one chunk and embeds once even when the LLM picked multiple buckets.
+   Semantic dedupe is checked across the union of destination projects.
+7. All work happens in a detached child — Stop returns immediately.
 
 | Var | Default | Notes |
 |---|---|---|
@@ -155,9 +191,26 @@ control plane — not configurable.
 ## Data layout
 
 Memories live in the gateway's `plugin_chunks` table under collection
-`memories`, with vectors in `plugin_chunks_vec_1024`. Isolation is by
-gateway user (via `plugin_ref_chunks` overlays); team memberships grant
-read access to shared memories tagged under a team ref. Project slug is
-stored in each memory's metadata JSON and filtered server-side via
-`json_extract`. Forget is user-scoped — you cannot remove a teammate's
-memory.
+`memories`, with vectors in `plugin_chunks_vec_1024`. The chunk id is
+`mem_<sha256(saver_email + "\0" + content).slice(0,16)>` — content+saver
+only, *not* project. Re-saving the same content by the same user is an
+upsert; no second row, no second embedding.
+
+Multi-destination is expressed via two orthogonal mechanisms:
+  * **Projects (buckets)** — `metadata.projects: string[]` on the chunk.
+    Filtering on `metadata.projects[] in [...]` (array containment, via
+    `json_each`) makes one chunk visible in any number of buckets.
+  * **Teams (read access)** — additional rows in `plugin_ref_chunks`
+    pointing the team's `team:<id>` ref at the same chunk_id. Reads
+    union the caller's personal ref with all their team refs.
+
+Forget is ref-counted: the caller's `user:<email>` overlay row is
+removed along with any `team:<id>` overlays they're a current member
+of. The underlying chunk only disappears once no other user-ref still
+points at it. So a memory co-saved by two teammates survives one of
+them calling forget — the chunk stays for the remaining owner and the
+team continues to recall it.
+
+A one-shot migration runs at gateway startup and rewrites legacy chunks
+that only carry `metadata.project` (string) into the new
+`metadata.projects: [string]` shape; the legacy field is removed.

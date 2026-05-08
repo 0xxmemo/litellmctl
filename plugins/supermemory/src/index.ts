@@ -40,7 +40,8 @@ class SupermemoryMcpServer {
             "AUTHORITATIVE cross-session memory for this user. SINGLE source of truth — DO NOT use file-based memory paths like `~/.claude/projects/<slug>/memory/` or `MEMORY.md`; route everything through this tool. " +
             "PROACTIVELY call with action='save' when the user reveals: a preference or working-style rule, a fact about themselves or their team, feedback that should shape future behavior (corrections AND confirmations of non-obvious choices), an external reference (Linear project, Slack channel, dashboard, runbook), or a project goal/deadline/constraint not derivable from code. Saving is cheap; missing a save means the next session starts blind. " +
             "Use action='forget' when a memory is outdated or the user asks to remove it (exact `(project, content)` hash first, then semantic similarity >= 0.85 within the same project). " +
-            "Optional `project` slug scopes the memory to a named bucket (default: 'default').";
+            "Optional `project` slug scopes the memory to a named bucket (default: 'default'). " +
+            "For fan-out, pass `destinations: [{project?, team?}, ...]` — each entry writes the same content to one bucket (project slug and/or a team id you belong to). Use this when a fact is relevant to both your `default` bucket and a team, or to multiple projects at once. Call `whoAmI` to discover the team ids you can target.";
 
         const recallDescription =
             "AUTHORITATIVE cross-session recall for this user. SINGLE source of truth — DO NOT use file-based memory paths. " +
@@ -74,8 +75,29 @@ class SupermemoryMcpServer {
                             project: {
                                 type: "string",
                                 description:
-                                    "Optional project slug (a-z, 0-9, ., _, -). Defaults to 'default'.",
+                                    "Optional project slug (a-z, 0-9, ., _, -). Defaults to 'default'. Ignored when `destinations` is provided.",
                                 maxLength: MAX_PROJECT_LENGTH,
+                            },
+                            destinations: {
+                                type: "array",
+                                description:
+                                    "Optional fan-out targets. Each entry picks a project slug (defaults to 'default' if omitted) and/or a team id the caller is a member of. The same content is written once per destination — use this for facts that span personal + team contexts, or multiple projects.",
+                                items: {
+                                    type: "object",
+                                    properties: {
+                                        project: {
+                                            type: "string",
+                                            maxLength: MAX_PROJECT_LENGTH,
+                                            description:
+                                                "Project slug for this destination. Optional; defaults to 'default'.",
+                                        },
+                                        team: {
+                                            type: "string",
+                                            description:
+                                                "Team id the caller belongs to. Look up via the `whoAmI` tool.",
+                                        },
+                                    },
+                                },
                             },
                         },
                         required: ["content"],
@@ -129,6 +151,10 @@ class SupermemoryMcpServer {
                                 content: string;
                                 action?: "save" | "forget";
                                 project?: string;
+                                destinations?: Array<{
+                                    project?: string;
+                                    team?: string;
+                                }>;
                             },
                         );
                     case "recall":
@@ -158,6 +184,7 @@ class SupermemoryMcpServer {
         content: string;
         action?: "save" | "forget";
         project?: string;
+        destinations?: Array<{ project?: string; team?: string }>;
     }) {
         const action = args.action ?? "save";
         if (!args?.content) {
@@ -179,17 +206,49 @@ class SupermemoryMcpServer {
         }
 
         if (action === "save") {
-            const res = await this.client.save(args.content, {
-                project: args.project,
-            });
-            return {
-                content: [
-                    {
-                        type: "text" as const,
-                        text: `Saved memory ${res.id} (project: ${res.project})`,
-                    },
-                ],
-            };
+            // Collapse `destinations: [{project?, team?}, ...]` into the
+            // canonical (projects[], teams[]) shape the gateway accepts.
+            // The chunk lives once — projects ride on metadata, teams on
+            // ref overlays. No duplicate embeddings, no duplicate rows.
+            const projectSet = new Set<string>();
+            const teamSet = new Set<string>();
+            if (typeof args.project === "string" && args.project.trim()) {
+                projectSet.add(args.project.trim());
+            }
+            if (Array.isArray(args.destinations)) {
+                for (const d of args.destinations) {
+                    if (!d || typeof d !== "object") continue;
+                    if (typeof d.project === "string" && d.project.trim()) {
+                        projectSet.add(d.project.trim());
+                    }
+                    if (typeof d.team === "string" && d.team.trim()) {
+                        teamSet.add(d.team.trim());
+                    }
+                }
+            }
+            try {
+                const res = await this.client.save(args.content, {
+                    projects: projectSet.size > 0 ? Array.from(projectSet) : undefined,
+                    teams: teamSet.size > 0 ? Array.from(teamSet) : undefined,
+                });
+                const projTag = res.projects.join(",");
+                const teamTag = res.teams.length ? ` · teams=${res.teams.join(",")}` : "";
+                const reusedTag = res.reused ? " (merged into existing chunk)" : "";
+                return {
+                    content: [
+                        {
+                            type: "text" as const,
+                            text: `Saved memory ${res.id} (projects=${projTag}${teamTag})${reusedTag}`,
+                        },
+                    ],
+                };
+            } catch (err) {
+                const msg = err instanceof Error ? err.message : String(err);
+                return {
+                    content: [{ type: "text" as const, text: `Error saving memory: ${msg}` }],
+                    isError: true,
+                };
+            }
         }
         if (action === "forget") {
             const res = await this.client.forget(args.content, {

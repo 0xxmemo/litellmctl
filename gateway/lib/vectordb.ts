@@ -456,17 +456,23 @@ const METADATA_KEY_RE = /^[a-zA-Z_][a-zA-Z0-9_]{0,63}$/;
 
 export type ParsedFilter =
   | { kind: "column"; column: string; values: string[] }
-  | { kind: "metadata"; jsonKey: string; values: string[] };
+  | { kind: "metadata"; jsonKey: string; values: string[] }
+  // `metadata.<key>[] in [a,b,...]` — chunk matches if the JSON array at
+  // metadata.<key> contains ANY of the given values. Compiles to an EXISTS
+  // over json_each(...).
+  | { kind: "metadata-array"; jsonKey: string; values: string[] };
 
 export function parseFilterExpr(expr: string): ParsedFilter | null {
   if (!expr || !expr.trim()) return null;
-  const match = expr.match(/^\s*([\w.]+)\s+in\s+\[(.*)\]\s*$/i);
+  const match = expr.match(/^\s*([\w.]+(?:\[\])?)\s+in\s+\[(.*)\]\s*$/i);
   if (!match) {
     throw new Error(
-      `Unsupported filter expression. Only '<field> in [...]' is supported: ${expr}`,
+      `Unsupported filter expression. Only '<field> in [...]' or '<field>[] in [...]' is supported: ${expr}`,
     );
   }
-  const field = match[1];
+  const fieldRaw = match[1];
+  const isArray = fieldRaw.endsWith("[]");
+  const field = isArray ? fieldRaw.slice(0, -2) : fieldRaw;
   const body = match[2];
 
   const values: string[] = [];
@@ -481,13 +487,50 @@ export function parseFilterExpr(expr: string): ParsedFilter | null {
     if (!METADATA_KEY_RE.test(jsonKey)) {
       throw new Error(`Unsupported metadata key: ${jsonKey}`);
     }
-    return { kind: "metadata", jsonKey, values };
+    return {
+      kind: isArray ? "metadata-array" : "metadata",
+      jsonKey,
+      values,
+    };
   }
 
+  if (isArray) {
+    throw new Error(
+      `Array containment '[]' is only supported on metadata.* fields: ${expr}`,
+    );
+  }
   if (!ALLOWED_FILTER_FIELDS.has(field)) {
     throw new Error(`Unsupported filter field: ${field}`);
   }
   return { kind: "column", column: FIELD_TO_COLUMN[field], values };
+}
+
+/** SQL fragment + binds for a parsed filter applied to an aliased table. */
+function compileFilterSql(
+  parsed: ParsedFilter,
+  tableAlias: string,
+): { sql: string; binds: string[] } {
+  const phs = parsed.values.map(() => "?").join(",");
+  const md = `${tableAlias}.metadata`;
+  if (parsed.kind === "metadata") {
+    return {
+      sql: `json_extract(${md}, '$.${parsed.jsonKey}') IN (${phs})`,
+      binds: parsed.values,
+    };
+  }
+  if (parsed.kind === "metadata-array") {
+    return {
+      sql: `EXISTS (
+              SELECT 1 FROM json_each(json_extract(${md}, '$.${parsed.jsonKey}'))
+              WHERE value IN (${phs})
+            )`,
+      binds: parsed.values,
+    };
+  }
+  return {
+    sql: `${tableAlias}.${parsed.column} IN (${phs})`,
+    binds: parsed.values,
+  };
 }
 
 // ── Search ──────────────────────────────────────────────────────────────────
@@ -562,13 +605,9 @@ export function searchVectors(
   let sql = `SELECT * FROM plugin_chunks WHERE rowid IN (${placeholders}) AND collection = ?`;
   const args: (string | number)[] = [...rowIds, collection];
   if (parsed && parsed.values.length > 0) {
-    const valPhs = parsed.values.map(() => "?").join(",");
-    if (parsed.kind === "metadata") {
-      sql += ` AND json_extract(metadata, '$.${parsed.jsonKey}') IN (${valPhs})`;
-    } else {
-      sql += ` AND ${parsed.column} IN (${valPhs})`;
-    }
-    args.push(...parsed.values);
+    const f = compileFilterSql(parsed, "plugin_chunks");
+    sql += ` AND ${f.sql}`;
+    args.push(...f.binds);
   } else if (parsed && parsed.values.length === 0) {
     return [];
   }
@@ -716,13 +755,9 @@ export function searchHybrid(
     let sql = `SELECT * FROM plugin_chunks WHERE rowid IN (${placeholders}) AND collection = ?`;
     const args: (string | number)[] = [...rowIds, collection];
     if (parsed && parsed.values.length > 0) {
-      const valPhs = parsed.values.map(() => "?").join(",");
-      if (parsed.kind === "metadata") {
-        sql += ` AND json_extract(metadata, '$.${parsed.jsonKey}') IN (${valPhs})`;
-      } else {
-        sql += ` AND ${parsed.column} IN (${valPhs})`;
-      }
-      args.push(...parsed.values);
+      const f = compileFilterSql(parsed, "plugin_chunks");
+      sql += ` AND ${f.sql}`;
+      args.push(...f.binds);
     } else if (parsed && parsed.values.length === 0) {
       ftsResults = [];
     }
@@ -880,14 +915,11 @@ export function queryByFilter(
     }
   }
 
-  const placeholders = parsed.values.map(() => "?").join(",");
-  const filterSql = parsed.kind === "metadata"
-    ? `json_extract(pc.metadata, '$.${parsed.jsonKey}') IN (${placeholders})`
-    : `pc.${parsed.column} IN (${placeholders})`;
+  const f = compileFilterSql(parsed, "pc");
   let sql = `SELECT pc.* FROM plugin_chunks pc
               WHERE pc.collection = ?
-                AND ${filterSql}`;
-  const args: (string | number)[] = [collection, ...parsed.values];
+                AND ${f.sql}`;
+  const args: (string | number)[] = [collection, ...f.binds];
   if (refIds !== null) {
     const refPhs = refIds.map(() => "?").join(",");
     sql += ` AND EXISTS (

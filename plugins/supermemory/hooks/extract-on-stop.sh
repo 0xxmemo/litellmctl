@@ -22,14 +22,17 @@
 #    last extraction for this session. Stop fires often; we don't.
 # 4. Pulls the last N messages from the transcript JSONL and the top
 #    existing memories for this project.
-# 5. Asks the extractor LLM to emit BOTH save and forget candidates:
-#       - save: items the user has clearly concluded / declared, with the
-#               dialogue providing confirmation (their own statement, or
-#               assent to the assistant's proposal). Speculation, rejected
-#               ideas, and pure task descriptions are excluded.
+# 5. Pre-fetches the user's team list (/whoami) and known project slugs
+#    (/projects) so the extractor LLM can ROUTE each save to one or more
+#    destinations.
+# 6. Asks the extractor LLM to emit BOTH save and forget candidates:
+#       - save: {content, destinations: [{project?, team?}, ...]} — the
+#               dialogue confirmed the item AND the model picked which
+#               bucket(s) it belongs to (personal project, default,
+#               and/or a team the user is in).
 #       - forget: existing memories the latest exchange contradicts or
 #                 supersedes. Lets memory evolve as the user's stance does.
-# 6. Applies save+forget against the gateway, scoped to the derived project.
+# 7. Applies save+forget against the gateway, fanning out per destination.
 #
 # Wire: hooks.Stop, identified by path substring
 #   `supermemory/hooks/extract-on-stop.sh`
@@ -261,6 +264,43 @@ def post(path: str, payload, timeout: float):
         return json.loads(resp.read())
 
 
+def get(path: str, timeout: float):
+    r = urllib.request.Request(
+        gateway.rstrip("/") + path,
+        headers={"Authorization": f"Bearer {api_key}"},
+        method="GET",
+    )
+    with urllib.request.urlopen(r, timeout=timeout) as resp:
+        return json.loads(resp.read())
+
+
+# ── Routing context: team membership + known project slugs. The router LLM ─
+# uses these to decide where each save lands. Failures are non-fatal — we
+# fall back to project-only routing scoped to the cwd-derived slug.
+teams_for_user = []  # list of {"id","name"} dicts
+try:
+    who = get("/api/plugins/supermemory/whoami", timeout=3.0)
+    raw_teams = who.get("teams") if isinstance(who, dict) else None
+    if isinstance(raw_teams, list):
+        for t in raw_teams:
+            if isinstance(t, dict) and t.get("id"):
+                teams_for_user.append({
+                    "id": str(t["id"]),
+                    "name": str(t.get("name") or t["id"]),
+                })
+except Exception:
+    pass
+
+known_projects = []
+try:
+    pdata = get("/api/plugins/supermemory/projects", timeout=3.0)
+    raw_projects = pdata.get("projects") if isinstance(pdata, dict) else None
+    if isinstance(raw_projects, list):
+        known_projects = [str(p) for p in raw_projects if isinstance(p, str) and p]
+except Exception:
+    pass
+
+
 # ── Pull existing memories for this project so the LLM can detect ─────────
 # contradictions (forget candidates) and skip duplicates more accurately. ─
 existing = []
@@ -291,13 +331,37 @@ transcript_block = "\n\n".join(
     f"[{t['role']}]\n{t['text']}" for t in turns
 )
 
+teams_block = (
+    "\n".join(f"- id={t['id']}  name={t['name']}" for t in teams_for_user)
+    if teams_for_user else "(none — user is not in any team; do NOT emit team destinations)"
+)
+
+# Surface up to 30 known project slugs so the router prefers an existing
+# bucket over inventing a near-duplicate. The current cwd project is always
+# listed first.
+def _format_projects():
+    seen = set()
+    out = []
+    for slug in [project, "default"] + known_projects:
+        if slug and slug not in seen:
+            seen.add(slug)
+            out.append(slug)
+        if len(out) >= 30:
+            break
+    return out
+
+
+known_block = ", ".join(_format_projects())
+
 SYSTEM = (
     "You curate a long-term memory store for a single user across Claude Code "
-    "sessions. You receive (a) the most recent turns of one conversation and "
-    "(b) the existing memories already saved for the user's CURRENT project. "
-    "Your job is to decide what to SAVE and what to FORGET so the store stays "
-    "accurate and current.\n"
+    "sessions. You receive (a) the most recent turns of one conversation, "
+    "(b) the existing memories already saved for the user's CURRENT project, "
+    "and (c) the user's team memberships and known project slugs. "
+    "Your job is to decide what to SAVE, where to ROUTE each save, and what "
+    "to FORGET so the store stays accurate and current.\n"
     "\n"
+    "── WHAT TO SAVE ──────────────────────────────────────────────────────\n"
     "Only emit a SAVE when the dialogue itself confirms the user has CONCLUDED "
     "the item — not merely brainstormed it. A safe save looks like:\n"
     "  • The user states a preference, rule, fact, or constraint in their own "
@@ -314,6 +378,33 @@ SYSTEM = (
     "  • Code patterns, architecture, file paths — derivable from the repo.\n"
     "  • Greetings, thanks, meta-questions about the assistant.\n"
     "\n"
+    "── WHERE TO ROUTE ────────────────────────────────────────────────────\n"
+    "Each save carries a `destinations` array. Each entry picks ONE bucket:\n"
+    "  {\"project\": \"<slug>\"}      — write to a personal project bucket.\n"
+    "  {\"team\": \"<team-id>\"}      — write to a team's shared bucket so "
+    "every member can recall it.\n"
+    "  {\"project\": \"<slug>\", \"team\": \"<team-id>\"}  — both: tagged "
+    "to the team in that project slug.\n"
+    "Routing rules:\n"
+    "  • Personal preferences, working style, facts about the user → "
+    "`{\"project\": \"default\"}`.\n"
+    "  • Project-specific facts (this codebase's deadlines, stakeholders, "
+    "gotchas, conventions specific to this repo) → "
+    "`{\"project\": \"<current-project>\"}`.\n"
+    "  • Team-shared knowledge that any teammate would benefit from — shared "
+    "infra, runbooks, on-call info, cross-cutting team conventions, vendor "
+    "decisions, ops links — → `{\"team\": \"<team-id>\"}`. ONLY use a team "
+    "id from the team list provided. NEVER invent ids.\n"
+    "  • Cross-cutting facts (relevant both personally AND to a team) → emit "
+    "MULTIPLE destinations in the array, one per bucket.\n"
+    "  • Prefer an EXISTING project slug from the known list over a new one.\n"
+    "  • If the user is in NO teams, never emit a team destination.\n"
+    "  • If unsure, fall back to a single `{\"project\": "
+    "\"<current-project>\"}` destination.\n"
+    "If you omit `destinations`, the save defaults to "
+    "`[{\"project\": \"<current-project>\"}]`.\n"
+    "\n"
+    "── WHAT TO FORGET ────────────────────────────────────────────────────\n"
     "Emit a FORGET for any existing memory the latest exchange CONTRADICTS, "
     "SUPERSEDES, or invalidates (e.g. user changed stack, switched tooling, "
     "reversed a preference, ended a project). Use the existing memory's exact "
@@ -321,17 +412,31 @@ SYSTEM = (
     "emit forget(old) AND save(new). Do NOT forget memories that are merely "
     "off-topic for the current turn.\n"
     "\n"
+    "── PHRASING ──────────────────────────────────────────────────────────\n"
     "Phrase saves in third person about the user (\"User prefers …\", \"User's "
     "team uses …\") so they read sensibly in isolation in a future session. "
     "Include the *why* if the dialogue gave one.\n"
     "\n"
-    "Return STRICT JSON: "
-    "{\"save\":[{\"content\":\"…\"}, …], \"forget\":[{\"content\":\"…\"}, …]}. "
-    "Either array may be empty. No prose, no markdown fences."
+    "── OUTPUT ────────────────────────────────────────────────────────────\n"
+    "Return STRICT JSON of the form:\n"
+    "{\n"
+    "  \"save\": [\n"
+    "    {\"content\": \"…\", \"destinations\": [{\"project\": \"default\"}, "
+    "{\"team\": \"<team-id>\"}]},\n"
+    "    …\n"
+    "  ],\n"
+    "  \"forget\": [{\"content\": \"…\"}, …]\n"
+    "}\n"
+    "Either array may be empty. `destinations` is optional per item. "
+    "No prose, no markdown fences."
 )
 
 USER_BLOCK = (
-    f"PROJECT: {project}\n"
+    f"CURRENT PROJECT: {project}\n"
+    f"KNOWN PROJECTS (prefer these slugs): {known_block}\n"
+    f"\n"
+    f"USER'S TEAMS (use only these team ids when routing to a team):\n"
+    f"{teams_block}\n"
     f"\n"
     f"EXISTING MEMORIES FOR THIS PROJECT:\n{existing_block}\n"
     f"\n"
@@ -428,17 +533,62 @@ for fm in forget_items:
                 pass
         errors += 1
 
-# ── Then apply saves with semantic dedupe ─────────────────────────────────
+# Set of team ids the user actually belongs to — defensive guard against
+# the LLM hallucinating an id. Hallucinated ids are dropped; the project
+# legs of the destinations are still honored so the memory isn't lost.
+known_team_ids = {t["id"] for t in teams_for_user}
+
+
+def _collapse_destinations(raw, fallback_project):
+    """Reduce the LLM's destinations array to (projects[], teams[]) — one
+    save call covers every destination. Bogus team ids are filtered. If the
+    LLM gave us nothing usable, default to a single-project fallback."""
+    projects = []
+    teams = []
+    pseen = set()
+    tseen = set()
+    if isinstance(raw, list):
+        for d in raw:
+            if not isinstance(d, dict):
+                continue
+            proj = d.get("project")
+            team = d.get("team")
+            if isinstance(proj, str):
+                slug = proj.strip().lower()
+                if slug and slug not in pseen:
+                    pseen.add(slug)
+                    projects.append(slug)
+            if isinstance(team, str):
+                tid = team.strip()
+                if tid and tid in known_team_ids and tid not in tseen:
+                    tseen.add(tid)
+                    teams.append(tid)
+    if not projects:
+        projects.append(fallback_project)
+    return projects, teams
+
+
+# ── Then apply saves with semantic dedupe — one call per memory ───────────
 for mem in save_items:
     if not isinstance(mem, dict):
         continue
     content = (mem.get("content") or "").strip()
     if not content or len(content) < 12 or len(content) > 4000:
         continue
+
+    projects_for_mem, teams_for_mem = _collapse_destinations(
+        mem.get("destinations"), project,
+    )
+
+    # Semantic dedupe across the union of destination projects: if a
+    # near-duplicate already lives in any of them (visible via overlay
+    # union — own + team), don't save again. The chunk would just be
+    # merged anyway, but skipping spares an extra round-trip on the
+    # gateway.
     try:
         sdata = post(
             "/api/plugins/supermemory/search",
-            {"query": content, "limit": 3, "project": project},
+            {"query": content, "limit": 3, "projects": projects_for_mem},
             timeout=3.0,
         )
         if any(
@@ -451,13 +601,18 @@ for mem in save_items:
     except Exception:
         pass
 
+    body_save = {"content": content, "projects": projects_for_mem}
+    if teams_for_mem:
+        body_save["teams"] = teams_for_mem
     try:
         post(
             "/api/plugins/supermemory/save",
-            {"content": content, "project": project},
+            body_save,
             timeout=5.0,
         )
-        saved.append(content)
+        proj_tag = ",".join(projects_for_mem)
+        team_tag = ("|teams=" + ",".join(teams_for_mem)) if teams_for_mem else ""
+        saved.append((proj_tag + team_tag, content))
     except Exception:
         errors += 1
 
@@ -471,8 +626,8 @@ if saved or forgot or skipped_dup or errors:
     try:
         with open(log_file, "a") as f:
             ts = time.strftime("%Y-%m-%dT%H:%M:%S")
-            for c in saved:
-                f.write(f"{ts} SAVE   [{project}] {c}\n")
+            for tag, c in saved:
+                f.write(f"{ts} SAVE   [{tag}] {c}\n")
             for c in forgot:
                 f.write(f"{ts} FORGET [{project}] {c}\n")
             if skipped_dup:

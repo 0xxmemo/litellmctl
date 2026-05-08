@@ -12,21 +12,6 @@ async function httpProbe(url: string, timeoutMs = 1000): Promise<boolean> {
   }
 }
 
-/** TCP port probe via net module, return true if connection succeeds. */
-async function tcpProbe(host: string, port: number, timeoutMs = 1000): Promise<boolean> {
-  try {
-    const net = require("net");
-    const socket = net.createConnection(port, host);
-    return await new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => { socket.destroy(); resolve(false); }, timeoutMs);
-      socket.on("connect", () => { clearTimeout(timer); socket.end(); resolve(true); });
-      socket.on("error", () => { clearTimeout(timer); resolve(false); });
-    });
-  } catch {
-    return false;
-  }
-}
-
 /** SQLite availability probe. */
 function dbProbe(): boolean {
   return dbHealthy();
