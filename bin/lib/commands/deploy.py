@@ -294,25 +294,20 @@ def _aws_deploy() -> None:
     # One call to the GitHub API — reused for every "is this already set?" check.
     existing_secrets = _gh_secret_names(repo)
 
-    # ── Optional: ProtonMail SMTP for OTP delivery ───────────────────────
-    # If all four Proton secrets are already set, default the confirm to
-    # "no" so re-runs don't ask for the creds again.
-    proton_keys = (
-        "GATEWAY_PROTON_EMAIL",
-        "GATEWAY_PROTON_USERNAME",
-        "GATEWAY_PROTON_PASSWORD",
-        "GATEWAY_PROTON_2FA_SECRET",
-    )
-    proton_all_set = all(k in existing_secrets for k in proton_keys)
-    proton_email = proton_user = proton_pass = proton_totp = ""
+    # ── Optional: Resend API key for OTP delivery ───────────────────────
+    # Resend (https://resend.com) replaces the previous ProtonMail/hydroxide
+    # path — hydroxide can't solve ProtonMail's CAPTCHA challenge for headless
+    # logins. Resend's free tier covers small dashboards (100/day).
+    resend_set = "RESEND_API_KEY" in existing_secrets
+    resend_api_key = ""
 
-    proton_prompt = (
-        "Update ProtonMail SMTP creds? (all 4 secrets already set — say no to keep them)"
-        if proton_all_set else
-        "Wire ProtonMail SMTP for OTP emails? (say no to read OTPs from instance logs instead)"
+    resend_prompt = (
+        "Update RESEND_API_KEY? (already set — say no to keep it)"
+        if resend_set else
+        "Wire Resend for OTP emails? (say no to read OTPs from instance logs instead)"
     )
-    if confirm(proton_prompt, default=False):
-        # Try to seed defaults from the local machine's .env.
+    if confirm(resend_prompt, default=False):
+        # Try to seed default from the local machine's .env.
         env_file = PROJECT_DIR / ".env"
         seeded: dict[str, str] = {}
         if env_file.exists():
@@ -320,10 +315,10 @@ def _aws_deploy() -> None:
                 if "=" in line and not line.strip().startswith("#"):
                     k, _, v = line.partition("=")
                     seeded[k.strip()] = v.strip()
-        proton_email = ask("GATEWAY_PROTON_EMAIL", default=seeded.get("GATEWAY_PROTON_EMAIL", ""))
-        proton_user  = ask("GATEWAY_PROTON_USERNAME", default=seeded.get("GATEWAY_PROTON_USERNAME", proton_email.split("@")[0] if "@" in proton_email else ""))
-        proton_pass  = ask("GATEWAY_PROTON_PASSWORD (account password)", default=seeded.get("GATEWAY_PROTON_PASSWORD", ""))
-        proton_totp  = ask("GATEWAY_PROTON_2FA_SECRET (TOTP seed, blank if no 2FA)", default=seeded.get("GATEWAY_PROTON_2FA_SECRET", ""))
+        resend_api_key = ask(
+            "RESEND_API_KEY (https://resend.com/api-keys)",
+            default=seeded.get("RESEND_API_KEY", ""),
+        )
 
     # Decide whether to rotate the master key — always preserve if set.
     reuse_key = "LITELLM_MASTER_KEY" in existing_secrets
@@ -345,6 +340,12 @@ def _aws_deploy() -> None:
     console.print(
         f"  [dim]reuse master key [/]{'yes' if reuse_key else 'no (new key will be set)'}"
     )
+    if resend_api_key:
+        console.print(f"  [dim]email (Resend)   [/]new RESEND_API_KEY will be written")
+    elif resend_set:
+        console.print(f"  [dim]email (Resend)   [/]existing RESEND_API_KEY left in place")
+    else:
+        console.print(f"  [dim]email (Resend)   [/]not configured — OTPs will print to instance logs")
     if not confirm("Continue?", default=True):
         error("aborted")
         sys.exit(1)
@@ -468,18 +469,12 @@ def _aws_deploy() -> None:
         set_secret("LITELLM_MASTER_KEY", master_key)
         console.print("  [dim]   master key saved only to GitHub secrets — store it yourself if you want a copy.[/]")
 
-    # Proton: only write what the user explicitly provided. Empty string
-    # would blow away an existing secret — leave those alone.
-    for name, value in [
-        ("GATEWAY_PROTON_EMAIL",      proton_email),
-        ("GATEWAY_PROTON_USERNAME",   proton_user),
-        ("GATEWAY_PROTON_PASSWORD",   proton_pass),
-        ("GATEWAY_PROTON_2FA_SECRET", proton_totp),
-    ]:
-        if value:
-            set_secret(name, value)
-        elif name in existing_secrets:
-            skip_if_present(name)
+    # Resend: only write what the user explicitly provided. Empty string
+    # would blow away an existing secret — leave it alone.
+    if resend_api_key:
+        set_secret("RESEND_API_KEY", resend_api_key)
+    elif "RESEND_API_KEY" in existing_secrets:
+        skip_if_present("RESEND_API_KEY")
 
     # ── Trigger workflow ─────────────────────────────────────────────────
     # `workflow_dispatch` can target any branch that has the workflow file

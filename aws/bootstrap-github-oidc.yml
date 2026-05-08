@@ -104,6 +104,5 @@ Outputs:
         GITHUB_REPO          = ${GithubRepo}
         LITELLM_MASTER_KEY   = sk-$(openssl rand -hex 24)   # any long secret
         GATEWAY_ADMIN_EMAILS = you@example.com,...
-      Optional ProtonMail SMTP secrets for OTP delivery:
-        GATEWAY_PROTON_EMAIL, GATEWAY_PROTON_USERNAME,
-        GATEWAY_PROTON_PASSWORD, GATEWAY_PROTON_2FA_SECRET
+      Optional email-delivery secret for OTPs:
+        RESEND_API_KEY  = re_xxx  (https://resend.com — free tier covers small dashboards)
