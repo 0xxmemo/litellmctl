@@ -14,7 +14,12 @@
 #   LLM_GATEWAY_API_KEY  required
 #   SUPERMEMORY_RECALL_MIN_SIMILARITY  optional, default 0.50
 #   SUPERMEMORY_RECALL_LIMIT           optional, default 5
-#   SUPERMEMORY_RECALL_PROJECT         optional, default "default"
+#   SUPERMEMORY_RECALL_PROJECT         optional hard override; if unset the
+#                                      project slug is derived per-event from
+#                                      the prompt's cwd (git-root basename,
+#                                      slugified; falls back to cwd basename).
+#                                      Memories from "default" are also
+#                                      always searched as a global fallback.
 #   SUPERMEMORY_RECALL_MAX_PROMPT      optional, default 2000 chars (cap on
 #                                      the query we send to the gateway — the
 #                                      gateway's own hard cap is 1000 so we
@@ -28,7 +33,7 @@ fi
 
 MIN_SIM="${SUPERMEMORY_RECALL_MIN_SIMILARITY:-0.50}"
 RECALL_LIMIT="${SUPERMEMORY_RECALL_LIMIT:-5}"
-RECALL_PROJECT="${SUPERMEMORY_RECALL_PROJECT:-default}"
+RECALL_PROJECT="${SUPERMEMORY_RECALL_PROJECT:-}"
 MAX_PROMPT_CHARS="${SUPERMEMORY_RECALL_MAX_PROMPT:-2000}"
 
 # Read the event JSON (stdin). Everything below runs under python3 which parses
@@ -39,9 +44,9 @@ if ! command -v python3 >/dev/null 2>&1; then
 fi
 
 python3 - "$LLM_GATEWAY_URL" "$LLM_GATEWAY_API_KEY" "$MIN_SIM" "$RECALL_LIMIT" "$RECALL_PROJECT" "$MAX_PROMPT_CHARS" <<'PYEOF' 2>/dev/null || exit 0
-import json, sys, urllib.request, urllib.error
+import json, os, sys, re, subprocess, urllib.request, urllib.error
 
-gateway, api_key, min_sim_s, limit_s, project, max_chars_s = sys.argv[1:7]
+gateway, api_key, min_sim_s, limit_s, project_override, max_chars_s = sys.argv[1:7]
 
 try:
     min_sim = float(min_sim_s)
@@ -74,8 +79,48 @@ if prompt.startswith("!"):
 if len(prompt) > max_chars:
     prompt = prompt[:max_chars]
 
+
+def _slugify(s: str) -> str:
+    s = s.strip().lower()
+    s = re.sub(r"[^a-z0-9._-]+", "-", s)
+    s = re.sub(r"-+", "-", s)
+    s = s.strip("-._")[:64]
+    return s if (s and re.match(r"^[a-z0-9]", s)) else ""
+
+
+def _derive_project(cwd: str) -> str:
+    if cwd:
+        try:
+            out = subprocess.run(
+                ["git", "-C", cwd, "rev-parse", "--show-toplevel"],
+                capture_output=True, text=True, timeout=2.0,
+            )
+            if out.returncode == 0 and out.stdout.strip():
+                slug = _slugify(os.path.basename(out.stdout.strip()))
+                if slug:
+                    return slug
+        except Exception:
+            pass
+        slug = _slugify(os.path.basename(cwd.rstrip("/")))
+        if slug:
+            return slug
+    return "default"
+
+
+# Hard env override > derived from cwd > "default". Memories saved under
+# "default" are always included as a fallback so global facts about the
+# user surface even outside any project bucket.
+if project_override:
+    project = _slugify(project_override) or "default"
+else:
+    project = _derive_project(event.get("cwd") or os.getcwd())
+
+projects = [project]
+if project != "default":
+    projects.append("default")
+
 url = gateway.rstrip("/") + "/api/plugins/supermemory/search"
-body = json.dumps({"query": prompt, "limit": limit, "project": project}).encode()
+body = json.dumps({"query": prompt, "limit": limit, "projects": projects}).encode()
 req = urllib.request.Request(
     url,
     data=body,

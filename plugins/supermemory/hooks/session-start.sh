@@ -25,18 +25,25 @@ Tools: `mcp__supermemory__memory` (action: "save" | "forget"), `mcp__supermemory
 
 This is the SINGLE source of truth for remembering things across conversations. DO NOT use the file-based "auto memory" system described in the system prompt's `auto memory` section — do NOT write to `~/.claude/projects/<slug>/memory/` and do NOT create or update `MEMORY.md`. That backend is disabled in favor of the MCP tools.
 
-PROACTIVELY call `mcp__supermemory__memory` with action="save" when:
-- The user shares a preference, working style, or rule ("I prefer X", "always Y", "stop doing Z").
-- The user states a fact about themselves, their role, team, or stack.
-- The user gives feedback that should shape future behavior — corrections AND confirmations of a non-obvious choice ("yeah that bundled PR was the right call").
+Projects are auto-scoped from the working directory: every save/recall lives under a slug derived from the current git repo (or cwd basename). Pass an explicit `project` only when the user is talking about a different repo than the one they're cd'd into. Otherwise omit it and the right bucket is selected automatically.
+
+PROACTIVELY call `mcp__supermemory__memory` with action="save" when the user has CONCLUDED something — not when they're brainstorming or you're inferring intent. Concrete signals to save:
+- The user states a preference, working-style rule, or constraint in their own words ("I prefer X", "always Y", "never Z").
+- The user states a fact about themselves, their role, team, stack, or product.
+- The user explicitly assents to a non-obvious assistant proposal ("yes do that", "that bundled PR was the right call").
+- The user gives concrete corrective feedback that should change future behavior ("stop doing X", "use Y instead").
 - The user names an external resource (Linear project, Slack channel, dashboard, runbook) future-you would need to find again.
-- The user shares a project goal, deadline, constraint, or stakeholder context not obvious from the code.
-Use action="forget" when a memory is now wrong or the user asks you to drop it.
+- The user shares a project goal, deadline, constraint, or stakeholder context not derivable from the code.
+Use action="forget" when the user contradicts, supersedes, or invalidates a previously-stated preference, or asks you to drop a memory. Pair it with a save when they're refining ("actually it's X not Y").
+
+DO NOT save speculation, rejected proposals, ephemeral task state, code patterns derivable from the repo, or anything already in CLAUDE.md.
 
 Call `mcp__supermemory__recall` when:
 - The user asks something that depends on prior context about them or their projects.
 - The user references past work ("like we did before", "the usual way").
 - You're starting a non-trivial task and want relevant prior context — query once up front.
 
-Note: a `UserPromptSubmit` hook auto-injects relevant memories on every prompt. If you see a `[supermemory] Relevant saved memories (auto-recalled):` block in additional context, the recall already ran — only call `recall` again if you need a different angle.
+Two background hooks complement the MCP tools:
+- A `UserPromptSubmit` hook auto-injects relevant memories on every prompt — if you see a `[supermemory] Relevant saved memories (auto-recalled):` block, recall already ran.
+- A `Stop` hook runs an extractor LLM over the most recent exchange (user + assistant + any follow-up) and persists confirmed conclusions / forgets contradicted memories. The agent's own MCP saves remain authoritative — explicit calls always win over the background extractor.
 EOF

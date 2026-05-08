@@ -92,8 +92,9 @@ recall_cmd = plugin_src + "/hooks/recall-on-prompt.sh"
 recall_marker = "supermemory/hooks/recall-on-prompt.sh"
 session_cmd = plugin_src + "/hooks/session-start.sh"
 session_marker = "supermemory/hooks/session-start.sh"
-extract_cmd = plugin_src + "/hooks/extract-on-prompt.sh"
-extract_marker = "supermemory/hooks/extract-on-prompt.sh"
+extract_cmd = plugin_src + "/hooks/extract-on-stop.sh"
+extract_marker = "supermemory/hooks/extract-on-stop.sh"
+legacy_extract_marker = "supermemory/hooks/extract-on-prompt.sh"
 
 settings.setdefault("hooks", {})
 
@@ -111,6 +112,23 @@ def _replace_or_append(group_key, marker_substr, hook_obj, matcher=None):
         block["matcher"] = matcher
     group.append(block)
 
+
+def _strip(group_key, marker_substr):
+    """Drop any prior hook entry pointing at marker_substr — used to evict the
+    legacy UserPromptSubmit-based extractor when upgrading to the Stop-based one."""
+    group = settings.get("hooks", {}).get(group_key)
+    if not isinstance(group, list):
+        return
+    cleaned = []
+    for entry in group:
+        kept = [h for h in entry.get("hooks", []) if marker_substr not in (h.get("command") or "")]
+        if kept:
+            new_entry = dict(entry)
+            new_entry["hooks"] = kept
+            cleaned.append(new_entry)
+    settings["hooks"][group_key] = cleaned
+
+
 env_prefix = " ".join(f"{k}={json.dumps(v)}" for k, v in hook_env.items())
 _replace_or_append(
     "UserPromptSubmit", recall_marker,
@@ -121,25 +139,30 @@ _replace_or_append(
     "SessionStart", session_marker,
     {"type": "command", "command": session_cmd, "timeout": 3},
 )
-# UserPromptSubmit auto-extract — runs an LLM extractor in the background and
-# saves any qualifying memories. The hook itself returns immediately (the
-# detached child handles the LLM call), so a 3 s timeout is plenty.
+# Evict the older UserPromptSubmit-based extractor, then wire its replacement
+# under hooks.Stop. Stop fires once per turn — by then we can see the user's
+# statement, the assistant's response, and any follow-up — which is what we
+# need to distinguish a confirmed conclusion from a passing speculation.
+_strip("UserPromptSubmit", legacy_extract_marker)
 _replace_or_append(
-    "UserPromptSubmit", extract_marker,
-    {"type": "command", "command": f"env {env_prefix} {extract_cmd}", "timeout": 3},
+    "Stop", extract_marker,
+    {"type": "command", "command": f"env {env_prefix} {extract_cmd}", "timeout": 5},
 )
 
 with open(settings_file, "w") as f:
     json.dump(settings, f, indent=2)
 print("  Registered UserPromptSubmit auto-recall hook in settings.json")
 print("  Registered SessionStart guidance hook in settings.json")
-print("  Registered UserPromptSubmit auto-extract hook in settings.json")
+print("  Registered Stop conversation-grounded extractor in settings.json")
 PYEOF
 
 # --- Ensure hook scripts are executable ---
-for h in recall-on-prompt.sh session-start.sh extract-on-prompt.sh; do
+for h in recall-on-prompt.sh session-start.sh extract-on-stop.sh; do
     [ -f "${PLUGIN_SRC_DIR}/hooks/$h" ] && chmod +x "${PLUGIN_SRC_DIR}/hooks/$h"
 done
+
+# --- Sweep stale legacy hook script if upgrading from a prior install ---
+[ -f "${PLUGIN_SRC_DIR}/hooks/extract-on-prompt.sh" ] && rm -f "${PLUGIN_SRC_DIR}/hooks/extract-on-prompt.sh"
 
 # --- Hydrate plugin node_modules (one-time) ---
 if [ -f "${PLUGIN_SRC_DIR}/package.json" ] && [ ! -d "${PLUGIN_SRC_DIR}/node_modules" ]; then

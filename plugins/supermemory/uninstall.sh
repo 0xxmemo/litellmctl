@@ -52,7 +52,9 @@ def _strip(group_key, marker_substr):
     settings["hooks"][group_key] = new_group
 
 _strip("UserPromptSubmit", "supermemory/hooks/recall-on-prompt.sh")
+# Legacy UserPromptSubmit-based extractor (replaced by the Stop hook below).
 _strip("UserPromptSubmit", "supermemory/hooks/extract-on-prompt.sh")
+_strip("Stop", "supermemory/hooks/extract-on-stop.sh")
 _strip("SessionStart", "supermemory/hooks/session-start.sh")
 
 # Also strip legacy `_tag: "supermemory"` entries from previous install.sh versions
