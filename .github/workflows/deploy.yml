@@ -77,25 +77,94 @@ jobs:
               ;;
           esac
 
+      # Detect instance-type drift and snapshot the root volume BEFORE CFN
+      # runs. Changing InstanceType is a replacement-trigger property: CFN
+      # destroys the EC2::Instance resource and creates a new one with a
+      # fresh root volume. DeleteOnTermination=false keeps the old volume
+      # alive as an orphan, but the new instance boots empty — losing the
+      # gateway sqlite, .env, caddy certs, and anything else on disk.
+      #
+      # Workaround: snapshot the current root, pass the snapshot ID to CFN
+      # via RootSnapshotId, and the replacement instance boots with all
+      # data intact. We only do this when a replacement is actually
+      # imminent (instance type changing) — otherwise the snapshot would
+      # be wasted IO + storage cost.
+      - name: Pre-snapshot root if instance type is changing
+        id: presnap
+        run: |
+          INSTANCE_ID=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
+            echo "no existing instance — first deploy, no snapshot needed"
+            echo "snapshot_id=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          CURRENT_TYPE=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].InstanceType' --output text)
+          DESIRED_TYPE="${{ inputs.instance_type || 'c7g.medium' }}"
+
+          if [ "$CURRENT_TYPE" = "$DESIRED_TYPE" ]; then
+            echo "instance type unchanged ($CURRENT_TYPE) — no snapshot needed"
+            echo "snapshot_id=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "::warning::instance type changing from $CURRENT_TYPE to $DESIRED_TYPE — CFN will replace the instance. Snapshotting root volume so the new instance boots from your data."
+
+          ROOT_VOL=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].BlockDeviceMappings[?DeviceName==`/dev/xvda`].Ebs.VolumeId | [0]' \
+            --output text)
+          if [ -z "$ROOT_VOL" ] || [ "$ROOT_VOL" = "None" ]; then
+            echo "::error::could not resolve root volume on $INSTANCE_ID — refusing to proceed (instance would lose data)"
+            exit 1
+          fi
+
+          SNAP_ID=$(aws ec2 create-snapshot \
+            --volume-id "$ROOT_VOL" \
+            --description "auto-snapshot before instance-type change ${CURRENT_TYPE} -> ${DESIRED_TYPE} (run ${{ github.run_id }})" \
+            --tag-specifications "ResourceType=snapshot,Tags=[{Key=Name,Value=${STACK_NAME}-pre-replace},{Key=auto,Value=instance-type-change},{Key=stack,Value=${STACK_NAME}},{Key=run,Value=${{ github.run_id }}}]" \
+            --query SnapshotId --output text)
+          echo "snapshot=$SNAP_ID for $ROOT_VOL"
+
+          # Wait for snapshot to complete before letting CFN replace the
+          # instance — pending snapshots from a deleted volume keep working,
+          # but it's safer to gate on completion before mutating state.
+          aws ec2 wait snapshot-completed --snapshot-ids "$SNAP_ID"
+          echo "snapshot_id=$SNAP_ID" >> "$GITHUB_OUTPUT"
+
       # Creates EC2 + EIP + EBS + SG + IAM on first run. Subsequent runs
       # are no-ops when no parameters changed (--no-fail-on-empty-changeset).
       - name: Deploy CloudFormation stack
         run: |
+          # If presnap detected an instance-type change, pass the snapshot
+          # so the replacement instance boots from the captured data.
+          # Otherwise leave RootSnapshotId blank to use the template default
+          # (no override → keeps any value already on the stack).
+          PARAMS=(
+            "AppName=${APP_NAME}"
+            "GithubOrg=${REPO_OWNER}"
+            "GithubRepo=${REPO_NAME}"
+            "GithubBranch=${{ github.ref_type == 'tag' && 'main' || github.ref_name }}"
+            "InstanceType=${{ inputs.instance_type || 'c7g.medium' }}"
+            "AppDomain=${{ secrets.APP_DOMAIN }}"
+            "AdminEmails=${{ secrets.GATEWAY_ADMIN_EMAILS }}"
+            "LitellmMasterKey=${{ secrets.LITELLM_MASTER_KEY }}"
+            "ResendApiKey=${{ secrets.RESEND_API_KEY }}"
+          )
+          SNAP="${{ steps.presnap.outputs.snapshot_id }}"
+          if [ -n "$SNAP" ]; then
+            echo "Passing RootSnapshotId=$SNAP to CFN — replacement instance will boot from this snapshot."
+            PARAMS+=("RootSnapshotId=$SNAP")
+          fi
           aws cloudformation deploy \
             --stack-name "${STACK_NAME}" \
             --template-file aws/cloudformation.yml \
             --capabilities CAPABILITY_NAMED_IAM \
             --no-fail-on-empty-changeset \
-            --parameter-overrides \
-              AppName="${APP_NAME}" \
-              GithubOrg="${REPO_OWNER}" \
-              GithubRepo="${REPO_NAME}" \
-              GithubBranch="${{ github.ref_type == 'tag' && 'main' || github.ref_name }}" \
-              InstanceType="${{ inputs.instance_type || 'c7g.medium' }}" \
-              AppDomain="${{ secrets.APP_DOMAIN }}" \
-              AdminEmails="${{ secrets.GATEWAY_ADMIN_EMAILS }}" \
-              LitellmMasterKey="${{ secrets.LITELLM_MASTER_KEY }}" \
-              ResendApiKey="${{ secrets.RESEND_API_KEY }}"
+            --parameter-overrides "${PARAMS[@]}"
 
       - name: On-failure stack diagnostics
         if: failure()
