@@ -49,6 +49,18 @@ def _load_gateway_env() -> None:
                 os.environ.setdefault(k.strip(), v.strip())
 
 
+def _strip_env_quotes(value: str) -> str:
+    """Drop surrounding double or single quotes from an .env value (matches Bun's loader)."""
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+        return value[1:-1]
+    return value
+
+
+def _xml_escape(s: str) -> str:
+    """Escape XML special characters so values can safely sit inside <string> tags."""
+    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _parse_root_env_for_plist() -> str:
     """Generate plist XML env block from root .env."""
     if not ENV_FILE.exists():
@@ -59,9 +71,10 @@ def _parse_root_env_for_plist() -> str:
         if not line or line.startswith("#") or "=" not in line:
             continue
         key, _, value = line.partition("=")
-        key, value = key.strip(), value.strip()
+        key = key.strip()
+        value = _strip_env_quotes(value.strip())
         if key:
-            block += f"    <key>{key}</key>\n    <string>{value}</string>\n"
+            block += f"    <key>{_xml_escape(key)}</key>\n    <string>{_xml_escape(value)}</string>\n"
     return block
 
 
@@ -85,7 +98,18 @@ def _parse_root_env_for_systemd() -> str:
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
-        lines += f"Environment={line}\n"
+        key, _, value = line.partition("=")
+        key = key.strip()
+        value = _strip_env_quotes(value.strip())
+        if not key:
+            continue
+        # Quote the value if it contains whitespace or shell specials so the
+        # systemd Environment= directive parses correctly.
+        if any(c in value for c in ' \t"\'$`\\'):
+            escaped = value.replace("\\", "\\\\").replace('"', '\\"')
+            lines += f'Environment="{key}={escaped}"\n'
+        else:
+            lines += f"Environment={key}={value}\n"
     return lines
 
 

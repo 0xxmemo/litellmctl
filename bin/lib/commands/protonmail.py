@@ -155,17 +155,28 @@ def hydroxide_auth_auto() -> bool:
     buf = b""
     sent_password = False
     sent_totp = False
-    deadline = time.time() + 30
+    timed_out = False
+    timeout_secs = 30
+    deadline = time.time() + timeout_secs
+    # Match common prompt variants hydroxide may use across versions
+    import re as _re
+    password_re = _re.compile(rb"(?i)password\s*:")
+    totp_re = _re.compile(rb"(?i)(2fa|totp|two[- ]?factor|verification\s+code)")
     try:
         while proc.poll() is None and time.time() < deadline:
             r, _, _ = select.select([master_fd], [], [], 0.2)
             if r:
-                chunk = os.read(master_fd, 1024)
+                try:
+                    chunk = os.read(master_fd, 1024)
+                except OSError:
+                    break
+                if not chunk:
+                    break
                 buf += chunk
-                if not sent_password and b"Password" in buf:
+                if not sent_password and password_re.search(buf):
                     os.write(master_fd, (password + "\n").encode())
                     sent_password = True
-                elif sent_password and not sent_totp and b"2FA" in buf:
+                elif sent_password and not sent_totp and totp_re.search(buf):
                     if totp_secret:
                         code = _totp_code(totp_secret)
                         info(f"Sending 2FA TOTP code: {code}")
@@ -175,26 +186,65 @@ def hydroxide_auth_auto() -> bool:
                         proc.terminate()
                         break
                     sent_totp = True
+        if proc.poll() is None:
+            timed_out = True
+            proc.terminate()
         proc.wait(timeout=5)
-    except Exception:
-        pass
+    except Exception as e:
+        warn(f"auth loop exception: {type(e).__name__}: {e}")
     finally:
         try:
             os.close(master_fd)
         except OSError:
             pass
 
+    output = buf.decode(errors="replace").strip()
+    exit_code = proc.returncode
+
     if _hydroxide_authenticated():
         info("hydroxide authenticated successfully")
         # Extract bridge password from output and save to .env
-        import re
-        m = re.search(rb"Bridge password: (.+)", buf)
+        m = _re.search(rb"Bridge password: (.+)", buf)
         if m:
             bridge_pass = m.group(1).decode().strip()
             _save_env_var("GATEWAY_PROTON_BRIDGE_PASS", bridge_pass)
             info(f"Bridge password saved to .env")
+        else:
+            warn("Authenticated but could not parse 'Bridge password:' from output:")
+            warn(output or "<no output>")
         return True
+
     warn("hydroxide authentication failed")
+    if timed_out:
+        warn(f"timed out after {timeout_secs}s waiting for prompts")
+    warn(f"exit code: {exit_code if exit_code is not None else 'still running'}")
+    warn(f"sent_password={sent_password} sent_totp={sent_totp} totp_secret_set={bool(totp_secret)}")
+    warn("--- hydroxide output ---")
+    warn(output or "<no output captured>")
+    warn("--- end output ---")
+
+    # ProtonMail returns [9001] when the account is flagged for CAPTCHA.
+    # Hydroxide cannot solve CAPTCHAs — the user must log in via the web to clear it.
+    if "9001" in output or "CAPTCHA" in output.upper():
+        console.print()
+        warn("ProtonMail is requiring a CAPTCHA challenge that hydroxide cannot solve.")
+        info("To clear it, log in to your ProtonMail account from a browser:")
+        console.print("\n      https://account.proton.me/login\n")
+        info("Once logged in, complete any CAPTCHA / security check, then re-run:")
+        console.print("\n      litellmctl auth protonmail\n")
+        # Surface any URLs hydroxide printed (e.g. abuse-appeal link)
+        urls = _re.findall(r"https?://\S+", output)
+        if urls:
+            info("URLs from hydroxide output:")
+            for url in dict.fromkeys(urls):  # dedupe, preserve order
+                console.print(f"      {url}")
+            console.print()
+        return False
+
+    if not sent_password:
+        warn("never saw a Password prompt — hydroxide may have errored before prompting")
+    elif not sent_totp and totp_secret:
+        warn("password sent but no 2FA prompt detected — wrong password, or 2FA prompt wording changed")
     return False
 
 

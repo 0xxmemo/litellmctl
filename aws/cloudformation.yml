@@ -92,29 +92,18 @@ Parameters:
       Master key for the LiteLLM proxy. Generate with `openssl rand -hex 24`
       and prefix with `sk-`. Leave blank to auto-generate on first boot.
 
-  # Optional ProtonMail SMTP credentials. If set, user-data seeds them into
-  # the gateway .env; an admin `litellmctl auth protonmail` on the instance
-  # then runs the non-interactive pty auth flow that saves the bridge
-  # password back to .env. If blank, the gateway logs OTP codes to stdout
-  # instead (readable via the admin web console).
-  ProtonEmail:
-    Type: String
-    Default: ""
-    Description: "Optional — ProtonMail address (From header)."
-  ProtonUsername:
-    Type: String
-    Default: ""
-    Description: "Optional — ProtonMail username (SMTP auth)."
-  ProtonPassword:
+  # Resend API key for OTP email delivery. If blank, the gateway logs OTP
+  # codes to stdout instead (readable via the admin web console). Free tier
+  # at https://resend.com covers small dashboards (100/day).
+  ResendApiKey:
     Type: String
     NoEcho: true
     Default: ""
-    Description: "Optional — ProtonMail password."
-  Proton2faSecret:
+    Description: "Optional — Resend API key (RESEND_API_KEY) for OTP emails."
+  ResendFrom:
     Type: String
-    NoEcho: true
-    Default: ""
-    Description: "Optional — ProtonMail TOTP secret if 2FA is enabled."
+    Default: "onboarding@resend.dev"
+    Description: "From header for outgoing OTP emails. Default works without domain verification."
 
   SshKeyName:
     Type: String
@@ -187,7 +176,7 @@ Resources:
             Version: "2012-10-17"
             Statement:
               # Read `/${AppName}/*` SecureString parameters — the deploy
-              # workflow writes secrets (master key, Proton creds, etc.)
+              # workflow writes secrets (master key, Resend API key, etc.)
               # there so they don't need to be embedded in CloudTrail-
               # logged SSM command bodies.
               - Effect: Allow
@@ -290,10 +279,8 @@ Resources:
           GATEWAY_ADMIN_EMAILS=${AdminEmails}
           GATEWAY_SESSION_SECRET=${!SESSION_SECRET}
           GATEWAY_CONSOLE_ENABLED=true
-          GATEWAY_PROTON_EMAIL=${ProtonEmail}
-          GATEWAY_PROTON_USERNAME=${ProtonUsername}
-          GATEWAY_PROTON_PASSWORD=${ProtonPassword}
-          GATEWAY_PROTON_2FA_SECRET=${Proton2faSecret}
+          RESEND_API_KEY=${ResendApiKey}
+          RESEND_FROM=${ResendFrom}
           APP_DOMAIN=${AppDomain}
           SWAP_SIZE_GB=${SwapSizeGb}
           CADDY_VERSION=${CaddyVersion}
@@ -304,7 +291,7 @@ Resources:
 
           # Hand off to install.sh --pipeline — same script used for
           # laptop/VPC installs. --pipeline adds the EC2 bundle (swap,
-          # caddy systemd, bun, claude, node-gyp, gateway + protonmail,
+          # caddy systemd, bun, claude, node-gyp, gateway,
           # detached embedding/transcription/searxng, service start,
           # fingerprint-based fast-exit on re-runs). Failures here don't
           # wreck the stack — re-run via SSM with `bash ~/.litellm/install.sh --pipeline`.

@@ -84,7 +84,9 @@ while [ $# -gt 0 ]; do
     --pipeline)
       WITH_SWAP=1; WITH_CADDY=1
       WITH_BUN=1; WITH_CLAUDE=1; WITH_NODE_GYP=1
-      WITH_GATEWAY=1; WITH_PROTONMAIL=1
+      WITH_GATEWAY=1
+      # ProtonMail/hydroxide is disabled by default — Resend (HTTP API) is now
+      # the email provider. Pass --with-protonmail explicitly to opt in.
       WITH_EMBEDDING=1; WITH_TRANSCRIPTION=1; WITH_SEARXNG=1; WITH_DOCKER=1
       START_SERVICES=1; USE_FINGERPRINT=1
       APP_USER="${APP_USER:-ec2-user}"
@@ -790,7 +792,9 @@ fi
 
 # ── Pipeline: start services ─────────────────────────────────────────────
 if [ "$START_SERVICES" = 1 ]; then
-  for svc in proxy gateway protonmail; do
+  SERVICES="proxy gateway"
+  [ "$WITH_PROTONMAIL" = 1 ] && SERVICES="$SERVICES protonmail"
+  for svc in $SERVICES; do
     as_user "cd '$INSTALL_DIR' && ./bin/litellmctl restart $svc" 2>/dev/null \
       || as_user "cd '$INSTALL_DIR' && ./bin/litellmctl start $svc" \
       || warn "could not start $svc (non-fatal)"

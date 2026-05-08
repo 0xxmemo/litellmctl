@@ -44,17 +44,14 @@ async function healthHandler() {
     || `http://localhost:${process.env.SEARXNG_PORT || "8888"}`;
   const embeddingUrl = process.env.LOCAL_EMBEDDING_API_BASE || "http://localhost:11434";
   const transcriptionUrl = process.env.LOCAL_TRANSCRIPTION_API_BASE || "http://localhost:10300/v1";
-  const protonHost = process.env.GATEWAY_PROTON_SMTP_HOST || "127.0.0.1";
-  const protonPort = parseInt(process.env.GATEWAY_PROTON_SMTP_PORT || "1025");
-
-  const [search, embedding, transcription, proton, image] = await Promise.all([
+  const [search, embedding, transcription, image] = await Promise.all([
     httpProbe(`${searxngUrl.replace(/\/$/, "")}/`),
     httpProbe(`${embeddingUrl.replace(/\/$/, "")}/api/tags`),
     httpProbe(`${transcriptionUrl.replace(/\/v1\/?$/, "").replace(/\/$/, "")}/health`),
-    tcpProbe(protonHost, protonPort),
     imageGenerationHealthy(),
   ]);
   const database = dbProbe();
+  const email = !!process.env.RESEND_API_KEY;
 
   return Response.json({
     status: "ok",
@@ -64,7 +61,7 @@ async function healthHandler() {
       embedding,
       transcription,
       image,
-      proton,
+      email,
       database,
       console: consoleEnabled(),
     },

@@ -95,10 +95,7 @@ jobs:
               AppDomain="${{ secrets.APP_DOMAIN }}" \
               AdminEmails="${{ secrets.GATEWAY_ADMIN_EMAILS }}" \
               LitellmMasterKey="${{ secrets.LITELLM_MASTER_KEY }}" \
-              ProtonEmail="${{ secrets.GATEWAY_PROTON_EMAIL }}" \
-              ProtonUsername="${{ secrets.GATEWAY_PROTON_USERNAME }}" \
-              ProtonPassword="${{ secrets.GATEWAY_PROTON_PASSWORD }}" \
-              Proton2faSecret="${{ secrets.GATEWAY_PROTON_2FA_SECRET }}"
+              ResendApiKey="${{ secrets.RESEND_API_KEY }}"
 
       - name: On-failure stack diagnostics
         if: failure()
@@ -136,10 +133,7 @@ jobs:
           }
           put LITELLM_MASTER_KEY        "${{ secrets.LITELLM_MASTER_KEY }}"
           put GATEWAY_ADMIN_EMAILS      "${{ secrets.GATEWAY_ADMIN_EMAILS }}"
-          put GATEWAY_PROTON_EMAIL      "${{ secrets.GATEWAY_PROTON_EMAIL }}"
-          put GATEWAY_PROTON_USERNAME   "${{ secrets.GATEWAY_PROTON_USERNAME }}"
-          put GATEWAY_PROTON_PASSWORD   "${{ secrets.GATEWAY_PROTON_PASSWORD }}"
-          put GATEWAY_PROTON_2FA_SECRET "${{ secrets.GATEWAY_PROTON_2FA_SECRET }}"
+          put RESEND_API_KEY            "${{ secrets.RESEND_API_KEY }}"
           put APP_DOMAIN                "${{ secrets.APP_DOMAIN }}"
 
       # In-place update. The instance already has the repo + venv + systemd
@@ -208,8 +202,7 @@ jobs:
           }
 
           for key in LITELLM_MASTER_KEY GATEWAY_ADMIN_EMAILS \\
-                     GATEWAY_PROTON_EMAIL GATEWAY_PROTON_USERNAME \\
-                     GATEWAY_PROTON_PASSWORD GATEWAY_PROTON_2FA_SECRET \\
+                     RESEND_API_KEY \\
                      APP_DOMAIN; do
             seed_if_absent "\$key" "\$(fetch_param \$key)"
           done
@@ -218,7 +211,7 @@ jobs:
             echo "GATEWAY_SESSION_SECRET=\$(head -c 48 /dev/urandom | base64 | tr -d '=+/' | head -c 48)" >> "\$ENV_FILE"
 
           # Idempotent install — --pipeline does the EC2 bootstrap bundle
-          # (swap, caddy, bun, claude, gateway, protonmail, detached
+          # (swap, caddy, bun, claude, gateway, detached
           # embedding/transcription/searxng, services). --fingerprint is
           # implicit: skips every step when HEAD + .env + this script are
           # unchanged and services healthy.

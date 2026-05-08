@@ -42,7 +42,7 @@ async function requestOtpHandler(req: Request) {
   const emailResult = await sendOTPCode(email, code);
   if (emailResult.warning) {
     return Response.json(
-      { error: "Email service not configured. Ask the admin to set up ProtonMail SMTP." },
+      { error: "Email service not configured. Ask the admin to set RESEND_API_KEY." },
       { status: 503 },
     );
   }

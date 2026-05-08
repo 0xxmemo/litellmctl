@@ -5,7 +5,8 @@ export interface HealthFeatures {
   search: boolean
   embedding: boolean
   transcription: boolean
-  proton: boolean
+  email: boolean
+  image: boolean
   database: boolean
   console: boolean
 }
