@@ -105,15 +105,16 @@ Parameters:
     Default: "onboarding@resend.dev"
     Description: "From header for outgoing OTP emails. Default works without domain verification."
 
-  SshKeyName:
+  Ec2InstanceConnectPrefixListId:
     Type: String
-    Default: ""
-    Description: (Optional) EC2 key-pair name. Leave blank — SSM Session Manager + the in-UI web console are the intended access paths.
-
-  AllowSshFromCidr:
-    Type: String
-    Default: "0.0.0.0/0"
-    Description: CIDR allowed to reach :22. Ignored if SshKeyName is blank.
+    Description: >
+      AWS-managed prefix list for EC2 Instance Connect in this region
+      (e.g. pl-0e4bcff02b13bef1e in us-east-1). Looked up at deploy time
+      by the workflow via `aws ec2 describe-managed-prefix-lists` filtering
+      on `com.amazonaws.<region>.ec2-instance-connect`. Port 22 is opened
+      only to this prefix list — never to the public internet — so the
+      console's "Connect" → "EC2 Instance Connect" tab works on a fresh
+      stack while leaving SSM Session Manager as the primary access path.
 
   LatestAmiId:
     Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
@@ -125,7 +126,6 @@ Parameters:
     Default: "2.8.4"
 
 Conditions:
-  HasSshKey: !Not [!Equals [!Ref SshKeyName, ""]]
   HasRootSnapshot: !Not [!Equals [!Ref RootSnapshotId, ""]]
 
 Resources:
@@ -148,15 +148,19 @@ Resources:
           ToPort: 14041
           CidrIp: 0.0.0.0/0
 
-  SgSshIngress:
+  # AL2023 ships with the `ec2-instance-connect` package preinstalled, so
+  # opening :22 to the regional EC2 Instance Connect prefix list is enough
+  # to make the console's "Connect" → "EC2 Instance Connect" tab work.
+  # Public :22 stays closed; SSM Session Manager remains the primary path.
+  SgSshFromInstanceConnect:
     Type: AWS::EC2::SecurityGroupIngress
-    Condition: HasSshKey
     Properties:
       GroupId: !Ref Sg
       IpProtocol: tcp
       FromPort: 22
       ToPort: 22
-      CidrIp: !Ref AllowSshFromCidr
+      SourcePrefixListId: !Ref Ec2InstanceConnectPrefixListId
+      Description: EC2 Instance Connect (regional managed prefix list)
 
   # ── IAM: instance profile for SSM Session Manager + Parameter Store ─────
   InstanceRole:
@@ -221,7 +225,6 @@ Resources:
       ImageId: !Ref LatestAmiId
       InstanceType: !Ref InstanceType
       IamInstanceProfile: !Ref InstanceProfile
-      KeyName: !If [HasSshKey, !Ref SshKeyName, !Ref "AWS::NoValue"]
       SecurityGroupIds: [!Ref Sg]
       # Single-volume layout. DeleteOnTermination=false keeps the volume
       # around as an orphan if CFN ever forces instance replacement

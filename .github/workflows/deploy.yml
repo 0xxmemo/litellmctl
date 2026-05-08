@@ -135,6 +135,62 @@ jobs:
           aws ec2 wait snapshot-completed --snapshot-ids "$SNAP_ID"
           echo "snapshot_id=$SNAP_ID" >> "$GITHUB_OUTPUT"
 
+      # The EC2 Instance Connect service publishes its source IPs as a
+      # regional AWS-managed prefix list. We resolve the ID at deploy time
+      # so a fresh stack opens :22 only to that prefix list — never to the
+      # public internet — and the console's Connect → "EC2 Instance
+      # Connect" tab works on first boot. SSM Session Manager is the
+      # primary access path and doesn't depend on this.
+      - name: Resolve EC2 Instance Connect prefix list
+        id: eic
+        run: |
+          PL_ID=$(aws ec2 describe-managed-prefix-lists \
+            --filters "Name=prefix-list-name,Values=com.amazonaws.${AWS_REGION}.ec2-instance-connect" \
+            --query 'PrefixLists[0].PrefixListId' --output text)
+          if [ -z "$PL_ID" ] || [ "$PL_ID" = "None" ]; then
+            echo "::error::no EC2 Instance Connect prefix list found in ${AWS_REGION} — cannot configure console SSH"
+            exit 1
+          fi
+          echo "prefix_list_id=$PL_ID" >> "$GITHUB_OUTPUT"
+          echo "resolved EC2 Instance Connect prefix list: $PL_ID"
+
+      # Migration guard: if a previous out-of-band fix already authorized
+      # :22 from the EIC prefix list directly on the SG, CFN's create of
+      # SgSshFromInstanceConnect will fail with InvalidPermission.Duplicate.
+      # Revoke any matching orphan rule so CFN can claim the rule cleanly.
+      # No-op on a fresh stack (no SG yet) and on a stack already in sync.
+      - name: Reconcile orphan :22 ingress rules
+        run: |
+          SG_ID=$(aws cloudformation describe-stack-resource \
+            --stack-name "${STACK_NAME}" \
+            --logical-resource-id Sg \
+            --query 'StackResourceDetail.PhysicalResourceId' \
+            --output text 2>/dev/null || echo "")
+          if [ -z "$SG_ID" ] || [ "$SG_ID" = "None" ]; then
+            echo "no existing SG — nothing to reconcile"
+            exit 0
+          fi
+
+          PL_ID="${{ steps.eic.outputs.prefix_list_id }}"
+
+          # Find SG rule IDs that match :22 + this prefix list AND are not
+          # already attached to a CloudFormation stack (i.e. orphans). Tags
+          # on SG rules created by CFN include `aws:cloudformation:stack-id`.
+          ORPHANS=$(aws ec2 describe-security-group-rules \
+            --filters "Name=group-id,Values=${SG_ID}" \
+            --query "SecurityGroupRules[?IsEgress==\`false\` && FromPort==\`22\` && ToPort==\`22\` && PrefixListId=='${PL_ID}' && !(Tags && length(Tags[?Key=='aws:cloudformation:stack-id']) > \`0\`)].SecurityGroupRuleId" \
+            --output text)
+
+          if [ -z "$ORPHANS" ]; then
+            echo "no orphan :22 EIC rules on ${SG_ID} — nothing to revoke"
+            exit 0
+          fi
+
+          echo "revoking orphan rules so CFN can claim them: $ORPHANS"
+          aws ec2 revoke-security-group-ingress \
+            --group-id "$SG_ID" \
+            --security-group-rule-ids $ORPHANS
+
       # Creates EC2 + EIP + EBS + SG + IAM on first run. Subsequent runs
       # are no-ops when no parameters changed (--no-fail-on-empty-changeset).
       - name: Deploy CloudFormation stack
@@ -153,6 +209,7 @@ jobs:
             "AdminEmails=${{ secrets.GATEWAY_ADMIN_EMAILS }}"
             "LitellmMasterKey=${{ secrets.LITELLM_MASTER_KEY }}"
             "ResendApiKey=${{ secrets.RESEND_API_KEY }}"
+            "Ec2InstanceConnectPrefixListId=${{ steps.eic.outputs.prefix_list_id }}"
           )
           SNAP="${{ steps.presnap.outputs.snapshot_id }}"
           if [ -n "$SNAP" ]; then
