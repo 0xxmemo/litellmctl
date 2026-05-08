@@ -83,29 +83,29 @@ function buildEndpoints(baseUrl: string) {
       method: "POST",
       path: "/v1/embeddings",
       description:
-        "Text embeddings — local Nomic Embed v2 MoE (Ollama), 512-d default",
+        "Text embeddings — AWS Bedrock Titan Embed v2 (Matryoshka), 1024-d default",
       requiresAuth: true,
-      defaultModel: "local/nomic-embed-text",
+      defaultModel: "bedrock/titan-embed-v2",
       allowedModes: ['embedding'],
       curlExample: `curl ${baseUrl}/v1/embeddings \\
   -H "Authorization: Bearer YOUR_API_KEY" \\
   -H "Content-Type: application/json" \\
   -d '{
-    "model": "local/nomic-embed-text",
+    "model": "bedrock/titan-embed-v2",
     "input": "The quick brown fox",
-    "dimensions": 768
+    "dimensions": 1024
   }'`,
       defaultBody: JSON.stringify(
         {
-          model: "local/nomic-embed-text",
+          model: "bedrock/titan-embed-v2",
           input: "The quick brown fox",
-          dimensions: 768,
+          dimensions: 1024,
         },
         null,
         2,
       ),
       bodyNote:
-        "Optional `dimensions` selects output width when the backend supports it. See Available Models for typical values; omit the key to use the deployment default.",
+        "Optional `dimensions` selects output width when the backend supports it. Titan v2 accepts 256, 512, or 1024 only. See Available Models for typical values; omit the key to use the deployment default.",
     },
     {
       method: "POST",
