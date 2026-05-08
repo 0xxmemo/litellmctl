@@ -145,6 +145,14 @@ async function fetchSupermemoryUsage(limit: number, project?: string): Promise<S
   return (await res.json()) as SupermemoryUsage
 }
 
+// Polling cadence shared by every plugin overview query: 3 s burst while a
+// long-running job (indexing, crawling) is in flight so progress feels live;
+// 30 s idle otherwise so the freshness indicator on the page stays honest
+// without hammering the gateway. `refetchIntervalInBackground` defaults to
+// false → polling pauses when the tab loses focus.
+const PLUGIN_IDLE_POLL_MS = 30_000
+const PLUGIN_ACTIVE_POLL_MS = 3_000
+
 export function useClaudeContextUsage(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: queryKeys.claudeContextUsage,
@@ -152,7 +160,9 @@ export function useClaudeContextUsage(options?: { enabled?: boolean }) {
     enabled: options?.enabled ?? true,
     refetchOnWindowFocus: false,
     refetchInterval: (query) =>
-      query.state.data?.indexing?.length ? 3000 : false,
+      query.state.data?.indexing?.length
+        ? PLUGIN_ACTIVE_POLL_MS
+        : PLUGIN_IDLE_POLL_MS,
   })
 }
 
@@ -301,7 +311,9 @@ export function useDocsContextUsage(options?: { enabled?: boolean }) {
     enabled: options?.enabled ?? true,
     refetchOnWindowFocus: false,
     refetchInterval: (query) =>
-      query.state.data?.indexing?.length ? 3000 : false,
+      query.state.data?.indexing?.length
+        ? PLUGIN_ACTIVE_POLL_MS
+        : PLUGIN_IDLE_POLL_MS,
   })
 }
 
@@ -407,7 +419,43 @@ export function useSupermemoryUsage(
     queryFn: () => fetchSupermemoryUsage(limit, project),
     enabled: options?.enabled ?? true,
     refetchOnWindowFocus: false,
+    // Supermemory has no long-running jobs to burst-poll for, but the user
+    // can save/forget memories from another tab — idle polling keeps the
+    // overview honest.
+    refetchInterval: PLUGIN_IDLE_POLL_MS,
   })
 }
 
 export type UseSupermemoryUsageReturn = ReturnType<typeof useSupermemoryUsage>
+
+async function forgetSupermemoryApi(ids: string[]): Promise<{ deleted: number }> {
+  if (ids.length === 0) return { deleted: 0 }
+  const res = await fetch('/api/plugins/supermemory/forget', {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  })
+  if (!res.ok) throw new Error(`HTTP ${res.status}`)
+  return (await res.json()) as { deleted: number }
+}
+
+export function useForgetSupermemoryMemories() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: forgetSupermemoryApi,
+    // The query key embeds (limit, project), so multiple variants may be in
+    // the cache. Invalidate every supermemoryUsage entry so any open view
+    // refetches after a delete.
+    onSuccess: () =>
+      qc.invalidateQueries({
+        predicate: (q) =>
+          Array.isArray(q.queryKey) &&
+          q.queryKey[0] === 'plugins' &&
+          q.queryKey[1] === 'supermemory' &&
+          q.queryKey[2] === 'usage',
+      }),
+  })
+}
+
+export type UseForgetSupermemoryMemoriesReturn = ReturnType<typeof useForgetSupermemoryMemories>

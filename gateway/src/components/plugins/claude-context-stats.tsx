@@ -33,6 +33,8 @@ import {
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { StatCard } from "@/components/stat-card";
 import { PrettyAmount } from "@/components/pretty-amount";
+import { PrettyDate } from "@/components/pretty-date";
+import { PluginFreshness } from "./plugin-freshness";
 import type {
   UseClaudeContextUsageReturn,
   UseRemoveClaudeContextCodebaseReturn,
@@ -52,17 +54,6 @@ interface Props {
   unhideCodebase: UseUnhideClaudeContextCodebaseReturn;
 }
 
-function formatRelative(timestamp: number): string {
-  const diff = Date.now() - timestamp;
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
-
 type StopTarget = { codebaseId: string; branch: string };
 type RemoveTarget = { codebaseId: string };
 type ClearTarget = { codebaseId: string; branch: string };
@@ -76,7 +67,7 @@ export function ClaudeContextStats({
   hideCodebase,
   unhideCodebase,
 }: Props) {
-  const { data, isLoading, error } = query;
+  const { data, isLoading, error, isFetching, dataUpdatedAt, refetch } = query;
   const [stopTarget, setStopTarget] = useState<StopTarget | null>(null);
   const [removeTarget, setRemoveTarget] = useState<RemoveTarget | null>(null);
   const [clearTarget, setClearTarget] = useState<ClearTarget | null>(null);
@@ -261,12 +252,19 @@ export function ClaudeContextStats({
           </div>
 
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Indexed Codebases</CardTitle>
-              <CardDescription>
-                Shared across every user of the same upstream repo. Branches are overlays — a file that
-                exists on multiple branches stores its chunks once.
-              </CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+              <div className="space-y-1.5">
+                <CardTitle className="text-base">Indexed Codebases</CardTitle>
+                <CardDescription>
+                  Shared across every user of the same upstream repo. Branches are overlays — a file that
+                  exists on multiple branches stores its chunks once.
+                </CardDescription>
+              </div>
+              <PluginFreshness
+                dataUpdatedAt={dataUpdatedAt}
+                isFetching={isFetching}
+                onRefresh={() => refetch()}
+              />
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
@@ -315,7 +313,11 @@ export function ClaudeContextStats({
                                 <span
                                   key={b.branch}
                                   className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 font-mono"
-                                  title={b.headCommit ? `HEAD ${b.headCommit.slice(0, 8)} · ${formatRelative(b.updatedAt)}` : formatRelative(b.updatedAt)}
+                                  title={
+                                    b.headCommit
+                                      ? `HEAD ${b.headCommit.slice(0, 8)} · ${new Date(b.updatedAt).toLocaleString()}`
+                                      : new Date(b.updatedAt).toLocaleString()
+                                  }
                                 >
                                   <GitBranch className="w-3 h-3 opacity-60" />
                                   {b.branch}
@@ -327,7 +329,13 @@ export function ClaudeContextStats({
                         <td className="py-2 pr-4">{c.files.toLocaleString()}</td>
                         <td className="py-2 pr-4">{c.chunks.toLocaleString()}</td>
                         <td className="py-2 pr-4 text-muted-foreground">{c.dimension}</td>
-                        <td className="py-2 pr-4 text-muted-foreground">{formatRelative(c.createdAt)}</td>
+                        <td className="py-2 pr-4 text-muted-foreground">
+                          <PrettyDate
+                            date={c.createdAt}
+                            format="relative"
+                            size="sm"
+                          />
+                        </td>
                         {isAdmin && (
                           <td className="py-2 pr-4 text-right">
                             {c.codebaseId && (

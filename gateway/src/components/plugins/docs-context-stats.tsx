@@ -33,6 +33,8 @@ import {
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { StatCard } from "@/components/stat-card";
 import { PrettyAmount } from "@/components/pretty-amount";
+import { PrettyDate } from "@/components/pretty-date";
+import { PluginFreshness } from "./plugin-freshness";
 import type {
   UseDocsContextUsageReturn,
   UseRemoveDocsContextSourceReturn,
@@ -52,17 +54,6 @@ interface Props {
   unhideSource: UseUnhideDocsContextSourceReturn;
 }
 
-function formatRelative(timestamp: number): string {
-  const diff = Date.now() - timestamp;
-  const mins = Math.floor(diff / 60_000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d ago`;
-}
-
 type StopTarget = { sourceId: string; ref: string };
 type RemoveTarget = { sourceId: string };
 type ClearTarget = { sourceId: string; ref: string };
@@ -76,7 +67,7 @@ export function DocsContextStats({
   hideSource,
   unhideSource,
 }: Props) {
-  const { data, isLoading, error } = query;
+  const { data, isLoading, error, isFetching, dataUpdatedAt, refetch } = query;
   const [stopTarget, setStopTarget] = useState<StopTarget | null>(null);
   const [removeTarget, setRemoveTarget] = useState<RemoveTarget | null>(null);
   const [clearTarget, setClearTarget] = useState<ClearTarget | null>(null);
@@ -261,13 +252,20 @@ export function DocsContextStats({
           </div>
 
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Indexed Docs</CardTitle>
-              <CardDescription>
-                Documentation sources crawled and embedded for semantic search. Re-mentioning a
-                base URL in chat re-checks the index — unchanged pages are kept, changed pages
-                re-embed.
-              </CardDescription>
+            <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
+              <div className="space-y-1.5">
+                <CardTitle className="text-base">Indexed Docs</CardTitle>
+                <CardDescription>
+                  Documentation sources crawled and embedded for semantic search. Re-mentioning a
+                  base URL in chat re-checks the index — unchanged pages are kept, changed pages
+                  re-embed.
+                </CardDescription>
+              </div>
+              <PluginFreshness
+                dataUpdatedAt={dataUpdatedAt}
+                isFetching={isFetching}
+                onRefresh={() => refetch()}
+              />
             </CardHeader>
             <CardContent>
               <div className="overflow-x-auto">
@@ -319,7 +317,13 @@ export function DocsContextStats({
                         </td>
                         <td className="py-2 pr-4">{s.pages.toLocaleString()}</td>
                         <td className="py-2 pr-4">{s.chunks.toLocaleString()}</td>
-                        <td className="py-2 pr-4 text-muted-foreground">{formatRelative(s.updatedAt)}</td>
+                        <td className="py-2 pr-4 text-muted-foreground">
+                          <PrettyDate
+                            date={s.updatedAt}
+                            format="relative"
+                            size="sm"
+                          />
+                        </td>
                         {isAdmin && (
                           <td className="py-2 pr-4 text-right">
                             <Popover>

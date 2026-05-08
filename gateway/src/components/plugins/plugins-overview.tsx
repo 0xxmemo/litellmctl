@@ -7,6 +7,7 @@ import { SupermemoryStats } from "./supermemory-stats";
 import {
   useClaudeContextUsage,
   useSupermemoryUsage,
+  useForgetSupermemoryMemories,
   useRemoveClaudeContextCodebase,
   useStopClaudeContextJob,
   useClearClaudeContextJob,
@@ -29,7 +30,11 @@ export function PluginsOverview({ enabled, isAdmin }: Props) {
   const [active, setActive] = useState<string>("claude-context");
   const claudeContextQuery = useClaudeContextUsage({ enabled });
   const docsContextQuery = useDocsContextUsage({ enabled });
-  const supermemoryQuery = useSupermemoryUsage(20, { enabled });
+  // Bump the limit so the project→time-bucket grouping has enough material
+  // to feel useful at a glance — 20 was thin once memories spread across
+  // multiple project buckets.
+  const supermemoryQuery = useSupermemoryUsage(200, { enabled });
+  const forgetSupermemoryMemories = useForgetSupermemoryMemories();
   const removeCodebase = useRemoveClaudeContextCodebase();
   const stopJob = useStopClaudeContextJob();
   const clearJob = useClearClaudeContextJob();
@@ -76,7 +81,10 @@ export function PluginsOverview({ enabled, isAdmin }: Props) {
       </TabsContent>
 
       <TabsContent value="supermemory" className="mt-4">
-        <SupermemoryStats query={supermemoryQuery} />
+        <SupermemoryStats
+          query={supermemoryQuery}
+          forgetMemories={forgetSupermemoryMemories}
+        />
       </TabsContent>
     </Tabs>
   );
