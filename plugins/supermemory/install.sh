@@ -92,6 +92,8 @@ recall_cmd = plugin_src + "/hooks/recall-on-prompt.sh"
 recall_marker = "supermemory/hooks/recall-on-prompt.sh"
 session_cmd = plugin_src + "/hooks/session-start.sh"
 session_marker = "supermemory/hooks/session-start.sh"
+extract_cmd = plugin_src + "/hooks/extract-on-prompt.sh"
+extract_marker = "supermemory/hooks/extract-on-prompt.sh"
 
 settings.setdefault("hooks", {})
 
@@ -119,15 +121,23 @@ _replace_or_append(
     "SessionStart", session_marker,
     {"type": "command", "command": session_cmd, "timeout": 3},
 )
+# UserPromptSubmit auto-extract — runs an LLM extractor in the background and
+# saves any qualifying memories. The hook itself returns immediately (the
+# detached child handles the LLM call), so a 3 s timeout is plenty.
+_replace_or_append(
+    "UserPromptSubmit", extract_marker,
+    {"type": "command", "command": f"env {env_prefix} {extract_cmd}", "timeout": 3},
+)
 
 with open(settings_file, "w") as f:
     json.dump(settings, f, indent=2)
 print("  Registered UserPromptSubmit auto-recall hook in settings.json")
 print("  Registered SessionStart guidance hook in settings.json")
+print("  Registered UserPromptSubmit auto-extract hook in settings.json")
 PYEOF
 
 # --- Ensure hook scripts are executable ---
-for h in recall-on-prompt.sh session-start.sh; do
+for h in recall-on-prompt.sh session-start.sh extract-on-prompt.sh; do
     [ -f "${PLUGIN_SRC_DIR}/hooks/$h" ] && chmod +x "${PLUGIN_SRC_DIR}/hooks/$h"
 done
 
