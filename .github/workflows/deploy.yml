@@ -171,6 +171,17 @@ jobs:
             exit 0
           fi
 
+          # Guard: PhysicalResourceId can be a CFN-internal placeholder
+          # (e.g. "<StackName>-Sg-<random>") when the SG resource is
+          # mid-create / partially-rolled-back. Real SG IDs match
+          # ^sg-[0-9a-f]{8,}$. Anything else is unsafe to pass to
+          # describe-security-group-rules — it'll fail with
+          # InvalidGroupId.Malformed and abort the whole deploy.
+          if ! printf '%s' "$SG_ID" | grep -Eq '^sg-[0-9a-f]{8,}$'; then
+            echo "::warning::Sg resource has non-final PhysicalResourceId; skipping reconcile (will retry on next deploy after CFN settles)"
+            exit 0
+          fi
+
           PL_ID="${{ steps.eic.outputs.prefix_list_id }}"
 
           # Find SG rule IDs that match :22 + this prefix list AND are not
