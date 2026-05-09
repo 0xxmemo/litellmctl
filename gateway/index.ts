@@ -46,8 +46,31 @@ import {
 process.on("uncaughtException", (err) => {
   console.error("[gateway][uncaughtException]", err);
 });
+
+// Sliding-window unhandled-rejection guard. A single stray rejection (e.g. an
+// aborted client fetch) is fine, but a burst means the event loop is
+// corrupted (Bun's `null is not an object` in the fetch controller has been
+// the recurring offender) and we're better off letting the supervisor
+// restart us than serving hung requests with a poisoned loop.
+const REJECTION_THRESHOLD = 10;
+const REJECTION_WINDOW_MS = 60_000;
+const rejectionTimestamps: number[] = [];
 process.on("unhandledRejection", (reason) => {
   console.error("[gateway][unhandledRejection]", reason);
+  const now = Date.now();
+  rejectionTimestamps.push(now);
+  while (
+    rejectionTimestamps.length > 0 &&
+    now - rejectionTimestamps[0] > REJECTION_WINDOW_MS
+  ) {
+    rejectionTimestamps.shift();
+  }
+  if (rejectionTimestamps.length >= REJECTION_THRESHOLD) {
+    console.error(
+      `[gateway] ${rejectionTimestamps.length} unhandled rejections in ${REJECTION_WINDOW_MS}ms — exiting for supervisor restart`,
+    );
+    process.exit(1);
+  }
 });
 // Installing a SIGHUP handler makes bun (and forked children up until
 // exec) not die on the spurious SIGHUP that node-pty delivers to pty
