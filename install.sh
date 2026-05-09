@@ -242,12 +242,24 @@ if ! command -v git &>/dev/null; then
   exit 1
 fi
 
+# Minimum Python version. Upstream litellm now uses `match` statements and
+# PEP 604 (`X | Y`) unions; both are 3.10+ only. Stays in sync with
+# bin/install.
+PY_MIN_MAJOR=3
+PY_MIN_MINOR=10
+
+py_version_ge_min() {
+  "$1" -c "import sys; print(sys.version_info[:2] >= ($PY_MIN_MAJOR,$PY_MIN_MINOR))" 2>/dev/null || echo "False"
+}
+
+py_short_version() {
+  "$1" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || true
+}
+
 detect_python() {
-  for cmd in python3 python; do
+  for cmd in python3.13 python3.12 python3.11 python3.10 python3 python; do
     if command -v "$cmd" &>/dev/null; then
-      local ver
-      ver=$("$cmd" -c 'import sys; print(sys.version_info[:2] >= (3,9))' 2>/dev/null || echo "False")
-      if [ "$ver" = "True" ]; then
+      if [ "$(py_version_ge_min "$cmd")" = "True" ]; then
         echo "$cmd"
         return
       fi
@@ -256,28 +268,41 @@ detect_python() {
   return 1
 }
 
-PYTHON=""
-if PYTHON=$(detect_python); then
-  ok "Python: $($PYTHON --version 2>&1)"
-else
-  error "Python 3.9+ not found."
-  exit 1
-fi
+# Try once now — we may need to install python3.12 below before we succeed.
+PYTHON="$(detect_python || true)"
 
-# Linux-only prereqs install (apt / dnf)
+# Linux-only prereqs install (apt / dnf). Done BEFORE the final python
+# detection so we can install python3.12 here when AL2023's stock 3.9 is
+# the only thing on PATH.
 if [ "$PLATFORM" = "Linux" ]; then
   case "$PM" in
     apt)
-      if ! $PYTHON -c "import venv"     2>/dev/null; then sudo apt-get update -qq && sudo apt-get install -y -qq python3-venv; fi
-      if ! $PYTHON -c "import ensurepip" 2>/dev/null; then sudo apt-get update -qq && sudo apt-get install -y -qq python3-pip;  fi
+      # Debian/Ubuntu: install python3.12 explicitly when current python is
+      # too old. Comes from main on Ubuntu 24.04+, deadsnakes on older.
+      if [ -z "$PYTHON" ]; then
+        info "Installing python3.12 (apt) ..."
+        if sudo apt-get update -qq && sudo apt-get install -y -qq python3.12 python3.12-venv 2>/dev/null; then
+          :
+        else
+          warn "python3.12 unavailable in default apt sources — trying deadsnakes PPA"
+          sudo apt-get install -y -qq software-properties-common
+          sudo add-apt-repository -y ppa:deadsnakes/ppa
+          sudo apt-get update -qq && sudo apt-get install -y -qq python3.12 python3.12-venv
+        fi
+      fi
+      # If PYTHON is set but venv/pip stdlib bits are missing, fix that up.
+      if [ -n "$PYTHON" ]; then
+        if ! $PYTHON -c "import venv"      2>/dev/null; then sudo apt-get update -qq && sudo apt-get install -y -qq python3-venv; fi
+        if ! $PYTHON -c "import ensurepip" 2>/dev/null; then sudo apt-get update -qq && sudo apt-get install -y -qq python3-pip;  fi
+      fi
       ;;
     dnf)
-      # AL2023 ships python3; in pipeline mode we also want build tools +
-      # sqlite headers for pip-built wheels. --allowerasing handles the
-      # curl-minimal vs curl conflict.
-      if [ "$USE_FINGERPRINT" = 1 ] || [ "$WITH_GATEWAY" = 1 ] || [ "$WITH_NODE_GYP" = 1 ]; then
+      # AL2023 ships python3 (3.9). Upstream litellm needs 3.10+, and
+      # python3.12 is in the AL2023 default repos.
+      if [ "$USE_FINGERPRINT" = 1 ] || [ "$WITH_GATEWAY" = 1 ] || [ "$WITH_NODE_GYP" = 1 ] || [ -z "$PYTHON" ]; then
         sudo dnf install -y --allowerasing \
           git jq unzip \
+          python3.12 python3.12-pip python3.12-devel \
           python3-pip python3-devel \
           gcc gcc-c++ make \
           sqlite sqlite-devel \
@@ -286,6 +311,19 @@ if [ "$PLATFORM" = "Linux" ]; then
       ;;
   esac
 fi
+
+# Re-detect after package install so we pick up newly-installed python3.12.
+PYTHON="$(detect_python || true)"
+if [ -z "$PYTHON" ]; then
+  error "Python ${PY_MIN_MAJOR}.${PY_MIN_MINOR}+ not found and could not be installed."
+  case "$PM" in
+    apt)  echo "  Try: sudo apt install python3.12 python3.12-venv" ;;
+    dnf)  echo "  Try: sudo dnf install -y python3.12 python3.12-pip" ;;
+    none) [ "$PLATFORM" = "macOS" ] && echo "  Try: brew install python@3.12" ;;
+  esac
+  exit 1
+fi
+ok "Python: $($PYTHON --version 2>&1) ($PYTHON)"
 
 # ── 4. Clone or update repo ───────────────────────────────────────────────
 
@@ -318,6 +356,17 @@ if [ "$(id -u)" -eq 0 ] && [ "$APP_USER" != "root" ]; then
   chown -R "$APP_USER:$APP_USER" "$INSTALL_DIR"
 fi
 
+# Wire repo-tracked git hooks (.githooks/) so post-checkout / post-merge /
+# post-rewrite auto-prune the litellm submodule on every git operation.
+# Idempotent.
+if [ -d "$INSTALL_DIR/.githooks" ]; then
+  current_hooks="$(as_user "git -C '$INSTALL_DIR' config --get core.hooksPath 2>/dev/null || true")"
+  if [ "$current_hooks" != ".githooks" ]; then
+    as_user "git -C '$INSTALL_DIR' config core.hooksPath .githooks"
+    ok "Configured git hooks path → .githooks"
+  fi
+fi
+
 # ── 5. Initialize submodule ───────────────────────────────────────────────
 
 SUBMODULE_DIR="$INSTALL_DIR/litellm"
@@ -331,12 +380,55 @@ else
   ok "Submodule already initialized"
 fi
 
+# Prune the submodule (strip docs/UI/CI bloat). Hooks handle the
+# steady-state case; this catches first-run installs and any path that
+# bypasses a hook (manual sync, --depth 1 init, etc).
+if [ -x "$INSTALL_DIR/bin/litellm-prune" ] && [ -d "$SUBMODULE_DIR" ]; then
+  as_user "'$INSTALL_DIR/bin/litellm-prune'" || warn "Pruner failed (non-fatal)"
+fi
+
 # ── 6. Python virtualenv ─────────────────────────────────────────────────
+#
+# Rebuild triggers (in priority order):
+#   1. LITELLM_REINSTALL_VENV=1  — explicit override
+#   2. venv exists but uses a Python older than $PY_MIN_MAJOR.$PY_MIN_MINOR
+#      (e.g. left over from a 3.9 install before the upstream merge that
+#      introduced `match` syntax)
+#   3. venv exists but its Python X.Y differs from the chosen interpreter's
+#      X.Y (system upgrade — old venv's stdlib still points at gone interpreter)
+
+PY_NEW_VER="$(py_short_version "$PYTHON")"
+VENV_VER=""
+if [ -x "$VENV_DIR/bin/python" ]; then
+  VENV_VER="$(py_short_version "$VENV_DIR/bin/python")"
+fi
+need_rebuild=0
+rebuild_reason=""
+
+if [ "${LITELLM_REINSTALL_VENV:-}" = "1" ]; then
+  need_rebuild=1
+  rebuild_reason="LITELLM_REINSTALL_VENV=1"
+elif [ -n "$VENV_VER" ]; then
+  if ! "$VENV_DIR/bin/python" -c "import sys; sys.exit(0 if sys.version_info[:2] >= ($PY_MIN_MAJOR,$PY_MIN_MINOR) else 1)" 2>/dev/null; then
+    need_rebuild=1
+    rebuild_reason="venv Python $VENV_VER < required $PY_MIN_MAJOR.$PY_MIN_MINOR"
+  elif [ -n "$PY_NEW_VER" ] && [ "$VENV_VER" != "$PY_NEW_VER" ]; then
+    need_rebuild=1
+    rebuild_reason="venv Python $VENV_VER ≠ system Python $PY_NEW_VER"
+  fi
+fi
 
 if [ -d "$VENV_DIR" ]; then
-  ok "Existing virtualenv found — reusing"
+  if [ "$need_rebuild" = "1" ]; then
+    warn "Rebuilding virtualenv ($rebuild_reason) ..."
+    as_user "rm -rf '$VENV_DIR'"
+    as_user "$PYTHON -m venv '$VENV_DIR'"
+    ok "Virtualenv rebuilt on Python $PY_NEW_VER"
+  else
+    ok "Existing virtualenv found (Python $VENV_VER) — reusing"
+  fi
 else
-  info "Creating virtualenv ..."
+  info "Creating virtualenv (Python $PY_NEW_VER) ..."
   as_user "$PYTHON -m venv '$VENV_DIR'"
   ok "Virtualenv created"
 fi

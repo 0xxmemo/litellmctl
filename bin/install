@@ -211,26 +211,68 @@ normalize_submodule_ref() {
   info "Submodule aligned to branch main (parent-pinned commit)."
 }
 
+# Minimum Python version. Upstream litellm now uses `match` statements and
+# PEP 604 (X | Y) unions, both 3.10+ only.
+PY_MIN_MAJOR=3
+PY_MIN_MINOR=10
+
+py_version_ge_min() {
+  # Prints "True" if $1 (a python command) is >= PY_MIN_MAJOR.PY_MIN_MINOR
+  "$1" -c "import sys; print(sys.version_info[:2] >= ($PY_MIN_MAJOR,$PY_MIN_MINOR))" 2>/dev/null || echo "False"
+}
+
+# Try newest first so we pick the best available interpreter. Fall back to
+# generic python3/python last. Anything below 3.10 is rejected outright.
 detect_python() {
-  for cmd in python3 python; do
+  for cmd in python3.13 python3.12 python3.11 python3.10 python3 python; do
     if command -v "$cmd" &>/dev/null; then
-      local ver
-      ver=$("$cmd" -c 'import sys; print(sys.version_info[:2] >= (3,9))' 2>/dev/null || echo "False")
-      if [ "$ver" = "True" ]; then
+      if [ "$(py_version_ge_min "$cmd")" = "True" ]; then
         echo "$cmd"
         return
       fi
     fi
   done
-  error "Python 3.9+ not found."
+
+  warn "Python ${PY_MIN_MAJOR}.${PY_MIN_MINOR}+ not found." >&2
   local os_name
   os_name="$(uname -s)"
+
+  # On macOS, attempt to install via Homebrew when available and
+  # non-interactive auto-install is permitted (default: yes).
+  if [ "$os_name" = "Darwin" ] && command -v brew &>/dev/null \
+     && [ "${LITELLM_AUTO_INSTALL_PYTHON:-1}" = "1" ]; then
+    info "Installing python@3.12 via Homebrew ..." >&2
+    if brew install python@3.12 >&2; then
+      if command -v python3.12 &>/dev/null \
+         && [ "$(py_version_ge_min python3.12)" = "True" ]; then
+        echo "python3.12"
+        return
+      fi
+    fi
+    warn "Homebrew install did not yield a usable python3.12." >&2
+  fi
+
+  error "Python ${PY_MIN_MAJOR}.${PY_MIN_MINOR}+ required. Install one of:" >&2
   case "$os_name" in
-    Darwin) echo "  brew install python3" ;;
-    Linux)  echo "  sudo apt install python3 python3-venv  (Debian/Ubuntu)"
-            echo "  sudo dnf install python3              (Fedora/RHEL)" ;;
+    Darwin) echo "  brew install python@3.12" >&2 ;;
+    Linux)  echo "  sudo apt install python3.12 python3.12-venv  (Debian/Ubuntu)" >&2
+            echo "  sudo dnf install python3.12                  (Fedora/RHEL)" >&2 ;;
   esac
   exit 1
+}
+
+# Returns "X.Y" for a given python command, or empty string on failure.
+py_short_version() {
+  "$1" -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")' 2>/dev/null || true
+}
+
+# Returns "X.Y" of the venv's interpreter, or empty if the venv is missing
+# / broken. Used to decide whether the venv must be rebuilt because the
+# system interpreter changed (e.g. after a python version upgrade).
+venv_short_version() {
+  local venv_dir="$1"
+  [ -x "$venv_dir/bin/python" ] || return 0
+  py_short_version "$venv_dir/bin/python"
 }
 
 # Detect the system package manager on Linux.
@@ -279,6 +321,16 @@ fi
 if [ -d "$PROJECT_DIR/.git" ]; then
   info "Checking parent repo ..."
   sync_repo "$PROJECT_DIR" "parent repo"
+
+  # Wire repo-tracked git hooks (.githooks/) so post-checkout / post-merge /
+  # post-rewrite auto-prune the litellm submodule. Idempotent.
+  if [ -d "$PROJECT_DIR/.githooks" ]; then
+    current_hooks="$(git -C "$PROJECT_DIR" config --get core.hooksPath 2>/dev/null || true)"
+    if [ "$current_hooks" != ".githooks" ]; then
+      git -C "$PROJECT_DIR" config core.hooksPath .githooks
+      info "Configured git hooks path → .githooks"
+    fi
+  fi
 fi
 
 # ── Submodule ──
@@ -293,18 +345,51 @@ else
   normalize_submodule_ref "$SUBMODULE_DIR"
 fi
 
+# ── Prune litellm submodule (strip docs/UI/CI bloat) ──
+# Hooks handle the steady-state case; this catches first-run installs and
+# any path that lands here without going through a hook (manual sync, etc).
+if [ -x "$BIN_DIR/litellm-prune" ] && [ -d "$SUBMODULE_DIR" ]; then
+  "$BIN_DIR/litellm-prune" || warn "Pruner failed (non-fatal)"
+fi
+
 # ── Virtualenv ──
+#
+# Rebuild triggers (in priority order):
+#   1. LITELLM_REINSTALL_VENV=1  — explicit user override
+#   2. venv exists but uses a Python older than $PY_MIN_MAJOR.$PY_MIN_MINOR
+#      (e.g. left over from a 3.9 install before the upstream merge that
+#      introduced `match` syntax)
+#   3. venv exists but its Python X.Y differs from the chosen interpreter's
+#      X.Y (system upgrade — old venv's stdlib still points at gone interpreter)
+
+PY_NEW_VER="$(py_short_version "$PYTHON")"
+VENV_VER="$(venv_short_version "$VENV_DIR")"
+need_rebuild=0
+rebuild_reason=""
+
+if [ "${LITELLM_REINSTALL_VENV:-}" = "1" ]; then
+  need_rebuild=1
+  rebuild_reason="LITELLM_REINSTALL_VENV=1"
+elif [ -n "$VENV_VER" ]; then
+  if ! "$VENV_DIR/bin/python" -c "import sys; sys.exit(0 if sys.version_info[:2] >= ($PY_MIN_MAJOR,$PY_MIN_MINOR) else 1)" 2>/dev/null; then
+    need_rebuild=1
+    rebuild_reason="venv Python $VENV_VER < required $PY_MIN_MAJOR.$PY_MIN_MINOR"
+  elif [ -n "$PY_NEW_VER" ] && [ "$VENV_VER" != "$PY_NEW_VER" ]; then
+    need_rebuild=1
+    rebuild_reason="venv Python $VENV_VER ≠ system Python $PY_NEW_VER"
+  fi
+fi
 
 if [ -d "$VENV_DIR" ]; then
-  if [ "${LITELLM_REINSTALL_VENV:-}" = "1" ]; then
-    info "Rebuilding virtualenv ..."
+  if [ "$need_rebuild" = "1" ]; then
+    warn "Rebuilding virtualenv ($rebuild_reason) ..."
     rm -rf "$VENV_DIR"
     $PYTHON -m venv "$VENV_DIR"
   else
-    info "Reusing existing virtualenv."
+    info "Reusing existing virtualenv (Python $VENV_VER)."
   fi
 else
-  info "Creating virtualenv at $VENV_DIR ..."
+  info "Creating virtualenv at $VENV_DIR (Python $PY_NEW_VER) ..."
   $PYTHON -m venv "$VENV_DIR"
 fi
 

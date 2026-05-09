@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Shared body for post-checkout / post-merge / post-rewrite hooks.
+# Re-prunes the litellm submodule whenever its working tree may have been
+# repopulated by a checkout, merge, or rewrite.
+#
+# Pruner deletions live only in the submodule's working tree; the parent repo
+# tracks just the submodule SHA, so this never touches parent git history.
+# Submodule's own `git status` will show the deletions but we never commit
+# them back to the fork.
+
+set -euo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+[ -n "$REPO_ROOT" ] || exit 0
+[ -x "$REPO_ROOT/bin/litellm-prune" ] || exit 0
+[ -d "$REPO_ROOT/litellm" ] || exit 0
+
+# Run quietly; pruner prints its own one-line summary when it removes things.
+"$REPO_ROOT/bin/litellm-prune" || true

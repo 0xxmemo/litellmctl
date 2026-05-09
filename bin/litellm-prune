@@ -29,17 +29,51 @@ PRUNE_DIRS=(
 )
 
 # Files to remove (relative to litellm submodule root)
+#
+# KEEP these — they are needed at runtime or by `pip install -e .`:
+#   pyproject.toml, requirements.txt, schema.prisma, LICENSE,
+#   proxy_server_config.yaml, model_prices_and_context_window.json,
+#   policy_templates.json, provider_endpoints_support.json
+# KEEP also (helpful context for Claude / agents working in the submodule):
+#   AGENTS.md, ARCHITECTURE.md, CLAUDE.md
 PRUNE_FILES=(
+    # Docs / project meta
+    # NOTE: README.md is referenced by pyproject.toml (`readme = "README.md"`)
+    # and pip's editable build fails without it — keep.
+    CONTRIBUTING.md
+    GEMINI.md
+    security.md
+    # CI / lint / typing configs
     .dockerignore
     .flake8
     .git-blame-ignore-revs
     .gitattributes
     .gitguardian.yaml
+    .npmrc
     .pre-commit-config.yaml
     .trivyignore
+    codecov.yaml
+    pyrightconfig.json
+    ruff.toml
+    taplo.toml
+    # Build / deploy configs we don't use
     Dockerfile
     Makefile
+    cosign.pub
+    dev_config.yaml
+    docker-compose.hardened.yml
     docker-compose.yml
+    index.yaml
+    license_cache.json
+    mcp_servers.json
+    prometheus.yml
+    render.yaml
+    # JS leftovers (litellm-js dir already pruned above)
+    package-lock.json
+    package.json
+    # Lockfiles for build tools we don't use (pyproject.toml drives pip)
+    poetry.lock
+    uv.lock
 )
 
 bytes_before=$(du -sb "$LITELLM_DIR" 2>/dev/null | cut -f1 || du -sk "$LITELLM_DIR" | awk '{print $1*1024}')

@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# post-checkout: $1=prev_head $2=new_head $3=branch_checkout_flag
+# Skip file checkouts (flag=0); only act on branch checkouts and clones.
+[ "${3:-0}" = "1" ] || exit 0
+exec "$(dirname "$0")/_run-prune"
