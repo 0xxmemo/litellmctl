@@ -117,9 +117,23 @@ Parameters:
       stack while leaving SSM Session Manager as the primary access path.
 
   LatestAmiId:
-    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
-    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
-    Description: Resolved at stack-create time — always the latest AL2023 ARM64.
+    Type: AWS::EC2::Image::Id
+    # Pinned, NOT a dynamic SSM lookup. Previously was
+    # `AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>` pointing at
+    # /aws/service/ami-amazon-linux-latest/...; that resolved fresh on
+    # every deploy, and AWS rotates the AL2023 AMI on every security
+    # patch. Each rotation = ImageId differs in the changeset = CFN
+    # replaces the EC2::Instance = root volume gets recreated from the
+    # new AMI's snapshot = data loss (orphan EBS left behind, new
+    # instance boots empty). The deploy workflow now resolves the
+    # current instance's AMI and passes it through verbatim, so a
+    # benign no-op deploy never triggers replacement. Explicit AMI
+    # upgrades go through the workflow's `ami_id` input, which is
+    # paired with pre-snapshot+RootSnapshotId so data survives.
+    Description: >
+      AMI ID for the EC2 instance. Pinned and resolved by the deploy
+      workflow (current instance's AMI on update; SSM-latest only on
+      first deploy). Override via the `ami_id` workflow_dispatch input.
 
   CaddyVersion:
     Type: String

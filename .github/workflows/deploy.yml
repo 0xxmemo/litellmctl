@@ -11,6 +11,14 @@ on:
         description: "EC2 instance type (ARM64)"
         required: false
         default: "c7g.medium"
+      ami_id:
+        description: "Override AMI ID (ami-xxxxxxxxxxxxxxxxx). Leave blank to keep current instance's AMI; only the FIRST deploy auto-picks SSM-latest AL2023."
+        required: false
+        default: ""
+      root_snapshot_id:
+        description: "Optional EBS snapshot ID (snap-xxxxxxxxxxxxxxxxx) to seed the new root volume on instance replacement. Use to recover from orphan after a forced replacement."
+        required: false
+        default: ""
 
 permissions:
   id-token: write
@@ -60,6 +68,49 @@ jobs:
         with:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+
+      # Resolve which AMI to pin to for this deploy. Priority:
+      #   1. workflow_dispatch input `ami_id` if set (explicit upgrade)
+      #   2. current instance's ImageId (no-op deploys keep using same AMI)
+      #   3. SSM-latest AL2023 (first deploy only — no instance yet)
+      #
+      # This is the fix for the "AMI rotation silently destroys the root
+      # volume" bug: by passing the current AMI back to CFN, no benign
+      # deploy ever triggers an ImageId change → no replacement → no
+      # data loss. Only an explicit `ami_id` input ever bumps it.
+      # Runs before pre-snapshot so the latter can read steps.ami.outputs.ami.
+      - name: Resolve AMI to pin
+        id: ami
+        run: |
+          INPUT_AMI="${{ inputs.ami_id }}"
+          if [ -n "$INPUT_AMI" ]; then
+            if ! printf '%s' "$INPUT_AMI" | grep -Eq '^ami-[0-9a-f]{8,}$'; then
+              echo "::error::ami_id input must match ^ami-[0-9a-f]{8,}$ (got: $INPUT_AMI)"; exit 1
+            fi
+            echo "ami=$INPUT_AMI" >> "$GITHUB_OUTPUT"
+            echo "Using explicit override: $INPUT_AMI"
+            exit 0
+          fi
+
+          INSTANCE_ID=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue' \
+            --output text 2>/dev/null || echo "")
+          if [ -n "$INSTANCE_ID" ] && [ "$INSTANCE_ID" != "None" ]; then
+            CURRENT_AMI=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+              --query 'Reservations[0].Instances[0].ImageId' --output text 2>/dev/null || echo "")
+            if printf '%s' "$CURRENT_AMI" | grep -Eq '^ami-[0-9a-f]{8,}$'; then
+              echo "ami=$CURRENT_AMI" >> "$GITHUB_OUTPUT"
+              echo "Reusing current instance's AMI: $CURRENT_AMI (ignoring AWS AMI rotation)"
+              exit 0
+            fi
+          fi
+
+          LATEST_AMI=$(aws ssm get-parameter \
+            --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 \
+            --query 'Parameter.Value' --output text)
+          echo "ami=$LATEST_AMI" >> "$GITHUB_OUTPUT"
+          echo "First deploy (no existing instance) — using SSM-latest AL2023: $LATEST_AMI"
 
       # Self-heals a stack wedged in a terminal failure state — CFN deploy
       # can't move out of these on its own.
@@ -113,20 +164,18 @@ jobs:
       # Detect instance-type drift and snapshot the root volume BEFORE CFN
       # runs. Changing InstanceType is a replacement-trigger property: CFN
       # destroys the EC2::Instance resource and creates a new one with a
-      # fresh root volume. DeleteOnTermination=false keeps the old volume
-      # alive as an orphan, but the new instance boots empty — losing the
+      # fresh root volume from the new AMI's snapshot — losing the
       # gateway sqlite, .env, caddy certs, and anything else on disk.
+      # DeleteOnTermination=false keeps the old volume alive as an
+      # orphan, but the new instance boots empty.
       #
       # Workaround: snapshot the current root, pass the snapshot ID to CFN
       # via RootSnapshotId, and the replacement instance boots with all
       # data intact. We trigger this whenever a replacement is imminent:
-      #   1. InstanceType change (explicit user input)
-      #   2. ImageId change (LatestAmiId is a dynamic SSM param that
-      #      resolves to AWS's *current* AL2023 AMI — it rotates on every
-      #      security patch; a deploy that lands after rotation will
-      #      replace the instance even though nothing in our template
-      #      changed). This is what bit us on 2026-05-10 — silent data
-      #      loss, recovered manually from the orphan EBS volume.
+      #   1. InstanceType change (explicit `instance_type` input)
+      #   2. AMI change (explicit `ami_id` input — AWS auto-rotation
+      #      no longer triggers replacement because LatestAmiId is now
+      #      pinned to the current instance's AMI by the resolver step)
       - name: Pre-snapshot root if instance will be replaced
         id: presnap
         run: |
@@ -147,9 +196,10 @@ jobs:
 
           CURRENT_AMI=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
             --query 'Reservations[0].Instances[0].ImageId' --output text)
-          DESIRED_AMI=$(aws ssm get-parameter \
-            --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 \
-            --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+          # The AMI we'll actually pass to CFN is whatever the AMI
+          # resolver step decided (current instance's AMI for no-op
+          # deploys; explicit `ami_id` input only when upgrading).
+          DESIRED_AMI="${{ steps.ami.outputs.ami }}"
 
           will_replace=0
           replace_reason=""
@@ -159,7 +209,7 @@ jobs:
           fi
           if [ -n "$DESIRED_AMI" ] && [ "$CURRENT_AMI" != "$DESIRED_AMI" ]; then
             will_replace=1
-            replace_reason="${replace_reason:+$replace_reason; }ImageId $CURRENT_AMI → $DESIRED_AMI (AMI rotation)"
+            replace_reason="${replace_reason:+$replace_reason; }ImageId $CURRENT_AMI → $DESIRED_AMI (explicit AMI upgrade)"
           fi
 
           if [ "$will_replace" = "0" ]; then
@@ -288,10 +338,11 @@ jobs:
       # are no-ops when no parameters changed (--no-fail-on-empty-changeset).
       - name: Deploy CloudFormation stack
         run: |
-          # If presnap detected an instance-type change, pass the snapshot
-          # so the replacement instance boots from the captured data.
-          # Otherwise leave RootSnapshotId blank to use the template default
-          # (no override → keeps any value already on the stack).
+          # AMI: pinned per the resolver step (current instance's AMI on
+          # update, SSM-latest on first deploy, explicit `ami_id` input
+          # to upgrade). RootSnapshotId: presnap (auto on instance-type /
+          # explicit AMI upgrade) OR explicit input (one-time orphan
+          # recovery). Workflow input wins if both set.
           PARAMS=(
             "AppName=${APP_NAME}"
             "GithubOrg=${REPO_OWNER}"
@@ -303,9 +354,15 @@ jobs:
             "LitellmMasterKey=${{ secrets.LITELLM_MASTER_KEY }}"
             "ResendApiKey=${{ secrets.RESEND_API_KEY }}"
             "Ec2InstanceConnectPrefixListId=${{ steps.eic.outputs.prefix_list_id }}"
+            "LatestAmiId=${{ steps.ami.outputs.ami }}"
           )
-          SNAP="${{ steps.presnap.outputs.snapshot_id }}"
+          INPUT_SNAP="${{ inputs.root_snapshot_id }}"
+          PRESNAP="${{ steps.presnap.outputs.snapshot_id }}"
+          SNAP="${INPUT_SNAP:-$PRESNAP}"
           if [ -n "$SNAP" ]; then
+            if ! printf '%s' "$SNAP" | grep -Eq '^snap-[0-9a-f]{8,}$'; then
+              echo "::error::root_snapshot_id must match ^snap-[0-9a-f]{8,}$ (got: $SNAP)"; exit 1
+            fi
             echo "Passing RootSnapshotId=$SNAP to CFN — replacement instance will boot from this snapshot."
             PARAMS+=("RootSnapshotId=$SNAP")
           fi
