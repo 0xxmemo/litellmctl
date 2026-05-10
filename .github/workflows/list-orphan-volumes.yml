@@ -1,0 +1,49 @@
+name: list-orphan-volumes
+
+# Lists EBS volumes that look like orphans from a previous instance
+# replacement on this stack. Shows VolumeId, size, AZ, create time,
+# and any source-instance tags so you can pick the right one to feed
+# into recover-orphan-volume.yml.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  list:
+    runs-on: ubuntu-latest
+    env:
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      STACK_NAME: ${{ secrets.APP_NAME }}
+
+    steps:
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: List candidate orphans
+        run: |
+          echo "### Available (detached) EBS volumes tagged for this stack" >> "$GITHUB_STEP_SUMMARY"
+          aws ec2 describe-volumes \
+            --filters "Name=tag:aws:cloudformation:stack-name,Values=${STACK_NAME}" \
+                      "Name=status,Values=available" \
+            --query 'sort_by(Volumes,&CreateTime)[*].[VolumeId,Size,AvailabilityZone,CreateTime,Tags[?Key==`Name`]|[0].Value]' \
+            --output table | tee -a "$GITHUB_STEP_SUMMARY"
+
+          echo
+          echo "### Currently in-use volumes on the live instance" >> "$GITHUB_STEP_SUMMARY"
+          aws ec2 describe-volumes \
+            --filters "Name=tag:aws:cloudformation:stack-name,Values=${STACK_NAME}" \
+                      "Name=status,Values=in-use" \
+            --query 'Volumes[*].[VolumeId,Size,AvailabilityZone,CreateTime,Attachments[0].InstanceId,Attachments[0].Device]' \
+            --output table | tee -a "$GITHUB_STEP_SUMMARY"
+
+          echo
+          echo "Recover from the most recent available volume by running:"
+          echo "  gh workflow run recover-orphan-volume.yml -f orphan_volume_id=<vol-...>"
+          echo "Add -f dry_run=true first to inspect mount + sizes without copying."
