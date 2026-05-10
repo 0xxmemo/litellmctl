@@ -119,10 +119,15 @@ jobs:
       #
       # Workaround: snapshot the current root, pass the snapshot ID to CFN
       # via RootSnapshotId, and the replacement instance boots with all
-      # data intact. We only do this when a replacement is actually
-      # imminent (instance type changing) — otherwise the snapshot would
-      # be wasted IO + storage cost.
-      - name: Pre-snapshot root if instance type is changing
+      # data intact. We trigger this whenever a replacement is imminent:
+      #   1. InstanceType change (explicit user input)
+      #   2. ImageId change (LatestAmiId is a dynamic SSM param that
+      #      resolves to AWS's *current* AL2023 AMI — it rotates on every
+      #      security patch; a deploy that lands after rotation will
+      #      replace the instance even though nothing in our template
+      #      changed). This is what bit us on 2026-05-10 — silent data
+      #      loss, recovered manually from the orphan EBS volume.
+      - name: Pre-snapshot root if instance will be replaced
         id: presnap
         run: |
           INSTANCE_ID=$(aws cloudformation describe-stacks \
@@ -135,17 +140,35 @@ jobs:
             exit 0
           fi
 
+          # ── Detect replacement triggers ────────────────────────────────
           CURRENT_TYPE=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
             --query 'Reservations[0].Instances[0].InstanceType' --output text)
           DESIRED_TYPE="${{ inputs.instance_type || 'c7g.medium' }}"
 
-          if [ "$CURRENT_TYPE" = "$DESIRED_TYPE" ]; then
-            echo "instance type unchanged ($CURRENT_TYPE) — no snapshot needed"
+          CURRENT_AMI=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].ImageId' --output text)
+          DESIRED_AMI=$(aws ssm get-parameter \
+            --name /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64 \
+            --query 'Parameter.Value' --output text 2>/dev/null || echo "")
+
+          will_replace=0
+          replace_reason=""
+          if [ "$CURRENT_TYPE" != "$DESIRED_TYPE" ]; then
+            will_replace=1
+            replace_reason="InstanceType $CURRENT_TYPE → $DESIRED_TYPE"
+          fi
+          if [ -n "$DESIRED_AMI" ] && [ "$CURRENT_AMI" != "$DESIRED_AMI" ]; then
+            will_replace=1
+            replace_reason="${replace_reason:+$replace_reason; }ImageId $CURRENT_AMI → $DESIRED_AMI (AMI rotation)"
+          fi
+
+          if [ "$will_replace" = "0" ]; then
+            echo "no replacement triggers detected (type=$CURRENT_TYPE, ami=$CURRENT_AMI) — no snapshot needed"
             echo "snapshot_id=" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          echo "::warning::instance type changing from $CURRENT_TYPE to $DESIRED_TYPE — CFN will replace the instance. Snapshotting root volume so the new instance boots from your data."
+          echo "::warning::CFN will replace the instance ($replace_reason). Snapshotting root volume so the new instance boots from your data."
 
           ROOT_VOL=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
             --query 'Reservations[0].Instances[0].BlockDeviceMappings[?DeviceName==`/dev/xvda`].Ebs.VolumeId | [0]' \
@@ -157,10 +180,10 @@ jobs:
 
           SNAP_ID=$(aws ec2 create-snapshot \
             --volume-id "$ROOT_VOL" \
-            --description "auto-snapshot before instance-type change ${CURRENT_TYPE} -> ${DESIRED_TYPE} (run ${{ github.run_id }})" \
-            --tag-specifications "ResourceType=snapshot,Tags=[{Key=Name,Value=${STACK_NAME}-pre-replace},{Key=auto,Value=instance-type-change},{Key=stack,Value=${STACK_NAME}},{Key=run,Value=${{ github.run_id }}}]" \
+            --description "auto-snapshot before replacement: ${replace_reason} (run ${{ github.run_id }})" \
+            --tag-specifications "ResourceType=snapshot,Tags=[{Key=Name,Value=${STACK_NAME}-pre-replace},{Key=auto,Value=pre-replace},{Key=stack,Value=${STACK_NAME}},{Key=reason,Value=${replace_reason}},{Key=run,Value=${{ github.run_id }}}]" \
             --query SnapshotId --output text)
-          echo "snapshot=$SNAP_ID for $ROOT_VOL"
+          echo "snapshot=$SNAP_ID for $ROOT_VOL ($replace_reason)"
 
           # Wait for snapshot to complete before letting CFN replace the
           # instance — pending snapshots from a deleted volume keep working,

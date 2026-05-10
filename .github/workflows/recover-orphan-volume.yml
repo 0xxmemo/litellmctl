@@ -1,0 +1,255 @@
+name: recover-orphan-volume
+
+# Recovery flow for the case where a CFN-replaced EC2 instance left an
+# orphan EBS volume behind (DeleteOnTermination=false on the root). This
+# workflow attaches that orphan to the CURRENT instance as a secondary
+# disk, mounts it read-only, rsyncs the persistent app state onto the
+# live root, and detaches.
+#
+# Use when: you've been hit by an unexpected instance replacement (most
+# commonly an AMI rotation that escaped the pre-snapshot guard) and need
+# to restore data. Less destructive than a full re-deploy with
+# RootSnapshotId — the running instance keeps running.
+#
+# Find your orphan volume:
+#   aws ec2 describe-volumes \
+#     --filters "Name=tag:aws:cloudformation:stack-name,Values=$APP_NAME" \
+#               "Name=status,Values=available" \
+#     --query 'sort_by(Volumes,&CreateTime)[-1].[VolumeId,Size,CreateTime,AvailabilityZone]' \
+#     --output table
+#
+# Then trigger:
+#   gh workflow run recover-orphan-volume.yml -f orphan_volume_id=vol-xxxx
+
+on:
+  workflow_dispatch:
+    inputs:
+      orphan_volume_id:
+        description: "EBS volume ID to recover from (vol-xxxxxxxxxxxxxxxxx)"
+        required: true
+        type: string
+      paths:
+        description: "Comma-separated absolute paths to rsync from the orphan onto the live root"
+        required: false
+        default: "/home/ec2-user/.litellm,/etc/caddy,/var/lib/caddy"
+      dry_run:
+        description: "Mount + list size only, don't rsync or restart"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: recover-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    env:
+      APP_NAME: ${{ secrets.APP_NAME }}
+      AWS_REGION: ${{ secrets.AWS_REGION }}
+      STACK_NAME: ${{ secrets.APP_NAME }}
+      ORPHAN_VOL: ${{ inputs.orphan_volume_id }}
+      RSYNC_PATHS: ${{ inputs.paths }}
+      DRY_RUN: ${{ inputs.dry_run }}
+
+    steps:
+      - name: Validate inputs
+        run: |
+          if ! printf '%s' "$ORPHAN_VOL" | grep -Eq '^vol-[0-9a-f]{8,}$'; then
+            echo "::error::orphan_volume_id must match ^vol-[0-9a-f]{8,}$ (got: $ORPHAN_VOL)"; exit 1
+          fi
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Resolve current instance + AZ check
+        id: target
+        run: |
+          INSTANCE_ID=$(aws cloudformation describe-stacks \
+            --stack-name "${STACK_NAME}" \
+            --query 'Stacks[0].Outputs[?OutputKey==`InstanceId`].OutputValue' \
+            --output text)
+          if [ -z "$INSTANCE_ID" ] || [ "$INSTANCE_ID" = "None" ]; then
+            echo "::error::no InstanceId in stack outputs — is the stack healthy?"; exit 1
+          fi
+
+          INST_AZ=$(aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+            --query 'Reservations[0].Instances[0].Placement.AvailabilityZone' \
+            --output text)
+          VOL_AZ=$(aws ec2 describe-volumes --volume-ids "$ORPHAN_VOL" \
+            --query 'Volumes[0].AvailabilityZone' --output text)
+          VOL_STATE=$(aws ec2 describe-volumes --volume-ids "$ORPHAN_VOL" \
+            --query 'Volumes[0].State' --output text)
+
+          echo "instance=$INSTANCE_ID az=$INST_AZ"
+          echo "orphan=$ORPHAN_VOL az=$VOL_AZ state=$VOL_STATE"
+
+          if [ "$VOL_STATE" != "available" ]; then
+            echo "::error::orphan volume is '$VOL_STATE', not 'available'. Detach it from any other instance first."; exit 1
+          fi
+          if [ "$INST_AZ" != "$VOL_AZ" ]; then
+            echo "::error::cross-AZ attach not supported. Snapshot the orphan and create a new volume in $INST_AZ before recovery."
+            echo "  aws ec2 create-snapshot --volume-id $ORPHAN_VOL --description 'cross-az restore'"
+            exit 1
+          fi
+          echo "instance_id=$INSTANCE_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Attach orphan as /dev/sdf
+        id: attach
+        run: |
+          aws ec2 attach-volume \
+            --volume-id "$ORPHAN_VOL" \
+            --instance-id "${{ steps.target.outputs.instance_id }}" \
+            --device /dev/sdf
+
+          # Wait for AWS to report attached. The kernel sees it as
+          # /dev/nvme1n1 on Nitro instances; the SSM script handles the
+          # device-name discovery itself.
+          for i in $(seq 1 30); do
+            state=$(aws ec2 describe-volumes --volume-ids "$ORPHAN_VOL" \
+              --query 'Volumes[0].Attachments[0].State' --output text 2>/dev/null || echo "")
+            echo "[$i] attachment state=$state"
+            [ "$state" = "attached" ] && exit 0
+            sleep 4
+          done
+          echo "::error::orphan never reached attached state"; exit 1
+
+      - name: Mount + rsync via SSM
+        id: ssm
+        run: |
+          INSTANCE="${{ steps.target.outputs.instance_id }}"
+
+          # Build the in-instance recovery script. Path list and dry-run
+          # flag are injected via shell variables expanded BEFORE the
+          # heredoc, so no quoting gymnastics inside the heredoc itself.
+          PATHS_NL="$(printf '%s' "$RSYNC_PATHS" | tr ',' '\n')"
+          DRY="${DRY_RUN:-false}"
+
+          {
+            echo '#!/usr/bin/env bash'
+            echo 'set -euxo pipefail'
+            echo
+            echo '# Wait for kernel to surface the attached EBS as /dev/nvme1n1.'
+            echo 'for i in 1 2 3 4 5 6 7 8 9 10; do'
+            echo '  [ -b /dev/nvme1n1 ] && break'
+            echo '  sleep 2'
+            echo 'done'
+            echo 'if [ ! -b /dev/nvme1n1 ]; then'
+            echo '  echo "ERROR: /dev/nvme1n1 never appeared (orphan not attached at kernel level)"'
+            echo '  lsblk'
+            echo '  exit 1'
+            echo 'fi'
+            echo
+            echo '# AL2023 root volumes are GPT with /dev/nvme1n1p1 holding the xfs root.'
+            echo 'if [ -b /dev/nvme1n1p1 ]; then'
+            echo '  ORPHAN_PART=/dev/nvme1n1p1'
+            echo 'else'
+            echo '  ORPHAN_PART=/dev/nvme1n1'
+            echo 'fi'
+            echo 'echo "orphan partition: $ORPHAN_PART"'
+            echo
+            echo '# nouuid: live root and orphan likely share an xfs UUID. ro: defense in depth.'
+            echo 'mkdir -p /mnt/orphan'
+            echo 'mount -o ro,nouuid "$ORPHAN_PART" /mnt/orphan'
+            echo
+            echo 'echo "=== orphan layout (top level) ==="'
+            echo 'ls -la /mnt/orphan/ | head -20'
+            for p in $PATHS_NL; do
+              echo "echo \"=== orphan size: $p ===\""
+              echo "du -sh '/mnt/orphan${p}' 2>/dev/null || echo '(no $p on orphan)'"
+            done
+            if [ "$DRY" != "true" ]; then
+              echo
+              echo '# Stop services so we do not race with in-flight DB writes.'
+              echo 'systemctl stop litellm-gateway 2>/dev/null || true'
+              echo 'systemctl stop litellm-proxy 2>/dev/null || true'
+              echo 'systemctl stop caddy 2>/dev/null || true'
+              echo '# Per-user systemd unit (gateway runs under ec2-user)'
+              echo 'sudo -u ec2-user XDG_RUNTIME_DIR=/run/user/$(id -u ec2-user) systemctl --user stop litellm-gateway 2>/dev/null || true'
+              echo
+              echo '# Rsync each path. -a perms/times/symlinks, H hardlinks, A ACLs, X xattrs.'
+              echo '# --delete intentionally OMITTED — only restore, never wipe new files on live root.'
+              for p in $PATHS_NL; do
+                echo "if [ -d '/mnt/orphan${p}' ]; then"
+                echo "  echo '=== rsync /mnt/orphan${p} -> ${p} ==='"
+                echo "  mkdir -p '${p}'"
+                echo "  rsync -aHAX --info=stats2 '/mnt/orphan${p}/' '${p}/'"
+                echo "else"
+                echo "  echo '(skip: /mnt/orphan${p} does not exist on orphan)'"
+                echo "fi"
+              done
+              echo
+              echo '# Fix ownership.'
+              echo '[ -d /home/ec2-user/.litellm ] && chown -R ec2-user:ec2-user /home/ec2-user/.litellm'
+              echo '[ -d /var/lib/caddy ] && chown -R caddy:caddy /var/lib/caddy 2>/dev/null || true'
+              echo
+              echo '# Restart.'
+              echo 'systemctl start caddy 2>/dev/null || true'
+              echo 'systemctl start litellm-proxy 2>/dev/null || true'
+              echo 'systemctl start litellm-gateway 2>/dev/null || true'
+              echo 'sudo -u ec2-user XDG_RUNTIME_DIR=/run/user/$(id -u ec2-user) systemctl --user start litellm-gateway 2>/dev/null || true'
+            fi
+            echo
+            echo '# Always unmount even if the rsync above failed.'
+            echo 'umount /mnt/orphan'
+            echo 'rmdir /mnt/orphan 2>/dev/null || true'
+            echo 'echo DONE'
+          } > /tmp/recover.sh
+
+          echo "=== /tmp/recover.sh ==="; cat /tmp/recover.sh; echo "=== end ==="
+
+          python3 -c "
+          import json
+          with open('/tmp/recover.sh') as f: s = f.read()
+          print(json.dumps({'commands': [s]}))
+          " > /tmp/params.json
+
+          CMD_ID=$(aws ssm send-command \
+            --document-name AWS-RunShellScript \
+            --instance-ids "$INSTANCE" \
+            --parameters file:///tmp/params.json \
+            --query Command.CommandId --output text)
+          echo "cmd_id=$CMD_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for SSM command
+        run: |
+          CMD="${{ steps.ssm.outputs.cmd_id }}"
+          INSTANCE="${{ steps.target.outputs.instance_id }}"
+          for i in $(seq 1 60); do
+            status=$(aws ssm get-command-invocation \
+              --command-id "$CMD" --instance-id "$INSTANCE" \
+              --query Status --output text 2>/dev/null || echo Pending)
+            echo "[$i] status=$status"
+            case "$status" in
+              Success) exit 0 ;;
+              Failed|Cancelled|TimedOut)
+                echo "::error::SSM command $status"
+                aws ssm get-command-invocation --command-id "$CMD" --instance-id "$INSTANCE"
+                exit 1 ;;
+            esac
+            sleep 10
+          done
+          echo "::error::SSM command did not finish in 10 min"
+          aws ssm get-command-invocation --command-id "$CMD" --instance-id "$INSTANCE" || true
+          exit 1
+
+      - name: Detach orphan (always runs)
+        if: always() && steps.attach.conclusion == 'success'
+        run: |
+          aws ec2 detach-volume --volume-id "$ORPHAN_VOL" || true
+          for i in $(seq 1 30); do
+            state=$(aws ec2 describe-volumes --volume-ids "$ORPHAN_VOL" \
+              --query 'Volumes[0].State' --output text 2>/dev/null || echo "")
+            echo "[$i] orphan state=$state"
+            [ "$state" = "available" ] && exit 0
+            sleep 4
+          done
+          echo "::warning::orphan did not reach 'available' state — may need manual detach"
