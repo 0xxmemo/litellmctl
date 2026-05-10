@@ -161,6 +161,17 @@ jobs:
       # No-op on a fresh stack (no SG yet) and on a stack already in sync.
       - name: Reconcile orphan :22 ingress rules
         run: |
+          # Dump full Sg resource details for diagnosis. PhysicalResourceId
+          # has been observed coming back as a non-final placeholder even
+          # on stacks in UPDATE_COMPLETE — surface the surrounding metadata
+          # (status, reason, type, length) so we can see what shape it
+          # really has across runs.
+          echo "=== describe-stack-resource Sg ==="
+          aws cloudformation describe-stack-resource \
+            --stack-name "${STACK_NAME}" \
+            --logical-resource-id Sg \
+            --output json 2>&1 || echo "(describe-stack-resource failed)"
+
           SG_ID=$(aws cloudformation describe-stack-resource \
             --stack-name "${STACK_NAME}" \
             --logical-resource-id Sg \
@@ -170,6 +181,21 @@ jobs:
             echo "no existing SG — nothing to reconcile"
             exit 0
           fi
+
+          # Surface raw shape so masking doesn't fully obscure the value.
+          SG_LEN=${#SG_ID}
+          SG_PREFIX="${SG_ID:0:3}"
+          echo "SG_ID length=$SG_LEN prefix='$SG_PREFIX' (3-char prefix shown)"
+
+          # Cross-check via describe-security-groups by group-name filter.
+          # If CFN's Sg is real and in the default VPC, we can find it
+          # independently and confirm the actual sg-xxx.
+          echo "=== describe-security-groups by tag (cross-check) ==="
+          aws ec2 describe-security-groups \
+            --filters "Name=tag:aws:cloudformation:stack-name,Values=${STACK_NAME}" \
+                      "Name=tag:aws:cloudformation:logical-id,Values=Sg" \
+            --query 'SecurityGroups[].[GroupId,GroupName,VpcId]' \
+            --output table 2>&1 || echo "(describe-security-groups failed)"
 
           # Guard: PhysicalResourceId can be a CFN-internal placeholder
           # (e.g. "<StackName>-Sg-<random>") when the SG resource is
