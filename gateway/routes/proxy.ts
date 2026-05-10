@@ -264,29 +264,13 @@ async function proxyHandler(req: Request) {
       }
     }
 
-    // Fail-fast connect/headers timeout. Upstream is localhost — if it
-    // doesn't return headers in 5s it's down or wedged, and retrying just
-    // amplifies pile-up (clients have their own retries). The timeout is
-    // cleared once headers arrive so streaming LLM responses run unbounded.
-    const CONNECT_TIMEOUT_MS = 5_000;
-    const ctrl = new AbortController();
-    const tid = setTimeout(
-      () => ctrl.abort(new Error("upstream connect timeout")),
-      CONNECT_TIMEOUT_MS,
-    );
-    let proxyRes: Response;
-    try {
-      proxyRes = await fetch(targetUrl, {
-        method: req.method,
-        headers,
-        body: fetchBody,
-        signal: ctrl.signal,
-        // Required by the fetch spec when body is a streaming ReadableStream.
-        ...(fetchBody instanceof ReadableStream ? { duplex: "half" } : {}),
-      } as RequestInit);
-    } finally {
-      clearTimeout(tid);
-    }
+    const proxyRes = await fetch(targetUrl, {
+      method: req.method,
+      headers,
+      body: fetchBody,
+      // Required by the fetch spec when body is a streaming ReadableStream.
+      ...(fetchBody instanceof ReadableStream ? { duplex: "half" } : {}),
+    } as RequestInit);
 
     // Usage tracking.
     //
