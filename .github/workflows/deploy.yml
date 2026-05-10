@@ -69,7 +69,40 @@ jobs:
             --stack-name "${STACK_NAME}" \
             --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo MISSING)
           echo "stack=${STACK_NAME} status=${status}"
+
+          # If a previous run left CFN mid-rollback (most often
+          # UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS, sometimes
+          # UPDATE_ROLLBACK_IN_PROGRESS / UPDATE_IN_PROGRESS), wait for
+          # CFN to settle into a terminal state before we touch it. The
+          # built-in waiters cover the common transitions; loop with a
+          # cap so a truly-wedged in-progress state can't hang us forever.
+          for _ in 1 2 3 4 5; do
+            case "$status" in
+              *_IN_PROGRESS)
+                echo "stack is in transient state $status — waiting up to 10 min ..."
+                aws cloudformation wait stack-update-complete \
+                  --stack-name "${STACK_NAME}" 2>/dev/null \
+                || aws cloudformation wait stack-rollback-complete \
+                  --stack-name "${STACK_NAME}" 2>/dev/null \
+                || true
+                status=$(aws cloudformation describe-stacks \
+                  --stack-name "${STACK_NAME}" \
+                  --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo MISSING)
+                echo "stack now in status=${status}"
+                ;;
+              *) break ;;
+            esac
+          done
+
           case "$status" in
+            UPDATE_ROLLBACK_FAILED)
+              # The rollback itself failed. continue-update-rollback skips
+              # the resources CFN couldn't roll back so the stack can reach
+              # UPDATE_ROLLBACK_COMPLETE without us deleting the whole stack.
+              echo "::warning::stack is in $status — calling continue-update-rollback"
+              aws cloudformation continue-update-rollback --stack-name "${STACK_NAME}"
+              aws cloudformation wait stack-rollback-complete --stack-name "${STACK_NAME}" || true
+              ;;
             ROLLBACK_COMPLETE|CREATE_FAILED|REVIEW_IN_PROGRESS|ROLLBACK_FAILED|DELETE_FAILED)
               echo "::warning::stack is in $status — deleting so we can re-create"
               aws cloudformation delete-stack --stack-name "${STACK_NAME}"

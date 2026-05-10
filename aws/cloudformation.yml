@@ -155,7 +155,13 @@ Resources:
   SgSshFromInstanceConnect:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
-      GroupId: !Ref Sg
+      # !GetAtt Sg.GroupId always returns the actual sg-xxx, regardless of
+      # how CFN classified the SG internally. !Ref Sg can return the
+      # GroupName (a long "<StackName>-Sg-<random>" string) when the SG
+      # was originally registered as Classic-style — that string is
+      # rejected here as InvalidGroupId.Malformed. !GetAtt is the safe
+      # form for cross-resource SG references in this template.
+      GroupId: !GetAtt Sg.GroupId
       IpProtocol: tcp
       FromPort: 22
       ToPort: 22
